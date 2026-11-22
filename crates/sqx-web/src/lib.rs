@@ -111,6 +111,7 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("POST", "/api/portfolio") => ("200 OK", "application/json", portfolio_json(body, state)),
         ("POST", "/api/pseudocode") => ("200 OK", "application/json", pseudocode_json(body)),
         ("POST", "/api/assistant") => ("200 OK", "application/json", assistant_json(body, state)),
+        ("GET", "/api/assistant/config") => ("200 OK", "application/json", assistant_config_json()),
         _ => ("404 Not Found", "text/plain", "not found".to_string()),
     }
 }
@@ -243,6 +244,16 @@ fn llm_config() -> sqx_assistant::LlmConfig {
     });
     let api_key = std::env::var("SQX_LLM_API_KEY").unwrap_or_default();
     sqx_assistant::LlmConfig { base_url, model, api_key, max_rounds: 6 }
+}
+
+fn assistant_config_json() -> String {
+    let cfg = llm_config();
+    json!({
+        "base_url": cfg.base_url,
+        "model": cfg.model,
+        "api_key_set": !cfg.api_key.is_empty(),
+    })
+    .to_string()
 }
 
 fn assistant_json(body: &str, state: &State) -> String {

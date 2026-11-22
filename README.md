@@ -152,7 +152,7 @@ cargo run -q -p sqx-cli -- serve --data data/eurusd_sample.csv
 The dashboard shows the data summary, the indicator catalog, a generate-and-rank
 panel, and a backtest panel with a metrics table, an SVG equity curve and the
 pseudo-code of the tested strategy. All endpoints are plain JSON
-(/api/data, /api/indicators, /api/backtest, /api/generate, /api/assistant).
+(/api/data, /api/indicators, /api/backtest, /api/generate, /api/assistant, /api/assistant/config).
 The dashboard also has an **AI assistant** panel that posts to `/api/assistant`.
 
 ## Design notes

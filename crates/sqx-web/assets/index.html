@@ -122,6 +122,7 @@
     </div>
     <div class="card" style="margin-top:18px">
       <h2>AI assistant</h2>
+      <div id="ai-status" class="muted" style="font-size:12px; margin-bottom:8px;"></div>
       <div class="row">
         <input id="ai-q" type="text" placeholder="e.g. generate 50 strategies and analyse the best" style="flex:1">
         <button id="btn-ai">Ask</button>
@@ -454,6 +455,16 @@ document.getElementById("btn-generate").onclick = async function() {
 
 document.getElementById("btn-backtest").onclick = runBacktest;
 
+async function refreshAiStatus() {
+  try {
+    const d = await getJSON("/api/assistant/config");
+    const key = d.api_key_set ? "" : " · no key";
+    document.getElementById("ai-status").textContent = "model: " + d.model + " · " + d.base_url + key;
+  } catch (e) {
+    document.getElementById("ai-status").textContent = "";
+  }
+}
+
 async function askAssistant() {
   const q = document.getElementById("ai-q").value.trim();
   if (!q) return;
@@ -468,6 +479,7 @@ async function askAssistant() {
   }
 }
 document.getElementById("btn-ai").onclick = askAssistant;
+refreshAiStatus();
 document.getElementById("aw-backtest").onclick = function() {
   document.getElementById("strategy").value = buildStrategyJSON();
   runBacktest();
