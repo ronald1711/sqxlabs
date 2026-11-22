@@ -16,7 +16,7 @@ independently from the documented behaviour and public domain knowledge.
 |---|---|---|
 | Data model | sqx-core | Bars, timeframes, instruments, directions |
 | Data Manager | sqx-data | Multi-symbol bar store, CSV import, listing |
-| Indicators | sqx-indicators | 112 dependency-free indicators (336 building blocks incl. variants) |
+| Indicators | sqx-indicators | 122 dependency-free indicators (366 building blocks incl. variants) |
 | Strategy model | sqx-strategy | Building blocks, conditions, signals, rules, money management, pseudo-code, block catalog |
 | Backtester | sqx-backtest | Event-driven, no look-ahead, SL/PT/trailing/BE, costs, equity |
 | Statistics | sqx-metrics | ~30 metrics mirroring the databank column catalog |

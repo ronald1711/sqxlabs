@@ -503,6 +503,87 @@ pub fn slope(c: &[f64], n: usize) -> Series {
     out
 }
 
+pub fn sma_envelope_upper(c: &[f64], n: usize, pct: f64) -> Series {
+    let m = sma(c, n);
+    (0..c.len()).map(|i| m[i] * (1.0 + pct / 100.0)).collect()
+}
+
+pub fn sma_envelope_lower(c: &[f64], n: usize, pct: f64) -> Series {
+    let m = sma(c, n);
+    (0..c.len()).map(|i| m[i] * (1.0 - pct / 100.0)).collect()
+}
+
+pub fn atr_bands_upper(h: &[f64], l: &[f64], c: &[f64], n: usize, mult: f64) -> Series {
+    let m = sma(c, n);
+    let a = rma(&tr_of(h, l, c), n);
+    (0..c.len()).map(|i| m[i] + mult * a[i]).collect()
+}
+
+pub fn atr_bands_lower(h: &[f64], l: &[f64], c: &[f64], n: usize, mult: f64) -> Series {
+    let m = sma(c, n);
+    let a = rma(&tr_of(h, l, c), n);
+    (0..c.len()).map(|i| m[i] - mult * a[i]).collect()
+}
+
+pub fn pivot_r2(h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    let p = pivot_p(h, l, c);
+    (0..h.len()).map(|i| p[i] + (h[i] - l[i])).collect()
+}
+
+pub fn pivot_s2(h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    let p = pivot_p(h, l, c);
+    (0..h.len()).map(|i| p[i] - (h[i] - l[i])).collect()
+}
+
+pub fn chande_forecast(c: &[f64], n: usize) -> Series {
+    let lr = crate::linreg(c, n).0;
+    (0..c.len())
+        .map(|i| if c[i] != 0.0 && !lr[i].is_nan() { (c[i] - lr[i]) / c[i] * 100.0 } else { f64::NAN })
+        .collect()
+}
+
+pub fn laguerre_rsi(c: &[f64], gamma: f64) -> Series {
+    let len = c.len();
+    let mut out = vec![f64::NAN; len];
+    let (mut l0, mut l1, mut l2, mut l3) = (0.0, 0.0, 0.0, 0.0);
+    for i in 0..len {
+        let p = c[i];
+        let l0n = (1.0 - gamma) * p + gamma * l0;
+        let l1n = -gamma * l0n + l0 + gamma * l1;
+        let l2n = -gamma * l1n + l1 + gamma * l2;
+        let l3n = -gamma * l2n + l2 + gamma * l3;
+        l0 = l0n;
+        l1 = l1n;
+        l2 = l2n;
+        l3 = l3n;
+        let cu = (if l0 >= l1 { l0 - l1 } else { 0.0 })
+            + (if l1 >= l2 { l1 - l2 } else { 0.0 })
+            + (if l2 >= l3 { l2 - l3 } else { 0.0 });
+        let cd = (if l0 < l1 { l1 - l0 } else { 0.0 })
+            + (if l1 < l2 { l2 - l1 } else { 0.0 })
+            + (if l2 < l3 { l3 - l2 } else { 0.0 });
+        out[i] = if cu + cd == 0.0 { 0.0 } else { cu / (cu + cd) };
+    }
+    out
+}
+
+pub fn up_down_volume(c: &[f64], v: &[f64], n: usize) -> Series {
+    let len = c.len();
+    let mut out = vec![f64::NAN; len];
+    for i in n..len {
+        let mut up = 0.0;
+        let mut total = 0.0;
+        for j in (i - n + 1)..=i {
+            total += v[j];
+            if c[j] > c[j - 1] {
+                up += v[j];
+            }
+        }
+        out[i] = if total != 0.0 { up / total * 100.0 } else { f64::NAN };
+    }
+    out
+}
+
 pub fn fisher(h: &[f64], l: &[f64], n: usize) -> Series {
     let len = h.len();
     let hh = highest(h, n);

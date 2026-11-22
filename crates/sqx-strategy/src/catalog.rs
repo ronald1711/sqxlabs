@@ -136,6 +136,16 @@ pub fn indicator_catalog() -> &'static [IndicatorSpec] {
         IndicatorSpec { name: "PriceChannelUpper", label: "Price channel upper", params: &[("period", 20.0)], is_oscillator: false },
         IndicatorSpec { name: "PriceChannelLower", label: "Price channel lower", params: &[("period", 20.0)], is_oscillator: false },
         IndicatorSpec { name: "Slope", label: "SMA slope", params: &[("period", 14.0)], is_oscillator: true },
+        IndicatorSpec { name: "MACDHist", label: "MACD histogram", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "SMAEnvelopeUpper", label: "SMA envelope upper", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "SMAEnvelopeLower", label: "SMA envelope lower", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "ATRBandsUpper", label: "ATR bands upper", params: &[("period", 14.0)], is_oscillator: false },
+        IndicatorSpec { name: "ATRBandsLower", label: "ATR bands lower", params: &[("period", 14.0)], is_oscillator: false },
+        IndicatorSpec { name: "PivotR2", label: "Pivot R2", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "PivotS2", label: "Pivot S2", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "ChandeForecast", label: "Chande forecast oscillator", params: &[("period", 14.0)], is_oscillator: true },
+        IndicatorSpec { name: "LaguerreRSI", label: "Laguerre RSI", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "UpDownVolume", label: "Up/down volume", params: &[("period", 14.0)], is_oscillator: true },
     ]
 }
 

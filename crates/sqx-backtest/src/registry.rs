@@ -190,6 +190,22 @@ pub fn compute(name: &str, params: &[sqx_strategy::Param], bars: &[Bar]) -> Opti
         "PriceChannelUpper" => ind::price_channel_upper(&h, period(params, 20)),
         "PriceChannelLower" => ind::price_channel_lower(&l, period(params, 20)),
         "Slope" => ind::slope(&c, period(params, 14)),
+        "MACDHist" => {
+            let f = ind::ema(&c, 12);
+            let s = ind::ema(&c, 26);
+            let line: Vec<f64> = (0..c.len()).map(|i| f[i] - s[i]).collect();
+            let sig = ind::ema(&line, 9);
+            ind::macd_hist(&line, &sig)
+        },
+        "SMAEnvelopeUpper" => ind::sma_envelope_upper(&c, period(params, 20), 1.0),
+        "SMAEnvelopeLower" => ind::sma_envelope_lower(&c, period(params, 20), 1.0),
+        "ATRBandsUpper" => ind::atr_bands_upper(&h, &l, &c, period(params, 14), 2.0),
+        "ATRBandsLower" => ind::atr_bands_lower(&h, &l, &c, period(params, 14), 2.0),
+        "PivotR2" => ind::pivot_r2(&h, &l, &c),
+        "PivotS2" => ind::pivot_s2(&h, &l, &c),
+        "ChandeForecast" => ind::chande_forecast(&c, period(params, 14)),
+        "LaguerreRSI" => ind::laguerre_rsi(&c, 0.7),
+        "UpDownVolume" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::up_down_volume(&c, &vol, period(params, 14)) },
         _ => return None,
     };
     Some(res)
