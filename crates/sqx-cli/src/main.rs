@@ -437,7 +437,10 @@ fn main() -> Result<()> {
                 let n = store.import_csv(file.to_str().unwrap(), &symbol, Timeframe::M1).map_err(|e| anyhow!(e))?;
                 println!("Loaded {} bars for {}", n, symbol);
             } else {
-                return Err(anyhow!("serve requires --data or --data-dir"));
+                for sym in ["EURUSD", "GBPUSD"] {
+                    store.add(sym, Timeframe::M1, sqx_data::synthetic_bars(sym, 2000));
+                }
+                println!("No --data/--data-dir given: loaded synthetic demo data for EURUSD and GBPUSD.");
             }
             if store.is_empty() {
                 return Err(anyhow!("no data loaded"));

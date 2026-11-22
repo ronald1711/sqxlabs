@@ -94,6 +94,31 @@ impl DataStore {
     }
 }
 
+/// Deterministic synthetic bars for demos and tests (no data source required).
+pub fn synthetic_bars(symbol: &str, n: usize) -> Vec<Bar> {
+    let mut out = Vec::with_capacity(n);
+    let mut price = if symbol.to_ascii_uppercase().starts_with("USDJPY") { 110.0 } else { 1.10 };
+    let mut state: u64 = 0x9E37_79B9_7F4A_7C15
+        ^ symbol
+            .bytes()
+            .fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64));
+    let mut t = 1_700_000_000_000i64;
+    for _ in 0..n {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        let r = ((state >> 33) as f64 / (1u64 << 31) as f64) - 1.0;
+        let open = price;
+        price = (price + r * 0.0004).max(0.01);
+        let close = price;
+        let hi = open.max(close) + r.abs() * 0.0002;
+        let lo = open.min(close) - r.abs() * 0.0002;
+        out.push(Bar { time: t, open, high: hi, low: lo, close, volume: 100.0 });
+        t += 60_000;
+    }
+    out
+}
+
 /// Parse a tick CSV with header timestamp,bid,ask (time in unix seconds).
 pub fn read_ticks_csv(path: &str) -> Result<Vec<Tick>, String> {
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
@@ -147,4 +172,17 @@ pub fn read_csv_bars(path: &str) -> Result<Vec<Bar>, String> {
         return Err(format!("no bars in {path}"));
     }
     Ok(bars)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn synthetic_bars_are_well_formed() {
+        let bars = synthetic_bars("EURUSD", 100);
+        assert_eq!(bars.len(), 100);
+        assert!(bars.iter().all(|b| b.high >= b.low && b.close > 0.0));
+        assert!(bars.windows(2).all(|w| w[0].time < w[1].time));
+    }
 }

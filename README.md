@@ -154,6 +154,8 @@ panel, and a backtest panel with a metrics table, an SVG equity curve and the
 pseudo-code of the tested strategy. All endpoints are plain JSON
 (/api/data, /api/indicators, /api/backtest, /api/generate, /api/assistant, /api/assistant/config).
 The dashboard also has an **AI assistant** panel that posts to `/api/assistant`.
+`serve` with no `--data`/`--data-dir` starts on synthetic demo data (EURUSD and
+GBPUSD, 2000 M1 bars) so the app can be opened without preparing a data source.
 
 ## Design notes
 
