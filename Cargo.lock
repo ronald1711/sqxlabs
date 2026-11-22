@@ -318,6 +318,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sqx-mcp"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "serde_json",
+ "sqx-backtest",
+ "sqx-core",
+ "sqx-data",
+ "sqx-metrics",
+ "sqx-optimizer",
+ "sqx-portfolio",
+ "sqx-robustness",
+ "sqx-strategy",
+]
+
+[[package]]
 name = "sqx-metrics"
 version = "0.1.0"
 dependencies = [

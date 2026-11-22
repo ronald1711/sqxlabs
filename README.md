@@ -26,6 +26,7 @@ independently from the documented behaviour and public domain knowledge.
 | Robustness | sqx-robustness | Monte Carlo trade-manipulation |
 | Portfolio | sqx-portfolio | Combine strategies, weights, correlation, best subset |
 | Custom Projects | sqx-pipeline | Build -> Retest -> Optimize pipeline with GoToTask |
+| MCP server | sqx-mcp | stdio JSON-RPC server exposing the engine as MCP tools |
 | Web | sqx-web | Embedded HTTP server + single-page dashboard |
 | CLI | sqx-cli | backtest / generate / evolve / optimize / export / montecarlo / portfolio / serve / indicators / pseudocode |
 
@@ -70,6 +71,9 @@ cargo run -q -p sqx-cli -- pipeline --data data/eurusd_sample.csv --count 200 --
 
 # Full robustness cross-check set (what-if, MC trade, MC retest, walk-forward)
 cargo run -q -p sqx-cli -- robustness --strategy examples/rsi-mean-reversion.json --data data/eurusd_sample.csv
+
+# MCP server over stdio (JSON-RPC 2.0) for LLM clients
+cargo run -q -p sqx-mcp
 
 # Start the web dashboard, then open http://127.0.0.1:8080
 cargo run -q -p sqx-cli -- serve --data data/eurusd_sample.csv

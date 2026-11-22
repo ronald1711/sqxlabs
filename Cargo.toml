@@ -14,6 +14,7 @@ members = [
   "crates/sqx-portfolio",
   "crates/sqx-pipeline",
   "crates/sqx-web",
+  "crates/sqx-mcp",
   "crates/sqx-cli",
 ]
 
