@@ -243,6 +243,25 @@ fn datasources_json(state: &State) -> String {
     json!({ "symbols": list, "default": default }).to_string()
 }
 
+fn databank_push(state: &State, rows: &[serde_json::Value]) {
+    let mut db = state.databank.write().unwrap();
+    let mut seen: std::collections::HashSet<String> = db
+        .iter()
+        .filter_map(|r| r.get("strategy").and_then(|s| serde_json::to_string(s).ok()))
+        .collect();
+    for r in rows {
+        let key = r
+            .get("strategy")
+            .and_then(|s| serde_json::to_string(s).ok())
+            .unwrap_or_default();
+        if !key.is_empty() && seen.insert(key) {
+            db.push(r.clone());
+        }
+    }
+    drop(db);
+    persist_databank(state);
+}
+
 fn persist_databank(state: &State) {
     let rows = state.databank.read().unwrap();
     let _ = std::fs::create_dir_all("data");
@@ -536,8 +555,7 @@ fn optimize_json(body: &str, state: &State) -> String {
                     "dd_pct": m.max_drawdown_pct, "strategy": s
                 }))
                 .collect();
-            state.databank.write().unwrap().extend(rows.iter().cloned());
-            persist_databank(state);
+            databank_push(state, &rows);
             json!({ "kind": "simple", "results": rows }).to_string()
         }
     }
@@ -867,8 +885,7 @@ fn generate_json(body: &str, state: &State) -> String {
             })
         })
         .collect();
-    state.databank.write().unwrap().extend(rows.iter().cloned());
-    persist_databank(state);
+    databank_push(state, &rows);
     json!({ "results": rows, "symbol": series.symbol }).to_string()
 }
 
