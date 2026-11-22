@@ -134,11 +134,25 @@ fn catalog_json() -> String {
             json!({ "name": s.name, "label": s.label, "oscillator": s.is_oscillator, "params": params })
         })
         .collect();
+    let mm = json!([
+        {"type": "FixedSize", "label": "Fixed size", "params": [{"name": "size", "value": 0.1}]},
+        {"type": "CryptoFixedBalancePct", "label": "Crypto fixed % balance", "params": [{"name": "risk", "value": 5}]},
+        {"type": "RiskFixedBalancePct", "label": "Risk fixed % balance", "params": [{"name": "risk", "value": 5}]},
+        {"type": "AtrRiskBased", "label": "ATR Risk-Based Sizing", "params": [{"name": "risk", "value": 1}, {"name": "atr_period", "value": 14}, {"name": "atr_mult", "value": 2}]},
+        {"type": "RiskFixedPctOfAccount", "label": "Risk fixed % of account", "params": [{"name": "risk", "value": 5}, {"name": "stop_loss_points", "value": 100}]},
+        {"type": "CryptoFixedAmount", "label": "Crypto fixed amount", "params": [{"name": "amount", "value": 500}]},
+        {"type": "FixedAmount", "label": "Fixed amount", "params": [{"name": "amount", "value": 500}]},
+        {"type": "CryptoSizeByPrice", "label": "Crypto size by price", "params": [{"name": "risk", "value": 5}]},
+        {"type": "StocksSizeByPrice", "label": "Stocks size by price", "params": [{"name": "risk", "value": 5}]},
+        {"type": "SimpleMartingale", "label": "Simple Martingale MM", "params": [{"name": "lots_start", "value": 0.1}, {"name": "lots_multiplier", "value": 2}, {"name": "lots_reset", "value": 1}]}
+    ]);
     json!({
         "indicators": indicators,
         "comparators": ["Gt", "Gte", "Lt", "Lte", "Eq", "Neq", "CrossAbove", "CrossBelow", "Rising", "Falling"],
         "price_fields": ["Open", "High", "Low", "Close", "Typical", "Volume"],
-        "signal_kinds": ["LongEntry", "ShortEntry", "LongExit", "ShortExit"]
+        "signal_kinds": ["LongEntry", "ShortEntry", "LongExit", "ShortExit"],
+        "money_management": mm,
+        "trading_options": {"exit_at_end_of_day": false, "exit_on_friday": false, "max_trades_per_day": null, "limit_hours": null}
     })
     .to_string()
 }

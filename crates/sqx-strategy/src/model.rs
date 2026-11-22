@@ -175,6 +175,16 @@ pub enum MoneyManagement {
     RiskFixedPctOfAccount { risk: f64, stop_loss_points: f64 },
     /// ATR-volatility-scaled risk sizing.
     AtrRiskBased { risk: f64, atr_period: usize, atr_mult: f64 },
+    /// Size by price (stocks): units = risk money / price.
+    StocksSizeByPrice { risk: f64 },
+    /// Size by price (crypto): units = risk money / price.
+    CryptoSizeByPrice { risk: f64 },
+    /// Fixed amount (crypto variant).
+    CryptoFixedAmount { amount: f64 },
+    /// Risk a fixed % of balance (crypto variant).
+    CryptoFixedBalancePct { risk: f64 },
+    /// Simple Martingale: after a loss multiply the size, reset after a win.
+    SimpleMartingale { lots_start: f64, lots_multiplier: f64, lots_reset: f64 },
 }
 
 impl Default for MoneyManagement {
@@ -191,6 +201,35 @@ impl MoneyManagement {
             MoneyManagement::RiskFixedBalancePct { .. } => "RiskFixedBalancePct",
             MoneyManagement::RiskFixedPctOfAccount { .. } => "RiskFixedPctOfAccount",
             MoneyManagement::AtrRiskBased { .. } => "ATRRiskBasedSizing",
+            MoneyManagement::StocksSizeByPrice { .. } => "StocksSizeByPrice",
+            MoneyManagement::CryptoSizeByPrice { .. } => "CryptoSizeByPrice",
+            MoneyManagement::CryptoFixedAmount { .. } => "CryptoFixedAmount",
+            MoneyManagement::CryptoFixedBalancePct { .. } => "CryptoFixedBalancePct",
+            MoneyManagement::SimpleMartingale { .. } => "SimpleMartingaleMM",
+        }
+    }
+}
+
+/// Trade-management options applied during the backtest.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TradingOptions {
+    /// Close any open position at the end of the trading day.
+    pub exit_at_end_of_day: bool,
+    /// Close any open position at the end of Friday.
+    pub exit_on_friday: bool,
+    /// Maximum number of new trades opened per day.
+    pub max_trades_per_day: Option<usize>,
+    /// Only allow entries between these UTC hours (inclusive start, exclusive end).
+    pub limit_hours: Option<(u8, u8)>,
+}
+
+impl Default for TradingOptions {
+    fn default() -> Self {
+        Self {
+            exit_at_end_of_day: false,
+            exit_on_friday: false,
+            max_trades_per_day: None,
+            limit_hours: None,
         }
     }
 }
@@ -213,6 +252,9 @@ pub struct Strategy {
     pub profit_target: Option<ProfitTarget>,
     /// Position sizing.
     pub money_management: MoneyManagement,
+    /// Trade-management options.
+    #[serde(default)]
+    pub trading_options: TradingOptions,
 }
 
 /// Stop-loss specification.
@@ -242,6 +284,7 @@ impl Strategy {
             stop_loss: None,
             profit_target: None,
             money_management: MoneyManagement::default(),
+            trading_options: TradingOptions::default(),
         }
     }
 }

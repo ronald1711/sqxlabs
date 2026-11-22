@@ -79,37 +79,66 @@ pub fn backtest(
     let mut trades: Vec<Trade> = Vec::new();
     let mut equity: Vec<(Timestamp, f64)> = Vec::with_capacity(bars.len());
     let mut trade_id = 0usize;
+    let mut trades_today: usize = 0;
+    let mut current_day: i64 = i64::MIN;
+    let mut mart_size: f64 = match &strategy.money_management {
+        MoneyManagement::SimpleMartingale { lots_start, .. } => *lots_start,
+        _ => 0.0,
+    };
 
     for i in 0..bars.len() {
         let bar = bars[i];
+        let day = bar.time.div_euclid(86_400_000);
+        if day != current_day {
+            current_day = day;
+            trades_today = 0;
+        }
 
         // 1. Execute a pending entry at this bar's open.
         if let Some(dir) = pending.take() {
-            let fill = bar.open + dir.sign() * config.slippage_points * point;
-            let (sl, pt) = stop_profit_levels(strategy, &atr_series, i, fill, dir, point);
-            let sl_points = sl_distance_points(sl, fill, point);
-            let size = position_size(strategy, cash, sl_points, point_value, &atr_series, i);
-            let trailing_distance = (fill - sl).abs();
-            position = Some(Position {
-                direction: dir,
-                size,
-                open_price: fill,
-                open_time: bar.time,
-                open_bar: i,
-                stop_loss: sl,
-                profit_target: pt,
-                trailing: strategy.exits.iter().any(|e| matches!(e, ExitType::TrailingStop)),
-                trailing_stop: sl,
-                trailing_distance,
-                move_to_be: strategy.exits.iter().any(|e| matches!(e, ExitType::MoveToBreakEven)),
-                be_applied: false,
-                exit_after_bars: strategy.exits.iter().find_map(|e| match e {
-                    ExitType::ExitAfterBars(n) => Some(*n),
-                    _ => None,
-                }),
-                mae_points: 0.0,
-                mfe_points: 0.0,
-            });
+            let hour = (bar.time.div_euclid(3_600_000).rem_euclid(24)) as u8;
+            let within_hours = match strategy.trading_options.limit_hours {
+                Some((a, b)) => hour >= a && hour < b,
+                None => true,
+            };
+            let under_cap = match strategy.trading_options.max_trades_per_day {
+                Some(m) => trades_today < m,
+                None => true,
+            };
+            if within_hours && under_cap {
+                let fill = bar.open + dir.sign() * config.slippage_points * point;
+                let (sl, pt) = stop_profit_levels(strategy, &atr_series, i, fill, dir, point);
+                let sl_points = sl_distance_points(sl, fill, point);
+                let size = match &strategy.money_management {
+                    MoneyManagement::SimpleMartingale { lots_start, lots_reset, .. } => {
+                        let s = if mart_size <= 0.0 { *lots_start } else { mart_size };
+                        if s > *lots_reset { *lots_start } else { s }
+                    }
+                    _ => position_size(strategy, cash, sl_points, point_value, &atr_series, i, fill),
+                };
+                trades_today += 1;
+                let trailing_distance = (fill - sl).abs();
+                position = Some(Position {
+                    direction: dir,
+                    size,
+                    open_price: fill,
+                    open_time: bar.time,
+                    open_bar: i,
+                    stop_loss: sl,
+                    profit_target: pt,
+                    trailing: strategy.exits.iter().any(|e| matches!(e, ExitType::TrailingStop)),
+                    trailing_stop: sl,
+                    trailing_distance,
+                    move_to_be: strategy.exits.iter().any(|e| matches!(e, ExitType::MoveToBreakEven)),
+                    be_applied: false,
+                    exit_after_bars: strategy.exits.iter().find_map(|e| match e {
+                        ExitType::ExitAfterBars(n) => Some(*n),
+                        _ => None,
+                    }),
+                    mae_points: 0.0,
+                    mfe_points: 0.0,
+                });
+            }
         }
 
         // 2. Manage the open position intra-bar (SL / PT / trailing / BE).
@@ -177,12 +206,29 @@ pub fn backtest(
                 }
             }
 
+            if closed.is_none() {
+                let is_last_of_day = i + 1 >= bars.len()
+                    || bars[i + 1].time.div_euclid(86_400_000) != day;
+                let friday = strategy.trading_options.exit_on_friday && is_friday(bar.time);
+                if is_last_of_day && (strategy.trading_options.exit_at_end_of_day || friday) {
+                    closed = Some((bar.close, ExitReason::ExitAtEndOfDay));
+                }
+            }
+
             match closed {
                 Some((px, reason)) => {
                     let commission = config.commission_per_lot * pos.size;
                     let pnl_points = (px - pos.open_price) * pos.direction.sign() / point;
                     let pnl = pnl_points * pos.size * point_value - commission;
                     cash += pnl;
+                    if let MoneyManagement::SimpleMartingale { lots_start, lots_multiplier, lots_reset } = &strategy.money_management {
+                        if pnl < 0.0 {
+                            let next = pos.size * lots_multiplier;
+                            mart_size = if next > *lots_reset { *lots_start } else { next };
+                        } else {
+                            mart_size = *lots_start;
+                        }
+                    }
                     trades.push(Trade {
                         id: trade_id,
                         direction: pos.direction,
@@ -313,6 +359,11 @@ fn sl_distance_points(sl: f64, fill: f64, point: f64) -> f64 {
     }
 }
 
+/// True when the timestamp falls on a Friday (unix epoch 1970-01-01 = Thursday).
+fn is_friday(time_ms: i64) -> bool {
+    time_ms.div_euclid(86_400_000).rem_euclid(7) == 1
+}
+
 fn position_size(
     s: &Strategy,
     balance: f64,
@@ -320,14 +371,15 @@ fn position_size(
     point_value: f64,
     atr: &Option<Vec<f64>>,
     i: usize,
+    fill: f64,
 ) -> f64 {
     match &s.money_management {
         MoneyManagement::FixedSize { size } => *size,
-        MoneyManagement::FixedAmount { amount } => {
+        MoneyManagement::FixedAmount { amount } | MoneyManagement::CryptoFixedAmount { amount } => {
             let denom = (sl_points * point_value).max(1e-9);
             (amount / denom).max(0.01)
         }
-        MoneyManagement::RiskFixedBalancePct { risk } => {
+        MoneyManagement::RiskFixedBalancePct { risk } | MoneyManagement::CryptoFixedBalancePct { risk } => {
             let risk_money = balance * risk / 100.0;
             let denom = (sl_points * point_value).max(1e-9);
             (risk_money / denom).max(0.01)
@@ -343,5 +395,10 @@ fn position_size(
             let denom = (dist * point_value).max(1e-9);
             (risk_money / denom).max(0.01)
         }
+        MoneyManagement::StocksSizeByPrice { risk } | MoneyManagement::CryptoSizeByPrice { risk } => {
+            let risk_money = balance * risk / 100.0;
+            (risk_money / fill.max(1e-9)).max(0.01)
+        }
+        MoneyManagement::SimpleMartingale { lots_start, .. } => *lots_start,
     }
 }

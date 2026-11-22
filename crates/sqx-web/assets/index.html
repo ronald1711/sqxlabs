@@ -81,11 +81,21 @@
         <input type="number" id="aw-sl" value="100" min="0">
         <label class="muted">TP pts</label>
         <input type="number" id="aw-pt" value="200" min="0">
-        <label class="muted">Lots</label>
-        <input type="number" id="aw-lots" value="0.1" step="0.01" min="0.01">
         <button id="aw-backtest">Build &amp; Backtest</button>
       </div>
-      <div id="aw-signals"></div>
+      <div style="display:flex; gap:16px; align-items:flex-start;">
+        <div style="flex:1; min-width:0;" id="aw-signals"></div>
+        <div style="width:290px; flex-shrink:0;">
+          <h3 style="margin:0 0 10px; font-size:14px;">Money management</h3>
+          <select id="aw-mm-type" style="width:100%;"></select>
+          <div id="aw-mm-params" style="margin-top:8px;"></div>
+          <h3 style="margin:16px 0 10px; font-size:14px;">Trading options</h3>
+          <label class="muted" style="display:block; font-size:12px;"><input type="checkbox" id="aw-eod"> Exit at end of day</label>
+          <label class="muted" style="display:block; font-size:12px; margin-top:4px;"><input type="checkbox" id="aw-friday"> Exit on Friday</label>
+          <label class="muted" style="display:block; font-size:12px; margin-top:8px;">Max trades/day (0 = no limit)</label>
+          <input type="number" id="aw-maxtrades" value="0" min="0" style="width:100%;">
+        </div>
+      </div>
     </div>
     <div class="card" style="margin-top:18px">
       <h2>Backtest a strategy</h2>
@@ -251,6 +261,52 @@ function operandRight(row) {
   return { "Const": 0 };
 }
 
+function mmObject() {
+  var type = document.getElementById("aw-mm-type").value;
+  var params = {};
+  document.querySelectorAll("#aw-mm-params .mm-param").forEach(function(inp) { params[inp.dataset.name] = parseFloat(inp.value); });
+  var obj = {};
+  obj[type] = params;
+  return obj;
+}
+
+function renderMmParams() {
+  var type = document.getElementById("aw-mm-type").value;
+  var m = CATALOG.money_management.find(function(x) { return x.type === type; });
+  var box = document.getElementById("aw-mm-params");
+  box.innerHTML = "";
+  m.params.forEach(function(p) {
+    var lab = document.createElement("label");
+    lab.className = "muted";
+    lab.style.display = "block";
+    lab.style.fontSize = "11px";
+    lab.textContent = p.name;
+    var inp = document.createElement("input");
+    inp.type = "number";
+    inp.className = "mm-param";
+    inp.setAttribute("data-name", p.name);
+    inp.value = p.value;
+    inp.step = "any";
+    inp.style.width = "100%";
+    inp.style.marginBottom = "4px";
+    box.appendChild(lab);
+    box.appendChild(inp);
+  });
+}
+
+function renderMmList() {
+  var sel = document.getElementById("aw-mm-type");
+  sel.innerHTML = "";
+  CATALOG.money_management.forEach(function(m) {
+    var opt = document.createElement("option");
+    opt.value = m.type;
+    opt.textContent = m.label;
+    sel.appendChild(opt);
+  });
+  sel.onchange = renderMmParams;
+  renderMmParams();
+}
+
 function buildStrategyJSON() {
   const sl = parseFloat(document.getElementById("aw-sl").value);
   const pt = parseFloat(document.getElementById("aw-pt").value);
@@ -262,7 +318,13 @@ function buildStrategyJSON() {
     exits: [],
     stop_loss: (sl > 0) ? { "Points": sl } : null,
     profit_target: (pt > 0) ? { "Points": pt } : null,
-    money_management: { "FixedSize": { "size": parseFloat(document.getElementById("aw-lots").value) || 0.1 } }
+    money_management: mmObject(),
+    trading_options: {
+      exit_at_end_of_day: document.getElementById("aw-eod").checked,
+      exit_on_friday: document.getElementById("aw-friday").checked,
+      max_trades_per_day: (function() { var v = parseInt(document.getElementById("aw-maxtrades").value); return v > 0 ? v : null; })(),
+      limit_hours: null
+    }
   };
   CATALOG.signal_kinds.forEach(function(kind) {
     const sec = document.getElementById("sig-" + kind);
@@ -352,6 +414,7 @@ async function loadCatalog() {
   CATALOG = await getJSON("/api/catalog");
   renderChips();
   renderEditor();
+  renderMmList();
 }
 
 loadInfo();
