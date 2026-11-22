@@ -140,6 +140,9 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("GET", "/api/project/list") => ("200 OK", "application/json", project_list_json()),
         ("GET", "/api/project/load") => ("200 OK", "application/json", project_load_json(&query_param(full_path, "name"))),
         ("POST", "/api/project/save") => ("200 OK", "application/json", project_save_json(body)),
+        ("GET", "/api/profiles") => ("200 OK", "application/json", profiles_json()),
+        ("POST", "/api/profiles/save") => ("200 OK", "application/json", profile_save_json(body)),
+        ("POST", "/api/profiles/delete") => ("200 OK", "application/json", profile_delete_json(body)),
         _ => ("404 Not Found", "text/plain", "not found".to_string()),
     }
 }
@@ -228,6 +231,72 @@ fn persist_databank(state: &State) {
         "data/databank.json",
         serde_json::to_string_pretty(&*rows).unwrap_or_default(),
     );
+}
+
+fn profiles_load() -> serde_json::Value {
+    std::fs::read_to_string("data/profiles.json")
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .unwrap_or_else(|| json!({ "brokers": [], "sessions": [] }))
+}
+
+fn profiles_store(v: &serde_json::Value) {
+    let _ = std::fs::create_dir_all("data");
+    let _ = std::fs::write(
+        "data/profiles.json",
+        serde_json::to_string_pretty(v).unwrap_or_default(),
+    );
+}
+
+fn profiles_json() -> String {
+    profiles_load().to_string()
+}
+
+fn profile_kind_key(kind: &str) -> &'static str {
+    if kind == "session" { "sessions" } else { "brokers" }
+}
+
+fn profile_save_json(body: &str) -> String {
+    let val: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let kind = val.get("kind").and_then(|v| v.as_str()).unwrap_or("broker").to_string();
+    let profile = match val.get("profile") {
+        Some(p) => p.clone(),
+        None => return json!({ "error": "profile required" }).to_string(),
+    };
+    let name = profile.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if name.is_empty() {
+        return json!({ "error": "name required" }).to_string();
+    }
+    let key = profile_kind_key(&kind);
+    let mut store = profiles_load();
+    if !store.get(key).map(|v| v.is_array()).unwrap_or(false) {
+        store[key] = json!([]);
+    }
+    if let Some(arr) = store.get_mut(key).and_then(|v| v.as_array_mut()) {
+        arr.retain(|x| x.get("name").and_then(|v| v.as_str()) != Some(name.as_str()));
+        arr.push(profile);
+    }
+    profiles_store(&store);
+    json!({ "ok": true, "name": name }).to_string()
+}
+
+fn profile_delete_json(body: &str) -> String {
+    let val: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let kind = val.get("kind").and_then(|v| v.as_str()).unwrap_or("broker").to_string();
+    let name = val.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let key = profile_kind_key(&kind);
+    let mut store = profiles_load();
+    if let Some(arr) = store.get_mut(key).and_then(|v| v.as_array_mut()) {
+        arr.retain(|x| x.get("name").and_then(|v| v.as_str()) != Some(name.as_str()));
+    }
+    profiles_store(&store);
+    json!({ "ok": true }).to_string()
 }
 
 fn databank_json(state: &State) -> String {

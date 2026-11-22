@@ -1,0 +1,20 @@
+{
+  "brokers": [
+    {
+      "commission": 7,
+      "deposit": 10000,
+      "name": "IC Markets",
+      "slippage": 2,
+      "spread": 10
+    }
+  ],
+  "sessions": [
+    {
+      "end": 17,
+      "exit_eod": true,
+      "exit_friday": false,
+      "name": "London",
+      "start": 8
+    }
+  ]
+}

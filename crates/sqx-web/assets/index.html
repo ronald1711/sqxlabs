@@ -242,6 +242,30 @@
         </div>
         <textarea id="dm-csv" placeholder="timestamp,open,high,low,close,volume&#10;1700000000,1.10,1.11,1.09,1.105,100"></textarea>
       </div>
+      <div class="card" style="margin-top:18px">
+        <h2>Broker profiles</h2>
+        <div id="bp-list" class="muted">No profiles yet.</div>
+        <div class="row" style="margin-top:10px">
+          <input type="text" id="bp-name" placeholder="name" style="width:120px">
+          <input type="number" id="bp-deposit" value="10000" style="width:100px">
+          <input type="number" id="bp-spread" value="0" style="width:80px">
+          <input type="number" id="bp-slippage" value="0" style="width:80px">
+          <input type="number" id="bp-commission" value="0" style="width:80px">
+          <button id="bp-save">Save profile</button>
+        </div>
+      </div>
+      <div class="card" style="margin-top:18px">
+        <h2>Sessions</h2>
+        <div id="ss-list" class="muted">No sessions yet.</div>
+        <div class="row" style="margin-top:10px">
+          <input type="text" id="ss-name" placeholder="name" style="width:120px">
+          <label class="muted">Start</label><input type="number" id="ss-start" value="8" min="0" max="23" style="width:70px">
+          <label class="muted">End</label><input type="number" id="ss-end" value="20" min="0" max="23" style="width:70px">
+          <label><input type="checkbox" id="ss-eod"> EOD</label>
+          <label><input type="checkbox" id="ss-fri"> Friday</label>
+          <button id="ss-save">Save session</button>
+        </div>
+      </div>
     </section>
     <section id="tab-projects" class="tab">
       <div class="card">
@@ -905,6 +929,60 @@ async function refreshDataManager() {
     };
   });
 }
+async function refreshProfiles() {
+  const d = await getJSON("/api/profiles");
+  const b = d.brokers || [];
+  const s = d.sessions || [];
+  const bp = document.getElementById("bp-list");
+  bp.innerHTML = b.length ? b.map(function(p) { return "<div class=\"row\"><span>" + p.name + " (dep " + p.deposit + ", spread " + p.spread + ", slip " + p.slippage + ", comm " + p.commission + ")</span><button data-bp=\"" + p.name + "\" style=\"background:#22314f;padding:4px 9px;font-size:12px\">Apply</button><button data-bpd=\"" + p.name + "\" style=\"background:#3a2430;padding:4px 9px;font-size:12px\">Delete</button></div>"; }).join("") : "<span class=\"muted\">No profiles yet.</span>";
+  bp.querySelectorAll("button[data-bp]").forEach(function(btn) {
+    btn.onclick = function() {
+      var p = b.find(function(x) { return x.name === btn.dataset.bp; });
+      if (!p) return;
+      document.getElementById("set-deposit").value = p.deposit;
+      document.getElementById("set-spread").value = p.spread;
+      document.getElementById("set-slippage").value = p.slippage;
+      document.getElementById("set-commission").value = p.commission;
+      document.querySelector('.nav-btn[data-tab="settings"]').click();
+    };
+  });
+  bp.querySelectorAll("button[data-bpd]").forEach(function(btn) {
+    btn.onclick = async function() { await postJSON("/api/profiles/delete", JSON.stringify({ kind: "broker", name: btn.dataset.bpd })); await refreshProfiles(); };
+  });
+  const ss = document.getElementById("ss-list");
+  ss.innerHTML = s.length ? s.map(function(p) { return "<div class=\"row\"><span>" + p.name + " (" + p.start + "-" + p.end + (p.exit_eod ? ", EOD" : "") + (p.exit_friday ? ", Fri" : "") + ")</span><button data-ss=\"" + p.name + "\" style=\"background:#22314f;padding:4px 9px;font-size:12px\">Apply</button><button data-ssd=\"" + p.name + "\" style=\"background:#3a2430;padding:4px 9px;font-size:12px\">Delete</button></div>"; }).join("") : "<span class=\"muted\">No sessions yet.</span>";
+  ss.querySelectorAll("button[data-ss]").forEach(function(btn) {
+    btn.onclick = function() {
+      var p = s.find(function(x) { return x.name === btn.dataset.ss; });
+      if (!p) return;
+      try {
+        var o = JSON.parse(document.getElementById("strategy").value);
+        o.trading_options = o.trading_options || {};
+        o.trading_options.limit_hours = [p.start, p.end];
+        o.trading_options.exit_at_end_of_day = !!p.exit_eod;
+        o.trading_options.exit_on_friday = !!p.exit_friday;
+        document.getElementById("strategy").value = JSON.stringify(o, null, 2);
+      } catch (e) {}
+      document.querySelector('.nav-btn[data-tab="builder"]').click();
+    };
+  });
+  ss.querySelectorAll("button[data-ssd]").forEach(function(btn) {
+    btn.onclick = async function() { await postJSON("/api/profiles/delete", JSON.stringify({ kind: "session", name: btn.dataset.ssd })); await refreshProfiles(); };
+  });
+}
+document.getElementById("bp-save").onclick = async function() {
+  var p = { name: document.getElementById("bp-name").value.trim(), deposit: parseFloat(document.getElementById("bp-deposit").value) || 10000, spread: parseFloat(document.getElementById("bp-spread").value) || 0, slippage: parseFloat(document.getElementById("bp-slippage").value) || 0, commission: parseFloat(document.getElementById("bp-commission").value) || 0 };
+  if (!p.name) return;
+  await postJSON("/api/profiles/save", JSON.stringify({ kind: "broker", profile: p }));
+  await refreshProfiles();
+};
+document.getElementById("ss-save").onclick = async function() {
+  var p = { name: document.getElementById("ss-name").value.trim(), start: parseInt(document.getElementById("ss-start").value) || 0, end: parseInt(document.getElementById("ss-end").value) || 23, exit_eod: document.getElementById("ss-eod").checked, exit_friday: document.getElementById("ss-fri").checked };
+  if (!p.name) return;
+  await postJSON("/api/profiles/save", JSON.stringify({ kind: "session", profile: p }));
+  await refreshProfiles();
+};
+
 document.getElementById("dm-import").onclick = async function() {
   const symbol = document.getElementById("dm-symbol").value.trim();
   const csv = document.getElementById("dm-csv").value;
@@ -924,7 +1002,7 @@ document.querySelectorAll(".nav-btn").forEach(function(b) {
     b.classList.add("active");
     var t = document.getElementById("tab-" + b.dataset.tab);
     if (t) t.classList.add("active");
-    if (b.dataset.tab === "data") refreshDataManager();
+    if (b.dataset.tab === "data") { refreshDataManager(); refreshProfiles(); }
     if (b.dataset.tab === "results") refreshDatabank();
   };
 });
