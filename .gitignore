@@ -4,4 +4,5 @@ algotrader/
 docs/
 scripts/
 data/slice.db
+data/mt5/
 *.rs.bk

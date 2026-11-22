@@ -90,6 +90,29 @@ examples/rsi-mean-reversion.json. Pseudo-code is rendered by
 CSV with header `timestamp,open,high,low,close,volume`, timestamp in unix
 seconds. data/eurusd_sample.csv is a 2000-bar synthetic EURUSD sample.
 
+### Real MT5 data (SiliconMetaTrader5)
+
+If [SiliconMetaTrader5](https://github.com/bahadirumutiscimen/silicon-metatrader5)
+is running on this Mac (native mode, Wine 11 + MT5), you can pull real history:
+
+```bash
+# start the runtime (native mode) if it is stopped
+bash "$HOME/Library/Application Support/SiliconMT5/runtime/macos/native.sh" start
+
+# export bars (client venv has siliconmetatrader5 + numpy)
+"$HOME/Library/Application Support/SiliconMT5/venv/bin/python" scripts/mt5_export.py \
+  --symbols EURUSD,GBPUSD,USDJPY --timeframe M5 --count 5000 --out data/mt5
+
+# use the real data
+cargo run -q -p sqx-cli -- generate --data data/mt5/EURUSD_M5.csv --count 300
+cargo run -q -p sqx-cli -- crosscheck --strategy examples/rsi-mean-reversion.json --data-dir data/mt5
+cargo run -q -p sqx-cli -- serve --data-dir data/mt5
+```
+
+MT5 bar times are broker server time; the engine uses relative bar intervals,
+so backtests are unaffected. `data/mt5/` is gitignored (your broker data stays
+local).
+
 ## Web dashboard
 
 A fully self-contained web app (no frontend build step, no external runtime):
