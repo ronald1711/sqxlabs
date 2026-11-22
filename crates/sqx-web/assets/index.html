@@ -937,7 +937,7 @@ function renderResults() {
   html += "<th></th></tr>";
   order.forEach(function(i) {
     var r = RESULTS[i];
-    html += "<tr><td>" + r.name + "</td><td>" + fmt(r.profit_factor, 2) + "</td><td>" + fmt(r.net_profit, 2) + "</td><td>" + r.trades + "</td><td>" + fmt(r.dd_pct, 2) + "</td><td><button data-ri=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">Use</button> <button data-exp=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">MQL5</button> <button data-rob=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">Robust</button></td></tr>";
+    html += "<tr><td>" + r.name + "</td><td>" + fmt(r.profit_factor, 2) + "</td><td>" + fmt(r.net_profit, 2) + "</td><td>" + r.trades + "</td><td>" + fmt(r.dd_pct, 2) + "</td><td><button data-ri=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">Use</button> <button data-exp=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">MQL5</button> <button data-rob=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">Robust</button> <button data-ana=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">Analyze</button></td></tr>";
   });
   html += "</table>";
   box.innerHTML = html;
@@ -977,6 +977,22 @@ function renderResults() {
       if (d.error) { out.textContent = d.error; return; }
       var m = d.mc || {};
       out.innerHTML = "<b>Robustness " + r.name + "</b>: " + (d.trades || 0) + " trades · MC net p5 " + fmt(m.net_p5, 2) + " / p50 " + fmt(m.net_p50, 2) + " / p95 " + fmt(m.net_p95, 2) + " · losing " + fmt(m.losing_pct, 1) + "%";
+    };
+  });
+  box.querySelectorAll("button[data-ana]").forEach(function(b) {
+    b.onclick = async function() {
+      var r = RESULTS[Number(b.dataset.ana)];
+      if (!r || !r.strategy) return;
+      var out = document.getElementById("res-portfolio-out");
+      out.textContent = "Analyzing " + r.name + "...";
+      var body = Object.assign({}, r.strategy, { symbol: selectedSymbol() }, settings());
+      var d = await postJSON("/api/analyze", JSON.stringify(body));
+      if (d.error) { out.textContent = d.error; return; }
+      out.innerHTML = "";
+      var pre = document.createElement("pre");
+      pre.style.maxHeight = "420px";
+      pre.textContent = d.markdown || "";
+      out.appendChild(pre);
     };
   });
 }

@@ -167,6 +167,7 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("POST", "/api/optimize") => ("200 OK", "application/json", optimize_json(body, state)),
         ("POST", "/api/pipeline") => ("200 OK", "application/json", pipeline_json(body, state)),
         ("POST", "/api/export") => ("200 OK", "application/json", export_json(body)),
+        ("POST", "/api/analyze") => ("200 OK", "application/json", analyze_json(body, state)),
         ("POST", "/api/data/import") => ("200 OK", "application/json", import_json(body, state)),
         ("POST", "/api/data/delete") => ("200 OK", "application/json", delete_json(body, state)),
         ("POST", "/api/assistant") => ("200 OK", "application/json", assistant_json(body, state)),
@@ -481,6 +482,28 @@ fn project_save_json(body: &str) -> String {
         Ok(_) => json!({ "ok": true, "name": name }).to_string(),
         Err(e) => json!({ "error": e.to_string() }).to_string(),
     }
+}
+
+fn analyze_json(body: &str, state: &State) -> String {
+    let val: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let symbol = val.get("symbol").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let series = match find_series(state, &symbol) {
+        Some(s) => s,
+        None => return json!({ "error": "no data" }).to_string(),
+    };
+    let inst = instrument_for(&series.symbol);
+    let pyp = pyp_for(&series.bars);
+    let cfg = config_from(&val);
+    let s: Strategy = match serde_json::from_str(body) {
+        Ok(s) => s,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let r = backtest(&s, &series.bars, &inst, &cfg);
+    let report = sqx_analyzer::analyze(&r, &series.bars, pyp);
+    json!({ "markdown": sqx_analyzer::render_markdown(&report) }).to_string()
 }
 
 fn export_json(body: &str) -> String {

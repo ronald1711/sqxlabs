@@ -448,6 +448,7 @@ dependencies = [
  "rand",
  "serde",
  "serde_json",
+ "sqx-analyzer",
  "sqx-assistant",
  "sqx-backtest",
  "sqx-core",
