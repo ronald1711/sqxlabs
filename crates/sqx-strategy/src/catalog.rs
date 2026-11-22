@@ -185,6 +185,15 @@ pub fn indicator_catalog() -> &'static [IndicatorSpec] {
         IndicatorSpec { name: "ROCSmooth", label: "Smoothed ROC", params: &[("period", 10.0)], is_oscillator: true },
         IndicatorSpec { name: "MedianPrice", label: "Median price (HL2)", params: &[], is_oscillator: false },
         IndicatorSpec { name: "WeightedClose", label: "Weighted close", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "SqueezeMomentum", label: "Squeeze momentum", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "WaveTrend", label: "WaveTrend", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "PercentRank", label: "Percent rank", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "KeltnerPosition", label: "Keltner position", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "DonchianPosition", label: "Donchian position", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "TrendQuality", label: "Trend quality", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "Acceleration", label: "Acceleration", params: &[("period", 10.0)], is_oscillator: true },
+        IndicatorSpec { name: "Jerk", label: "Jerk", params: &[("period", 10.0)], is_oscillator: true },
+        IndicatorSpec { name: "PriceVelocity", label: "Price velocity", params: &[("period", 10.0)], is_oscillator: true },
     ]
 }
 

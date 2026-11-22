@@ -245,6 +245,15 @@ pub fn compute(name: &str, params: &[sqx_strategy::Param], bars: &[Bar]) -> Opti
         "ROCSmooth" => ind::roc_smoothed(&c, period(params, 10)),
         "MedianPrice" => ind::median_price(&h, &l),
         "WeightedClose" => ind::weighted_close(&h, &l, &c),
+        "SqueezeMomentum" => ind::squeeze_momentum(&c, period(params, 20)),
+        "WaveTrend" => ind::wave_trend(&h, &l, &c),
+        "PercentRank" => ind::percent_rank(&c, period(params, 20)),
+        "KeltnerPosition" => ind::keltner_position(&h, &l, &c, period(params, 20), 2.0),
+        "DonchianPosition" => ind::donchian_position(&h, &l, &c, period(params, 20)),
+        "TrendQuality" => ind::trend_quality(&c, period(params, 20)),
+        "Acceleration" => ind::acceleration(&c, period(params, 10)),
+        "Jerk" => ind::jerk(&c, period(params, 10)),
+        "PriceVelocity" => ind::price_velocity(&c, period(params, 10)),
         _ => return None,
     };
     Some(res)

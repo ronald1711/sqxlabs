@@ -948,6 +948,87 @@ pub fn weighted_close(h: &[f64], l: &[f64], c: &[f64]) -> Series {
     (0..h.len()).map(|i| (h[i] + l[i] + 2.0 * c[i]) / 4.0).collect()
 }
 
+pub fn squeeze_momentum(c: &[f64], n: usize) -> Series {
+    let m = sma(c, n);
+    let d: Vec<f64> = (0..c.len()).map(|i| c[i] - m[i]).collect();
+    crate::linreg(&d, n).0
+}
+
+pub fn wave_trend(h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    let len = c.len();
+    let ap: Vec<f64> = (0..len).map(|i| (h[i] + l[i] + c[i]) / 3.0).collect();
+    let esa = ema(&ap, 10);
+    let d: Vec<f64> = (0..len).map(|i| (ap[i] - esa[i]).abs()).collect();
+    let de = ema(&d, 10);
+    let ci: Vec<f64> = (0..len)
+        .map(|i| if de[i] != 0.0 && !de[i].is_nan() { (ap[i] - esa[i]) / (0.015 * de[i]) } else { 0.0 })
+        .collect();
+    ema(&ci, 21)
+}
+
+pub fn percent_rank(c: &[f64], n: usize) -> Series {
+    let len = c.len();
+    let mut out = vec![f64::NAN; len];
+    for i in n.saturating_sub(1)..len {
+        let start = i + 1 - n;
+        let mut below = 0;
+        for j in start..=i {
+            if c[j] < c[i] {
+                below += 1;
+            }
+        }
+        out[i] = below as f64 / n as f64 * 100.0;
+    }
+    out
+}
+
+pub fn keltner_position(h: &[f64], l: &[f64], c: &[f64], n: usize, mult: f64) -> Series {
+    let mid = ema(c, n);
+    let a = atr_series(h, l, c, n);
+    (0..c.len())
+        .map(|i| {
+            let half = mult * a[i];
+            if half != 0.0 && !half.is_nan() { (c[i] - mid[i]) / half } else { f64::NAN }
+        })
+        .collect()
+}
+
+pub fn donchian_position(h: &[f64], l: &[f64], c: &[f64], n: usize) -> Series {
+    let u = highest(h, n);
+    let lo = lowest(l, n);
+    (0..c.len())
+        .map(|i| {
+            let r = u[i] - lo[i];
+            if r != 0.0 { (c[i] - lo[i]) / r } else { 0.5 }
+        })
+        .collect()
+}
+
+pub fn trend_quality(c: &[f64], n: usize) -> Series {
+    let r2 = r_squared(c, n);
+    let slope = linreg_slope(c, n);
+    (0..c.len()).map(|i| if slope[i] >= 0.0 { r2[i] } else { -r2[i] }).collect()
+}
+
+pub fn acceleration(c: &[f64], n: usize) -> Series {
+    let r = roc(c, n);
+    roc(&r, n)
+}
+
+pub fn jerk(c: &[f64], n: usize) -> Series {
+    let a = acceleration(c, n);
+    roc(&a, n)
+}
+
+pub fn price_velocity(c: &[f64], n: usize) -> Series {
+    let len = c.len();
+    let mut out = vec![f64::NAN; len];
+    for i in n..len {
+        out[i] = (c[i] - c[i - n]) / n as f64;
+    }
+    out
+}
+
 pub fn fisher(h: &[f64], l: &[f64], n: usize) -> Series {
     let len = h.len();
     let hh = highest(h, n);
