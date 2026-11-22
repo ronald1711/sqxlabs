@@ -156,6 +156,14 @@ pub fn indicator_catalog() -> &'static [IndicatorSpec] {
         IndicatorSpec { name: "PriceVolume", label: "Price volume", params: &[], is_oscillator: true },
         IndicatorSpec { name: "ForceRaw", label: "Force index (raw)", params: &[], is_oscillator: true },
         IndicatorSpec { name: "TypicalPrice", label: "Typical price (HLC3)", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "Kurtosis", label: "Kurtosis", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "ATRPercent", label: "ATR percent", params: &[("period", 14.0)], is_oscillator: true },
+        IndicatorSpec { name: "RangeExpansion", label: "Range expansion", params: &[("period", 10.0)], is_oscillator: true },
+        IndicatorSpec { name: "CloseLocation", label: "Close location value", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "HighLowRange", label: "High-low range", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "OpenCloseRange", label: "Open-close range", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "PriceChannelMiddle", label: "Price channel middle", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "Autocorrelation", label: "Autocorrelation", params: &[("period", 20.0)], is_oscillator: true },
     ]
 }
 

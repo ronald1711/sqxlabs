@@ -216,6 +216,14 @@ pub fn compute(name: &str, params: &[sqx_strategy::Param], bars: &[Bar]) -> Opti
         "PriceVolume" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::price_volume(&o, &c, &vol) },
         "ForceRaw" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::force_raw(&c, &vol) },
         "TypicalPrice" => ind::typical_price(&h, &l, &c),
+        "Kurtosis" => ind::kurtosis(&c, period(params, 20)),
+        "ATRPercent" => ind::atr_percent(&h, &l, &c, period(params, 14)),
+        "RangeExpansion" => ind::range_expansion(&h, &l, period(params, 10)),
+        "CloseLocation" => ind::close_location(&h, &l, &c),
+        "HighLowRange" => ind::high_low_range(&h, &l),
+        "OpenCloseRange" => ind::open_close_range(&o, &c),
+        "PriceChannelMiddle" => ind::price_channel_middle(&h, &l, period(params, 20)),
+        "Autocorrelation" => ind::autocorrelation(&c, period(params, 20), 1),
         _ => return None,
     };
     Some(res)

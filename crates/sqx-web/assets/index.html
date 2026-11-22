@@ -917,7 +917,7 @@ function renderResults() {
   html += "<th></th></tr>";
   order.forEach(function(i) {
     var r = RESULTS[i];
-    html += "<tr><td>" + r.name + "</td><td>" + fmt(r.profit_factor, 2) + "</td><td>" + fmt(r.net_profit, 2) + "</td><td>" + r.trades + "</td><td>" + fmt(r.dd_pct, 2) + "</td><td><button data-ri=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">Use</button></td></tr>";
+    html += "<tr><td>" + r.name + "</td><td>" + fmt(r.profit_factor, 2) + "</td><td>" + fmt(r.net_profit, 2) + "</td><td>" + r.trades + "</td><td>" + fmt(r.dd_pct, 2) + "</td><td><button data-ri=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">Use</button> <button data-exp=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">MQL5</button> <button data-rob=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">Robust</button></td></tr>";
   });
   html += "</table>";
   box.innerHTML = html;
@@ -930,6 +930,32 @@ function renderResults() {
       if (!r || !r.strategy) return;
       document.getElementById("strategy").value = JSON.stringify(r.strategy, null, 2);
       document.querySelector('.nav-btn[data-tab="builder"]').click();
+    };
+  });
+  box.querySelectorAll("button[data-exp]").forEach(function(b) {
+    b.onclick = async function() {
+      var r = RESULTS[Number(b.dataset.exp)];
+      if (!r || !r.strategy) return;
+      var d = await postJSON("/api/export", JSON.stringify({ engine: "mql5", strategy: r.strategy }));
+      if (d.error) { alert(d.error); return; }
+      var blob = new Blob([d.code], { type: "text/plain" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = (r.name || "strategy") + ".mq5";
+      a.click();
+    };
+  });
+  box.querySelectorAll("button[data-rob]").forEach(function(b) {
+    b.onclick = async function() {
+      var r = RESULTS[Number(b.dataset.rob)];
+      if (!r || !r.strategy) return;
+      var out = document.getElementById("res-portfolio-out");
+      out.textContent = "Running robustness for " + r.name + "...";
+      var body = Object.assign({}, r.strategy, { symbol: selectedSymbol() }, settings());
+      var d = await postJSON("/api/robustness", JSON.stringify(body));
+      if (d.error) { out.textContent = d.error; return; }
+      var m = d.mc || {};
+      out.innerHTML = "<b>Robustness " + r.name + "</b>: " + (d.trades || 0) + " trades · MC net p5 " + fmt(m.net_p5, 2) + " / p50 " + fmt(m.net_p50, 2) + " / p95 " + fmt(m.net_p95, 2) + " · losing " + fmt(m.losing_pct, 1) + "%";
     };
   });
 }

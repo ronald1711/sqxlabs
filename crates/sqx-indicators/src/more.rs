@@ -660,6 +660,83 @@ pub fn typical_price(h: &[f64], l: &[f64], c: &[f64]) -> Series {
     (0..h.len()).map(|i| (h[i] + l[i] + c[i]) / 3.0).collect()
 }
 
+pub fn kurtosis(c: &[f64], n: usize) -> Series {
+    let len = c.len();
+    let mut out = vec![f64::NAN; len];
+    for i in 0..len {
+        if i + 1 >= n {
+            let w = &c[i + 1 - n..=i];
+            let m = w.iter().sum::<f64>() / n as f64;
+            let sd = (w.iter().map(|v| (v - m).powi(2)).sum::<f64>() / n as f64).sqrt();
+            out[i] = if sd == 0.0 {
+                0.0
+            } else {
+                w.iter().map(|v| ((v - m) / sd).powi(4)).sum::<f64>() / n as f64 - 3.0
+            };
+        }
+    }
+    out
+}
+
+pub fn atr_percent(h: &[f64], l: &[f64], c: &[f64], n: usize) -> Series {
+    let a = rma(&tr_of(h, l, c), n);
+    (0..c.len())
+        .map(|i| if c[i] != 0.0 && !a[i].is_nan() { a[i] / c[i] * 100.0 } else { f64::NAN })
+        .collect()
+}
+
+pub fn range_expansion(h: &[f64], l: &[f64], n: usize) -> Series {
+    let r: Vec<f64> = (0..h.len()).map(|i| h[i] - l[i]).collect();
+    let m = sma(&r, n);
+    (0..h.len())
+        .map(|i| if m[i].is_nan() || m[i] == 0.0 { f64::NAN } else { r[i] / m[i] })
+        .collect()
+}
+
+pub fn close_location(h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    (0..h.len())
+        .map(|i| {
+            let r = h[i] - l[i];
+            if r != 0.0 { (c[i] - l[i]) / r } else { 0.5 }
+        })
+        .collect()
+}
+
+pub fn high_low_range(h: &[f64], l: &[f64]) -> Series {
+    (0..h.len()).map(|i| h[i] - l[i]).collect()
+}
+
+pub fn open_close_range(o: &[f64], c: &[f64]) -> Series {
+    (0..c.len()).map(|i| c[i] - o[i]).collect()
+}
+
+pub fn price_channel_middle(h: &[f64], l: &[f64], n: usize) -> Series {
+    let u = highest(h, n);
+    let lo = lowest(l, n);
+    (0..h.len()).map(|i| (u[i] + lo[i]) / 2.0).collect()
+}
+
+pub fn autocorrelation(c: &[f64], n: usize, lag: usize) -> Series {
+    let len = c.len();
+    let mut out = vec![f64::NAN; len];
+    for i in 0..len {
+        if i + 1 >= n && lag < n {
+            let w = &c[i + 1 - n..=i];
+            let m = w.iter().sum::<f64>() / n as f64;
+            let mut num = 0.0;
+            let mut den = 0.0;
+            for j in lag..w.len() {
+                num += (w[j] - m) * (w[j - lag] - m);
+            }
+            for j in 0..w.len() {
+                den += (w[j] - m) * (w[j] - m);
+            }
+            out[i] = if den != 0.0 { num / den } else { 0.0 };
+        }
+    }
+    out
+}
+
 pub fn fisher(h: &[f64], l: &[f64], n: usize) -> Series {
     let len = h.len();
     let hh = highest(h, n);
