@@ -1,0 +1,9 @@
+[package]
+name = "sqx-strategy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Strategy AST: building blocks, conditions, signals, rules, money management, pseudo-code."
+
+[dependencies]
+serde.workspace = true

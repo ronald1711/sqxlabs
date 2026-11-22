@@ -1,0 +1,7 @@
+/target
+.DS_Store
+algotrader/
+docs/
+scripts/
+data/slice.db
+*.rs.bk

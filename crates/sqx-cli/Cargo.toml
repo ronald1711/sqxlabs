@@ -1,0 +1,22 @@
+[package]
+name = "sqx-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Command line of the StrategyQuant open-source port (like sqcli)."
+
+[dependencies]
+sqx-core = { path = "../sqx-core" }
+sqx-strategy = { path = "../sqx-strategy" }
+sqx-backtest = { path = "../sqx-backtest" }
+sqx-metrics = { path = "../sqx-metrics" }
+sqx-optimizer = { path = "../sqx-optimizer" }
+sqx-project = { path = "../sqx-project" }
+sqx-indicators = { path = "../sqx-indicators" }
+sqx-export = { path = "../sqx-export" }
+sqx-robustness = { path = "../sqx-robustness" }
+sqx-web = { path = "../sqx-web" }
+clap.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+rand.workspace = true

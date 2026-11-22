@@ -1,0 +1,16 @@
+[package]
+name = "sqx-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Self-contained web dashboard: embedded HTTP server over the engine."
+
+[dependencies]
+sqx-core = { path = "../sqx-core" }
+sqx-strategy = { path = "../sqx-strategy" }
+sqx-backtest = { path = "../sqx-backtest" }
+sqx-metrics = { path = "../sqx-metrics" }
+sqx-optimizer = { path = "../sqx-optimizer" }
+serde.workspace = true
+serde_json.workspace = true
+rand.workspace = true

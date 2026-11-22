@@ -1,0 +1,9 @@
+[package]
+name = "sqx-indicators"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Technical indicator library (Series = Vec<f64>, NaN = undefined)."
+
+[dependencies]
+sqx-core = { path = "../sqx-core" }

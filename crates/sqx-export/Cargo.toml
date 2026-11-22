@@ -1,0 +1,9 @@
+[package]
+name = "sqx-export"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Strategy -> platform source code exporters (MQL4/MQL5/PineScript/PseudoCode)."
+
+[dependencies]
+sqx-strategy = { path = "../sqx-strategy" }

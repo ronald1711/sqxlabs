@@ -1,0 +1,9 @@
+[package]
+name = "sqx-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared data model: bars, timeframes, symbols, directions."
+
+[dependencies]
+serde.workspace = true

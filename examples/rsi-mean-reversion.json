@@ -1,0 +1,27 @@
+{
+  "name": "RSI mean-reversion (H1)",
+  "long": true,
+  "short": false,
+  "signals": [
+    {
+      "kind": "LongEntry",
+      "conditions": [
+        { "left": { "Indicator": ["RSI", [{ "name": "period", "value": 14.0 }]] }, "cmp": "CrossBelow", "right": { "Const": 30.0 } }
+      ],
+      "join": "And",
+      "fuzzy": null
+    },
+    {
+      "kind": "LongExit",
+      "conditions": [
+        { "left": { "Indicator": ["RSI", [{ "name": "period", "value": 14.0 }]] }, "cmp": "CrossAbove", "right": { "Const": 70.0 } }
+      ],
+      "join": "And",
+      "fuzzy": null
+    }
+  ],
+  "exits": [],
+  "stop_loss": { "Points": 100.0 },
+  "profit_target": { "Points": 200.0 },
+  "money_management": { "FixedSize": { "size": 0.1 } }
+}

@@ -1,0 +1,11 @@
+[package]
+name = "sqx-robustness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Robustness testing: Monte Carlo trade manipulation."
+
+[dependencies]
+sqx-backtest = { path = "../sqx-backtest" }
+sqx-core = { path = "../sqx-core" }
+rand.workspace = true

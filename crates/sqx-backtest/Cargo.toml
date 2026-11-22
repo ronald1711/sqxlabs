@@ -1,0 +1,15 @@
+[package]
+name = "sqx-backtest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Event-driven backtest engine: trades, equity, money management."
+
+[dependencies]
+sqx-core = { path = "../sqx-core" }
+sqx-strategy = { path = "../sqx-strategy" }
+sqx-indicators = { path = "../sqx-indicators" }
+
+[dev-dependencies]
+sqx-core = { path = "../sqx-core" }
+sqx-strategy = { path = "../sqx-strategy" }

@@ -1,0 +1,326 @@
+use std::path::PathBuf;
+
+use anyhow::{anyhow, Context, Result};
+use clap::{Parser, Subcommand};
+use rand::SeedableRng;
+
+use sqx_backtest::{backtest, BacktestConfig};
+use sqx_core::{Bar, Instrument};
+use sqx_metrics::{compute as compute_metrics, render as render_metrics};
+use sqx_optimizer::{backtest_batch, genetic_evolve, rank, random_strategy, walk_forward, Fitness, GeneticConfig, GeneratorConfig};
+use sqx_project::{Databank, MetricSummary, Project, StrategyRecord};
+use sqx_export::{export as export_strategy, Engine};
+use sqx_robustness::monte_carlo_trade_manipulation;
+use sqx_strategy::{render as render_pseudocode, Strategy};
+
+#[derive(Parser)]
+#[command(name = "sqx", version, about = "StrategyQuant open-source port command line")]
+struct Cli {
+    #[command(subcommand)]
+    cmd: Cmd,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// Backtest a single strategy over CSV data.
+    Backtest {
+        /// Path to a strategy JSON file.
+        #[arg(long)]
+        strategy: PathBuf,
+        /// Path to a CSV file (timestamp,open,high,low,close,volume).
+        #[arg(long)]
+        data: PathBuf,
+        /// Symbol name (defaults to EURUSD).
+        #[arg(long, default_value = "EURUSD")]
+        symbol: String,
+        /// Initial deposit.
+        #[arg(long, default_value_t = 10_000.0)]
+        deposit: f64,
+        /// Spread in points.
+        #[arg(long, default_value_t = 0.0)]
+        spread: f64,
+        /// Slippage in points.
+        #[arg(long, default_value_t = 0.0)]
+        slippage: f64,
+        /// Commission per lot (round-trip).
+        #[arg(long, default_value_t = 0.0)]
+        commission: f64,
+        /// Bars per year for annualization (0 = infer from data).
+        #[arg(long, default_value_t = 0.0)]
+        periods_per_year: f64,
+    },
+    /// Generate random strategies, backtest and rank them.
+    Generate {
+        #[arg(long)]
+        data: PathBuf,
+        /// Number of strategies to generate.
+        #[arg(long, default_value_t = 200)]
+        count: usize,
+        /// Random seed.
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
+        /// How many top strategies to print.
+        #[arg(long, default_value_t = 10)]
+        top: usize,
+        /// Minimum trades a strategy must have to be ranked.
+        #[arg(long, default_value_t = 5)]
+        min_trades: usize,
+        /// Save the ranked databank to this JSON file.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Run genetic evolution.
+    Evolve {
+        #[arg(long)]
+        data: PathBuf,
+        /// Random seed.
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
+        /// Population size.
+        #[arg(long, default_value_t = 50)]
+        population: usize,
+        /// Number of generations.
+        #[arg(long, default_value_t = 20)]
+        generations: usize,
+        /// Minimum trades to be ranked.
+        #[arg(long, default_value_t = 5)]
+        min_trades: usize,
+    },
+    /// List the indicator building-block catalog.
+    Indicators,
+    /// Render a strategy as pseudo-code.
+    Pseudocode {
+        #[arg(long)]
+        strategy: PathBuf,
+    },
+    /// Export a strategy to platform source code.
+    Export {
+        #[arg(long)]
+        strategy: PathBuf,
+        /// mql4 | mql5 | pine | pseudocode
+        #[arg(long)]
+        engine: String,
+        /// Write to this file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Monte Carlo trade-manipulation robustness test.
+    Montecarlo {
+        #[arg(long)]
+        strategy: PathBuf,
+        #[arg(long)]
+        data: PathBuf,
+        #[arg(long, default_value_t = 1000)]
+        runs: usize,
+        #[arg(long, default_value_t = 0.1)]
+        skip: f64,
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
+    },
+    /// Run walk-forward optimization.
+    Optimize {
+        #[arg(long)]
+        data: PathBuf,
+        #[arg(long, default_value_t = 6)]
+        windows: usize,
+        #[arg(long, default_value_t = 0.25)]
+        oos: f64,
+        #[arg(long, default_value_t = 40)]
+        candidates: usize,
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
+    },
+    /// Start the web dashboard.
+    Serve {
+        /// Listen address, e.g. 127.0.0.1:8080.
+        #[arg(long, default_value = "127.0.0.1:8080")]
+        addr: String,
+        #[arg(long)]
+        data: PathBuf,
+        #[arg(long, default_value = "EURUSD")]
+        symbol: String,
+    },
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    match cli.cmd {
+        Cmd::Backtest { strategy, data, symbol, deposit, spread, slippage, commission, periods_per_year } => {
+            let s: Strategy = load_strategy(&strategy)?;
+            let bars = load_bars(&data)?;
+            let instrument = instrument(&symbol);
+            let pyp = resolve_periods_per_year(bars.len(), periods_per_year, &bars);
+            let config = BacktestConfig {
+                initial_deposit: deposit,
+                spread_points: spread,
+                slippage_points: slippage,
+                commission_per_lot: commission,
+            };
+            let result = backtest(&s, &bars, &instrument, &config);
+            let m = compute_metrics(&result, bars.len(), pyp);
+            println!("{}", render_pseudocode(&s));
+            println!();
+            println!("{}", render_metrics(&m));
+            println!("Final equity: {:.2}", result.final_equity);
+            println!("Trades: {}", result.trades.len());
+            Ok(())
+        }
+        Cmd::Generate { data, count, seed, top, min_trades, out } => {
+            let bars = load_bars(&data)?;
+            let instrument = instrument("EURUSD");
+            let pyp = resolve_periods_per_year(bars.len(), 0.0, &bars);
+            let config = BacktestConfig::default();
+            let gen = GeneratorConfig::default();
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let strategies: Vec<Strategy> = (0..count)
+                .map(|i| random_strategy(&mut rng, &format!("s{i:04}"), &gen))
+                .collect();
+            let scored = backtest_batch(&strategies, &bars, &instrument, &config, pyp);
+            let ranked = rank(scored, Fitness::ProfitFactor, min_trades);
+            let top_n = ranked.iter().take(top).collect::<Vec<_>>();
+            for (i, (s, m)) in top_n.iter().enumerate() {
+                println!("{}. {}  PF={:.2}  Net={:.2}  Trades={:.0}  DD%={:.2}", i + 1, s.name, m.profit_factor, m.net_profit, m.number_of_trades, m.max_drawdown_pct);
+            }
+            if let Some(out_path) = out {
+                let mut bank = Databank { name: "Results".into(), strategies: Vec::new() };
+                for (s, m) in ranked.iter().take(100) {
+                    bank.strategies.push(StrategyRecord { strategy: s.clone(), metrics: MetricSummary::from(m) });
+                }
+                let project = Project { name: "Generator".into(), version: "0.1.0".into(), databanks: vec![bank] };
+                sqx_project::save(out_path.to_str().unwrap(), &project).map_err(|e| anyhow!(e))?;
+                println!("Saved {} strategies to {}", ranked.len().min(100), out_path.display());
+            }
+            Ok(())
+        }
+        Cmd::Evolve { data, seed, population, generations, min_trades } => {
+            let bars = load_bars(&data)?;
+            let instrument = instrument("EURUSD");
+            let pyp = resolve_periods_per_year(bars.len(), 0.0, &bars);
+            let config = BacktestConfig::default();
+            let gen = GeneratorConfig::default();
+            let ga = GeneticConfig { population_size: population, generations, min_trades, ..Default::default() };
+            let ranked = genetic_evolve(seed, &gen, &ga, Fitness::ProfitFactor, &bars, &instrument, &config, pyp);
+            for (i, (s, m)) in ranked.iter().take(10).enumerate() {
+                println!("{}. {}  PF={:.2}  Net={:.2}  Trades={:.0}", i + 1, s.name, m.profit_factor, m.net_profit, m.number_of_trades);
+            }
+            Ok(())
+        }
+        Cmd::Indicators => {
+            for spec in sqx_strategy::indicator_catalog() {
+                let params: Vec<String> = spec.params.iter().map(|(n, v)| format!("{n}={v}")).collect();
+                println!("{:<14} {:<22} {}", spec.name, spec.label, params.join(", "));
+            }
+            Ok(())
+        }
+        Cmd::Pseudocode { strategy } => {
+            let s: Strategy = load_strategy(&strategy)?;
+            println!("{}", render_pseudocode(&s));
+            Ok(())
+        }
+        Cmd::Export { strategy, engine, out } => {
+            let s: Strategy = load_strategy(&strategy)?;
+            let eng = Engine::from_label(&engine)
+                .ok_or_else(|| anyhow!("unknown engine '{engine}' (use mql4|mql5|pine|pseudocode)"))?;
+            let code = export_strategy(&s, eng);
+            match out {
+                Some(p) => std::fs::write(&p, &code).map_err(|e| anyhow!(e))?,
+                None => println!("{code}"),
+            }
+            Ok(())
+        }
+        Cmd::Montecarlo { strategy, data, runs, skip, seed } => {
+            let s: Strategy = load_strategy(&strategy)?;
+            let bars = load_bars(&data)?;
+            let inst = instrument("EURUSD");
+            let result = backtest(&s, &bars, &inst, &BacktestConfig::default());
+            let report = monte_carlo_trade_manipulation(&result.trades, runs, skip, seed);
+            print!("{}", sqx_robustness::render(&report));
+            Ok(())
+        }
+        Cmd::Optimize { data, windows, oos, candidates, seed } => {
+            let bars = load_bars(&data)?;
+            let inst = instrument("EURUSD");
+            let pyp = resolve_periods_per_year(bars.len(), 0.0, &bars);
+            let gen = GeneratorConfig::default();
+            let report = walk_forward(&bars, &inst, &BacktestConfig::default(), pyp, &gen, windows, oos, candidates, seed);
+            println!("Walk-forward optimization ({} windows)", report.windows);
+            println!("  OOS trades        : {}", report.oos_trades);
+            println!("  OOS net profit    : {:.2}", report.oos_net_profit);
+            println!("  OOS profit factor : {:.2}", report.oos_profit_factor);
+            println!("  OOS winning %     : {:.1}", report.oos_winning_pct);
+            println!("  OOS max DD %      : {:.2}", report.oos_max_dd_pct);
+            Ok(())
+        }
+        Cmd::Serve { addr, data, symbol } => {
+            let bars = load_bars(&data)?;
+            let inst = instrument(&symbol);
+            println!("Serving {} bars for {} on http://{}", bars.len(), symbol, addr);
+            sqx_web::serve(&addr, bars, inst).map_err(|e| anyhow!(e))?;
+            Ok(())
+        }
+    }
+}
+
+fn instrument(symbol: &str) -> Instrument {
+    if symbol.contains("JPY") {
+        Instrument::fx(symbol)
+    } else {
+        Instrument::fx(symbol)
+    }
+}
+
+fn load_strategy(path: &PathBuf) -> Result<Strategy> {
+    let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    serde_json::from_str(&text).map_err(|e| anyhow!("parsing strategy JSON: {e}"))
+}
+
+/// Parse bars from a CSV with header: timestamp,open,high,low,close,volume.
+fn load_bars(path: &PathBuf) -> Result<Vec<Bar>> {
+    let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let mut bars = Vec::new();
+    for (idx, line) in text.lines().enumerate() {
+        if idx == 0 && line.starts_with("timestamp") {
+            continue;
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        let cols: Vec<&str> = line.split(',').collect();
+        if cols.len() < 6 {
+            continue;
+        }
+        let time = cols[0].trim().parse::<i64>().map_err(|e| anyhow!("bad timestamp at line {}: {e}", idx + 1))?;
+        let open = cols[1].trim().parse::<f64>().map_err(|e| anyhow!("bad open at line {}: {e}", idx + 1))?;
+        let high = cols[2].trim().parse::<f64>().map_err(|e| anyhow!("bad high at line {}: {e}", idx + 1))?;
+        let low = cols[3].trim().parse::<f64>().map_err(|e| anyhow!("bad low at line {}: {e}", idx + 1))?;
+        let close = cols[4].trim().parse::<f64>().map_err(|e| anyhow!("bad close at line {}: {e}", idx + 1))?;
+        let volume = cols[5].trim().parse::<f64>().unwrap_or(0.0);
+        bars.push(Bar::new(time * 1000, open, high, low, close, volume));
+    }
+    if bars.is_empty() {
+        return Err(anyhow!("no bars loaded from {}", path.display()));
+    }
+    Ok(bars)
+}
+
+/// Resolve bars-per-year: explicit override, else infer from the median bar interval.
+fn resolve_periods_per_year(len: usize, explicit: f64, bars: &[Bar]) -> f64 {
+    if explicit > 0.0 {
+        return explicit;
+    }
+    let interval_secs = median_interval_secs(bars);
+    if interval_secs > 0.0 {
+        let per_year = 365.25 * 24.0 * 3600.0 / interval_secs;
+        return per_year.min(len as f64).max(1.0);
+    }
+    252.0
+}
+
+fn median_interval_secs(bars: &[Bar]) -> f64 {
+    if bars.len() < 2 {
+        return 0.0;
+    }
+    let mut diffs: Vec<i64> = bars.windows(2).map(|w| (w[1].time - w[0].time) / 1000).collect();
+    diffs.sort_unstable();
+    diffs[diffs.len() / 2] as f64
+}

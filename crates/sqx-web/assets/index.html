@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SqxLabs — StrategyQuant open-source port</title>
+<style>
+  :root { --bg:#0f1420; --panel:#171e2e; --line:#26304a; --fg:#e6ebf5; --dim:#8b96b3; --acc:#4f8cff; --good:#34c98e; --bad:#ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:18px 24px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:14px; }
+  header h1 { font-size:18px; margin:0; font-weight:600; }
+  header .badge { font-size:12px; color:var(--dim); }
+  main { display:grid; grid-template-columns:380px 1fr; gap:18px; padding:18px 24px; }
+  @media (max-width:900px) { main { grid-template-columns:1fr; } }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); margin:0 0 12px; }
+  #data-info { display:flex; gap:18px; font-size:13px; color:var(--dim); flex-wrap:wrap; }
+  #data-info b { color:var(--fg); font-weight:600; }
+  button { background:var(--acc); color:#fff; border:0; border-radius:6px; padding:9px 16px; font-size:14px; cursor:pointer; }
+  button:hover { filter:brightness(1.1); }
+  input[type=number] { background:#0b0f1a; border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:8px; width:90px; }
+  textarea { width:100%; height:180px; background:#0b0f1a; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:12px; font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:right; padding:6px 8px; border-bottom:1px solid var(--line); }
+  th:first-child, td:first-child { text-align:left; }
+  th { color:var(--dim); font-weight:600; }
+  .pos { color:var(--good); } .neg { color:var(--bad); }
+  #catalog { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { font-size:12px; padding:4px 9px; border:1px solid var(--line); border-radius:999px; color:var(--dim); }
+  .chip.osc { border-color:#2a4a66; color:#8fbcff; }
+  pre { background:#0b0f1a; border:1px solid var(--line); border-radius:8px; padding:12px; font-size:12px; overflow:auto; white-space:pre-wrap; }
+  #chart { width:100%; height:220px; }
+  .row { display:flex; gap:10px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
+  .muted { color:var(--dim); font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SqxLabs</h1>
+  <span class="badge">StrategyQuant open-source port · Rust</span>
+  <span id="data-info" style="margin-left:auto"></span>
+</header>
+<main>
+  <div>
+    <div class="card">
+      <h2>Generate &amp; rank</h2>
+      <div class="row">
+        <label class="muted">Count</label>
+        <input type="number" id="count" value="200" min="1" max="2000">
+        <label class="muted">Seed</label>
+        <input type="number" id="seed" value="42">
+        <button id="btn-generate">Generate</button>
+      </div>
+      <div id="gen-results" class="muted">Click generate to backtest random strategies and rank them.</div>
+    </div>
+    <div class="card" style="margin-top:18px">
+      <h2>Indicator catalog</h2>
+      <div id="catalog"></div>
+    </div>
+  </div>
+  <div>
+    <div class="card">
+      <h2>Backtest a strategy</h2>
+      <textarea id="strategy"></textarea>
+      <div class="row" style="margin-top:12px">
+        <button id="btn-backtest">Backtest</button>
+        <span id="bt-status" class="muted"></span>
+      </div>
+      <div id="bt-results"></div>
+    </div>
+  </div>
+</main>
+<script id="default-strategy" type="application/json">
+{
+  "name": "RSI mean-reversion",
+  "long": true,
+  "short": false,
+  "signals": [
+    { "kind": "LongEntry", "conditions": [ { "left": { "Indicator": ["RSI", [{ "name": "period", "value": 14.0 }]] }, "cmp": "CrossBelow", "right": { "Const": 30.0 } } ], "join": "And", "fuzzy": null },
+    { "kind": "LongExit", "conditions": [ { "left": { "Indicator": ["RSI", [{ "name": "period", "value": 14.0 }]] }, "cmp": "CrossAbove", "right": { "Const": 70.0 } } ], "join": "And", "fuzzy": null }
+  ],
+  "exits": [],
+  "stop_loss": { "Points": 100.0 },
+  "profit_target": { "Points": 200.0 },
+  "money_management": { "FixedSize": { "size": 0.1 } }
+}
+</script>
+<script>
+async function getJSON(url) { const r = await fetch(url); return r.json(); }
+async function postJSON(url, body) { const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: body }); return r.json(); }
+function fmt(v, d) { if (v == null || Number.isNaN(v)) return "-"; if (v === Infinity) return "inf"; return v.toFixed(d); }
+function cls(v) { return v < 0 ? "neg" : "pos"; }
+
+async function loadInfo() {
+  const d = await getJSON("/api/data");
+  document.getElementById("data-info").innerHTML = "<b>" + d.symbol + "</b> <span>" + d.bars + " bars</span>";
+}
+
+async function loadCatalog() {
+  const d = await getJSON("/api/indicators");
+  const box = document.getElementById("catalog");
+  box.innerHTML = d.indicators.map(function(i) { return "<span class=\"chip" + (i.oscillator ? " osc" : "") + "\">" + i.name + "</span>"; }).join("");
+}
+
+document.getElementById("strategy").value = document.getElementById("default-strategy").textContent.trim();
+
+document.getElementById("btn-generate").onclick = async function() {
+  const count = Number(document.getElementById("count").value);
+  const seed = Number(document.getElementById("seed").value);
+  const box = document.getElementById("gen-results");
+  box.textContent = "Generating...";
+  const d = await postJSON("/api/generate", JSON.stringify({ count: count, seed: seed }));
+  if (d.error) { box.innerHTML = "<span class=\"neg\">" + d.error + "</span>"; return; }
+  let rows = "<table><tr><th>Name</th><th>Profit factor</th><th>Net profit</th><th>Trades</th><th>DD %</th></tr>";
+  d.results.forEach(function(r) {
+    rows += "<tr><td>" + r.name + "</td><td class=\"" + cls(r.profit_factor - 1) + "\">" + fmt(r.profit_factor, 2) + "</td><td class=\"" + cls(r.net_profit) + "\">" + fmt(r.net_profit, 2) + "</td><td>" + fmt(r.trades, 0) + "</td><td>" + fmt(r.dd_pct, 2) + "</td></tr>";
+  });
+  rows += "</table>";
+  box.innerHTML = rows;
+};
+
+function drawChart(equity) {
+  const svg = document.getElementById("chart");
+  if (!equity || equity.length < 2) { svg.innerHTML = ""; return; }
+  const w = 700, h = 220, pad = 6;
+  let min = Infinity, max = -Infinity;
+  equity.forEach(function(p) { min = Math.min(min, p[1]); max = Math.max(max, p[1]); });
+  if (max === min) max = min + 1;
+  const n = equity.length;
+  const x = function(i) { return pad + i / (n - 1) * (w - 2 * pad); };
+  const y = function(v) { return h - pad - (v - min) / (max - min) * (h - 2 * pad); };
+  let pts = "";
+  equity.forEach(function(p, i) { pts += (i ? " L" : "M") + x(i).toFixed(1) + " " + y(p[1]).toFixed(1); });
+  svg.innerHTML = "<svg width=\"100%\" height=\"220\" viewBox=\"0 0 " + w + " " + h + "\"><polyline fill=\"none\" stroke=\"#4f8cff\" stroke-width=\"1.5\" points=\"" + pts + "\"/></svg>";
+}
+
+document.getElementById("btn-backtest").onclick = async function() {
+  const status = document.getElementById("bt-status");
+  const out = document.getElementById("bt-results");
+  status.textContent = "Running...";
+  let d;
+  try { d = await postJSON("/api/backtest", document.getElementById("strategy").value); }
+  catch (e) { status.textContent = "Error"; return; }
+  status.textContent = "";
+  if (d.error) { out.innerHTML = "<span class=\"neg\">" + d.error + "</span>"; return; }
+  const m = d.metrics;
+  const rows = [
+    ["Net profit", fmt(m.net_profit, 2)],
+    ["Profit factor", fmt(m.profit_factor, 2)],
+    ["Return/DD", fmt(m.return_dd, 2)],
+    ["Max drawdown %", fmt(m.max_drawdown_pct, 2)],
+    ["Trades", fmt(m.number_of_trades, 0)],
+    ["Winning %", fmt(m.winning_pct, 1)],
+    ["Avg trade", fmt(m.avg_trade, 2)],
+    ["Sharpe", fmt(m.sharpe, 2)],
+    ["SQN", fmt(m.sqn, 2)],
+    ["CAGR", fmt(m.cagr, 4)],
+    ["Stability", fmt(m.stability, 3)],
+    ["Exposure %", fmt(m.exposure_pct, 1)]
+  ];
+  let tbl = "<table><tr><th>Metric</th><th>Value</th></tr>";
+  rows.forEach(function(r) { tbl += "<tr><td>" + r[0] + "</td><td>" + r[1] + "</td></tr>"; });
+  tbl += "</table>";
+  out.innerHTML = "<p class=\"muted\">" + d.trades + " trades · final equity " + fmt(d.final_equity, 2) + "</p>" + tbl + "<h2 style=\"margin-top:16px\">Equity curve</h2><div id=\"chart\"></div><h2 style=\"margin-top:16px\">Pseudo-code</h2><pre>" + d.pseudocode + "</pre>";
+  drawChart(d.equity);
+};
+
+loadInfo();
+loadCatalog();
+</script>
+</body>
+</html>

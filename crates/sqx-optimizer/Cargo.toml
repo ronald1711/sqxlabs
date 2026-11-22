@@ -1,0 +1,13 @@
+[package]
+name = "sqx-optimizer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Random strategy generation and genetic evolution."
+
+[dependencies]
+sqx-core = { path = "../sqx-core" }
+sqx-strategy = { path = "../sqx-strategy" }
+sqx-backtest = { path = "../sqx-backtest" }
+sqx-metrics = { path = "../sqx-metrics" }
+rand.workspace = true
