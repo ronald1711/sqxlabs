@@ -100,6 +100,21 @@ pub fn indicator_catalog() -> &'static [IndicatorSpec] {
         IndicatorSpec { name: "Median", label: "Rolling median", params: &[("period", 20.0)], is_oscillator: false },
         IndicatorSpec { name: "Skewness", label: "Skewness", params: &[("period", 20.0)], is_oscillator: true },
         IndicatorSpec { name: "PVT", label: "Price volume trend", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "Fisher", label: "Fisher transform", params: &[("period", 9.0)], is_oscillator: true },
+        IndicatorSpec { name: "SMI", label: "Stochastic momentum index", params: &[("period", 14.0)], is_oscillator: true },
+        IndicatorSpec { name: "AlligatorJaw", label: "Alligator jaw", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "AlligatorTeeth", label: "Alligator teeth", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "AlligatorLips", label: "Alligator lips", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "GatorUpper", label: "Gator upper", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "GatorLower", label: "Gator lower", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "NVI", label: "Negative volume index", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "PVI", label: "Positive volume index", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "EOM", label: "Ease of movement", params: &[("period", 14.0)], is_oscillator: true },
+        IndicatorSpec { name: "VHF", label: "Vertical horizontal filter", params: &[("period", 28.0)], is_oscillator: true },
+        IndicatorSpec { name: "ChandelierLong", label: "Chandelier exit (long)", params: &[("period", 22.0)], is_oscillator: false },
+        IndicatorSpec { name: "ChandelierShort", label: "Chandelier exit (short)", params: &[("period", 22.0)], is_oscillator: false },
+        IndicatorSpec { name: "TwiggsMF", label: "Twiggs money flow", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "VolumeOsc", label: "Volume oscillator", params: &[], is_oscillator: true },
     ]
 }
 

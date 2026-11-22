@@ -1,6 +1,6 @@
 //! A further batch of standard indicators.
 
-use crate::{ma::*, roc, sum, Series};
+use crate::{highest, lowest, ma::*, roc, sum, Series};
 
 pub fn trix(src: &[f64], n: usize) -> Series {
     let e1 = ema(src, n);
@@ -256,6 +256,197 @@ pub fn skewness(src: &[f64], n: usize) -> Series {
         }
     }
     out
+}
+
+pub fn fisher(h: &[f64], l: &[f64], n: usize) -> Series {
+    let len = h.len();
+    let hh = highest(h, n);
+    let ll = lowest(l, n);
+    let mut out = vec![f64::NAN; len];
+    let mut prev_v = 0.0f64;
+    let mut prev_f = 0.0f64;
+    for i in 0..len {
+        if hh[i].is_nan() || ll[i].is_nan() {
+            continue;
+        }
+        let d = hh[i] - ll[i];
+        let mut v = if d != 0.0 {
+            2.0 * (((h[i] + l[i]) / 2.0 - ll[i]) / d - 0.5)
+        } else {
+            0.0
+        };
+        v = 0.33 * v + 0.67 * prev_v;
+        prev_v = v;
+        let vc = v.clamp(-0.999, 0.999);
+        let f = 0.5 * ((1.0 + vc) / (1.0 - vc)).ln() + 0.5 * prev_f;
+        prev_f = f;
+        out[i] = f;
+    }
+    out
+}
+
+pub fn smi(h: &[f64], l: &[f64], c: &[f64], n: usize, smooth: usize) -> Series {
+    let len = h.len();
+    let hh = highest(h, n);
+    let ll = lowest(l, n);
+    let mut raw = vec![0.0; len];
+    for i in 0..len {
+        if hh[i].is_nan() || ll[i].is_nan() {
+            continue;
+        }
+        let mid = (hh[i] + ll[i]) / 2.0;
+        let d = (hh[i] - ll[i]) / 2.0;
+        raw[i] = if d != 0.0 { (c[i] - mid) / d * 100.0 } else { 0.0 };
+    }
+    let s1 = ema(&raw, smooth);
+    ema(&s1, smooth)
+}
+
+fn shift_series(s: &[f64], n: usize) -> Series {
+    let mut out = vec![f64::NAN; s.len()];
+    for i in n..s.len() {
+        out[i] = s[i - n];
+    }
+    out
+}
+
+pub fn alligator_jaw(c: &[f64]) -> Series {
+    shift_series(&rma(c, 13), 8)
+}
+
+pub fn alligator_teeth(c: &[f64]) -> Series {
+    shift_series(&rma(c, 8), 5)
+}
+
+pub fn alligator_lips(c: &[f64]) -> Series {
+    shift_series(&rma(c, 5), 3)
+}
+
+pub fn gator_upper(c: &[f64]) -> Series {
+    let j = alligator_jaw(c);
+    let t = alligator_teeth(c);
+    (0..c.len()).map(|i| (j[i] - t[i]).abs()).collect()
+}
+
+pub fn gator_lower(c: &[f64]) -> Series {
+    let t = alligator_teeth(c);
+    let l = alligator_lips(c);
+    (0..c.len()).map(|i| (t[i] - l[i]).abs()).collect()
+}
+
+pub fn nvi(c: &[f64], v: &[f64]) -> Series {
+    let len = c.len();
+    let mut acc = 1000.0;
+    let mut out = vec![f64::NAN; len];
+    if len == 0 {
+        return out;
+    }
+    out[0] = acc;
+    for i in 1..len {
+        if v[i] < v[i - 1] && c[i - 1] != 0.0 {
+            acc += acc * (c[i] - c[i - 1]) / c[i - 1];
+        }
+        out[i] = acc;
+    }
+    out
+}
+
+pub fn pvi(c: &[f64], v: &[f64]) -> Series {
+    let len = c.len();
+    let mut acc = 1000.0;
+    let mut out = vec![f64::NAN; len];
+    if len == 0 {
+        return out;
+    }
+    out[0] = acc;
+    for i in 1..len {
+        if v[i] > v[i - 1] && c[i - 1] != 0.0 {
+            acc += acc * (c[i] - c[i - 1]) / c[i - 1];
+        }
+        out[i] = acc;
+    }
+    out
+}
+
+pub fn eom(h: &[f64], l: &[f64], v: &[f64], n: usize) -> Series {
+    let len = h.len();
+    let mut raw = vec![0.0; len];
+    for i in 1..len {
+        let dm = ((h[i] + l[i]) / 2.0) - ((h[i - 1] + l[i - 1]) / 2.0);
+        let br = (v[i] / 1e6).max(1e-9) / (h[i] - l[i]).max(1e-9);
+        raw[i] = dm / br;
+    }
+    sma(&raw, n)
+}
+
+pub fn vhf(c: &[f64], n: usize) -> Series {
+    let len = c.len();
+    let hh = highest(c, n);
+    let ll = lowest(c, n);
+    let mut out = vec![f64::NAN; len];
+    for i in n..len {
+        let mut sum = 0.0;
+        for j in (i - n + 1)..=i {
+            sum += (c[j] - c[j - 1]).abs();
+        }
+        out[i] = if sum != 0.0 { (hh[i] - ll[i]) / sum } else { 0.0 };
+    }
+    out
+}
+
+fn tr_of(h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    let len = h.len();
+    let mut out = vec![f64::NAN; len];
+    for i in 0..len {
+        if i == 0 {
+            out[i] = h[i] - l[i];
+            continue;
+        }
+        let pc = c[i - 1];
+        out[i] = (h[i] - l[i]).max((h[i] - pc).abs()).max((l[i] - pc).abs());
+    }
+    out
+}
+
+pub fn chandelier_long(h: &[f64], l: &[f64], c: &[f64], n: usize, mult: f64) -> Series {
+    let hh = highest(h, n);
+    let a = rma(&tr_of(h, l, c), n);
+    (0..c.len()).map(|i| hh[i] - mult * a[i]).collect()
+}
+
+pub fn chandelier_short(h: &[f64], l: &[f64], c: &[f64], n: usize, mult: f64) -> Series {
+    let ll = lowest(l, n);
+    let a = rma(&tr_of(h, l, c), n);
+    (0..c.len()).map(|i| ll[i] + mult * a[i]).collect()
+}
+
+pub fn twiggs_money_flow(h: &[f64], l: &[f64], c: &[f64], v: &[f64], n: usize) -> Series {
+    let len = h.len();
+    let mut ad = vec![0.0; len];
+    for i in 0..len {
+        let r = h[i] - l[i];
+        ad[i] = if r != 0.0 { ((c[i] - l[i]) - (h[i] - c[i])) / r * v[i] } else { 0.0 };
+    }
+    let mut out = vec![f64::NAN; len];
+    for i in n.saturating_sub(1)..len {
+        let start = i + 1 - n;
+        let mut num = 0.0;
+        let mut den = 0.0;
+        for j in start..=i {
+            num += ad[j];
+            den += v[j];
+        }
+        out[i] = if den != 0.0 { num / den } else { f64::NAN };
+    }
+    out
+}
+
+pub fn volume_osc(v: &[f64], fast: usize, slow: usize) -> Series {
+    let f = sma(v, fast);
+    let s = sma(v, slow);
+    (0..v.len())
+        .map(|i| if s[i].is_nan() || s[i] == 0.0 { f64::NAN } else { (f[i] - s[i]) / s[i] * 100.0 })
+        .collect()
 }
 
 pub fn pvt(c: &[f64], v: &[f64]) -> Series {
