@@ -584,6 +584,82 @@ pub fn up_down_volume(c: &[f64], v: &[f64], n: usize) -> Series {
     out
 }
 
+pub fn choppiness(h: &[f64], l: &[f64], c: &[f64], n: usize) -> Series {
+    let len = h.len();
+    let tr = tr_of(h, l, c);
+    let mut out = vec![f64::NAN; len];
+    for i in 0..len {
+        if i + 1 >= n && n > 1 {
+            let start = i + 1 - n;
+            let mut sum_tr = 0.0;
+            let mut hi = f64::NEG_INFINITY;
+            let mut lo = f64::INFINITY;
+            for j in start..=i {
+                sum_tr += tr[j];
+                hi = hi.max(h[j]);
+                lo = lo.min(l[j]);
+            }
+            let range = hi - lo;
+            out[i] = if sum_tr > 0.0 && range > 0.0 {
+                100.0 * (sum_tr / range).log10() / (n as f64).log10()
+            } else {
+                f64::NAN
+            };
+        }
+    }
+    out
+}
+
+pub fn pivot_r3(h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    let p = pivot_p(h, l, c);
+    (0..h.len()).map(|i| h[i] + 2.0 * (p[i] - l[i])).collect()
+}
+
+pub fn pivot_s3(h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    let p = pivot_p(h, l, c);
+    (0..h.len()).map(|i| l[i] - 2.0 * (h[i] - p[i])).collect()
+}
+
+fn fib_level(h: &[f64], l: &[f64], n: usize, pct: f64) -> Series {
+    let hh = highest(h, n);
+    let ll = lowest(l, n);
+    (0..h.len()).map(|i| ll[i] + pct * (hh[i] - ll[i])).collect()
+}
+
+pub fn fib_382(h: &[f64], l: &[f64], n: usize) -> Series {
+    fib_level(h, l, n, 0.382)
+}
+
+pub fn fib_500(h: &[f64], l: &[f64], n: usize) -> Series {
+    fib_level(h, l, n, 0.5)
+}
+
+pub fn fib_618(h: &[f64], l: &[f64], n: usize) -> Series {
+    fib_level(h, l, n, 0.618)
+}
+
+pub fn volume_ratio(v: &[f64], n: usize) -> Series {
+    let m = sma(v, n);
+    (0..v.len()).map(|i| if m[i].is_nan() || m[i] == 0.0 { f64::NAN } else { v[i] / m[i] }).collect()
+}
+
+pub fn price_volume(o: &[f64], c: &[f64], v: &[f64]) -> Series {
+    (0..c.len()).map(|i| (c[i] - o[i]) * v[i] / 1e6).collect()
+}
+
+pub fn force_raw(c: &[f64], v: &[f64]) -> Series {
+    let len = c.len();
+    let mut out = vec![f64::NAN; len];
+    for i in 1..len {
+        out[i] = (c[i] - c[i - 1]) * v[i];
+    }
+    out
+}
+
+pub fn typical_price(h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    (0..h.len()).map(|i| (h[i] + l[i] + c[i]) / 3.0).collect()
+}
+
 pub fn fisher(h: &[f64], l: &[f64], n: usize) -> Series {
     let len = h.len();
     let hh = highest(h, n);

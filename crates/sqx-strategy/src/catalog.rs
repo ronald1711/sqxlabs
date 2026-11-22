@@ -146,6 +146,16 @@ pub fn indicator_catalog() -> &'static [IndicatorSpec] {
         IndicatorSpec { name: "ChandeForecast", label: "Chande forecast oscillator", params: &[("period", 14.0)], is_oscillator: true },
         IndicatorSpec { name: "LaguerreRSI", label: "Laguerre RSI", params: &[], is_oscillator: true },
         IndicatorSpec { name: "UpDownVolume", label: "Up/down volume", params: &[("period", 14.0)], is_oscillator: true },
+        IndicatorSpec { name: "Choppiness", label: "Choppiness index", params: &[("period", 14.0)], is_oscillator: true },
+        IndicatorSpec { name: "PivotR3", label: "Pivot R3", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "PivotS3", label: "Pivot S3", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "Fib382", label: "Fib 38.2%", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "Fib500", label: "Fib 50%", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "Fib618", label: "Fib 61.8%", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "VolumeRatio", label: "Volume ratio", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "PriceVolume", label: "Price volume", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "ForceRaw", label: "Force index (raw)", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "TypicalPrice", label: "Typical price (HLC3)", params: &[], is_oscillator: false },
     ]
 }
 

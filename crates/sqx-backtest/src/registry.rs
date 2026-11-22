@@ -206,6 +206,16 @@ pub fn compute(name: &str, params: &[sqx_strategy::Param], bars: &[Bar]) -> Opti
         "ChandeForecast" => ind::chande_forecast(&c, period(params, 14)),
         "LaguerreRSI" => ind::laguerre_rsi(&c, 0.7),
         "UpDownVolume" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::up_down_volume(&c, &vol, period(params, 14)) },
+        "Choppiness" => ind::choppiness(&h, &l, &c, period(params, 14)),
+        "PivotR3" => ind::pivot_r3(&h, &l, &c),
+        "PivotS3" => ind::pivot_s3(&h, &l, &c),
+        "Fib382" => ind::fib_382(&h, &l, period(params, 20)),
+        "Fib500" => ind::fib_500(&h, &l, period(params, 20)),
+        "Fib618" => ind::fib_618(&h, &l, period(params, 20)),
+        "VolumeRatio" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::volume_ratio(&vol, period(params, 20)) },
+        "PriceVolume" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::price_volume(&o, &c, &vol) },
+        "ForceRaw" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::force_raw(&c, &vol) },
+        "TypicalPrice" => ind::typical_price(&h, &l, &c),
         _ => return None,
     };
     Some(res)

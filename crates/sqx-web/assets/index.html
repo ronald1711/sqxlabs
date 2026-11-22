@@ -20,7 +20,14 @@
   .content { flex:1; min-width:0; padding:18px 24px; }
   .tab { display:none; }
   .tab.active { display:block; }
-  @media (max-width:900px) { main { flex-direction:column; } .nav { width:auto; flex-direction:row; flex-wrap:wrap; } }
+  @media (max-width:900px) {
+    main { flex-direction:column; }
+    .nav { width:auto; flex-direction:row; flex-wrap:wrap; padding:10px; }
+    .content { padding:12px; }
+    table { font-size:12px; }
+    th, td { padding:4px 6px; }
+    #bt-results, #gen-results, #res-grid, #pf-results, #opt-results { overflow-x:auto; }
+  }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
   .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); margin:0 0 12px; }
   #data-info { display:flex; gap:18px; font-size:13px; color:var(--dim); flex-wrap:wrap; }
