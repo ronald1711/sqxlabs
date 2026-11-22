@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "crates/sqx-core",
+  "crates/sqx-data",
   "crates/sqx-indicators",
   "crates/sqx-strategy",
   "crates/sqx-backtest",

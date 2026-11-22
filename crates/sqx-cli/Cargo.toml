@@ -7,6 +7,7 @@ description = "Command line of the StrategyQuant open-source port (like sqcli)."
 
 [dependencies]
 sqx-core = { path = "../sqx-core" }
+sqx-data = { path = "../sqx-data" }
 sqx-strategy = { path = "../sqx-strategy" }
 sqx-backtest = { path = "../sqx-backtest" }
 sqx-metrics = { path = "../sqx-metrics" }

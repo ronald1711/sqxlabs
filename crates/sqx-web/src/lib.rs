@@ -1,7 +1,7 @@
 //! # sqx-web
 //!
 //! A dependency-free embedded HTTP server that serves a single-page dashboard
-//! over the trading engine. Start it with the CLI serve command.
+//! over the trading engine, with multi-symbol data from the Data Manager.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -12,6 +12,7 @@ use serde_json::json;
 
 use sqx_backtest::{backtest, BacktestConfig};
 use sqx_core::{Bar, Instrument};
+use sqx_data::{DataStore, SymbolSeries};
 use sqx_metrics::{compute as compute_metrics, Metrics};
 use sqx_optimizer::{backtest_batch, rank, random_strategy, Fitness, GeneratorConfig};
 use sqx_strategy::{render as render_pseudocode, Strategy};
@@ -19,16 +20,13 @@ use sqx_strategy::{render as render_pseudocode, Strategy};
 const INDEX: &str = include_str!("../assets/index.html");
 
 struct State {
-    bars: Vec<Bar>,
-    instrument: Instrument,
-    periods_per_year: f64,
+    store: DataStore,
 }
 
-pub fn serve(addr: &str, bars: Vec<Bar>, instrument: Instrument) -> std::io::Result<()> {
-    let pyp = periods_per_year(&bars);
-    let state = Arc::new(State { bars, instrument, periods_per_year: pyp });
+pub fn serve(addr: &str, store: DataStore) -> std::io::Result<()> {
+    println!("SqxLabs web app: http://{addr} ({} symbols)", store.len());
+    let state = Arc::new(State { store });
     let listener = TcpListener::bind(addr)?;
-    println!("SqxLabs web app: http://{addr}");
     for stream in listener.incoming() {
         match stream {
             Ok(s) => {
@@ -41,20 +39,6 @@ pub fn serve(addr: &str, bars: Vec<Bar>, instrument: Instrument) -> std::io::Res
         }
     }
     Ok(())
-}
-
-fn periods_per_year(bars: &[Bar]) -> f64 {
-    if bars.len() < 2 {
-        return 252.0;
-    }
-    let mut diffs: Vec<i64> = bars.windows(2).map(|w| (w[1].time - w[0].time) / 1000).collect();
-    diffs.sort_unstable();
-    let secs = diffs[diffs.len() / 2] as f64;
-    if secs > 0.0 {
-        (365.25 * 24.0 * 3600.0 / secs).min(bars.len() as f64).max(1.0)
-    } else {
-        252.0
-    }
 }
 
 fn handle(mut stream: TcpStream, state: &State) -> std::io::Result<()> {
@@ -92,7 +76,6 @@ fn handle(mut stream: TcpStream, state: &State) -> std::io::Result<()> {
         body.extend_from_slice(&tmp[..k]);
     }
     let body_str = String::from_utf8_lossy(&body).to_string();
-    eprintln!("[sqx-web] {} {}", method, path);
 
     let (status, ctype, payload) = route(&method, &path, &body_str, state);
     let resp = format!("HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}", payload.len());
@@ -101,17 +84,63 @@ fn handle(mut stream: TcpStream, state: &State) -> std::io::Result<()> {
     Ok(())
 }
 
-fn route(method: &str, path: &str, body: &str, state: &State) -> (&'static str, &'static str, String) {
+fn query_symbol(path: &str) -> (&str, String) {
+    match path.split_once('?') {
+        Some((p, q)) => {
+            let sym = q
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("symbol="))
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            (p, sym)
+        }
+        None => (path, String::new()),
+    }
+}
+
+fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static str, &'static str, String) {
+    let (path, qsym) = query_symbol(full_path);
     match (method, path) {
         ("GET", "/") | ("GET", "/index.html") => ("200 OK", "text/html; charset=utf-8", INDEX.to_string()),
         ("GET", "/api/indicators") => ("200 OK", "application/json", indicators_json()),
         ("GET", "/api/catalog") => ("200 OK", "application/json", catalog_json()),
-        ("GET", "/api/data") => ("200 OK", "application/json", data_json(state)),
+        ("GET", "/api/datasources") => ("200 OK", "application/json", datasources_json(state)),
+        ("GET", "/api/data") => ("200 OK", "application/json", data_json(state, &qsym)),
         ("POST", "/api/backtest") => ("200 OK", "application/json", backtest_json(body, state)),
         ("POST", "/api/generate") => ("200 OK", "application/json", generate_json(body, state)),
         ("POST", "/api/portfolio") => ("200 OK", "application/json", portfolio_json(body, state)),
         ("POST", "/api/pseudocode") => ("200 OK", "application/json", pseudocode_json(body)),
         _ => ("404 Not Found", "text/plain", "not found".to_string()),
+    }
+}
+
+fn default_series(state: &State) -> Option<&SymbolSeries> {
+    state.store.series.first()
+}
+
+fn find_series<'a>(state: &'a State, symbol: &str) -> Option<&'a SymbolSeries> {
+    if symbol.is_empty() {
+        default_series(state)
+    } else {
+        state.store.get(symbol).or_else(|| default_series(state))
+    }
+}
+
+fn instrument_for(symbol: &str) -> Instrument {
+    Instrument::fx(symbol)
+}
+
+fn pyp_for(bars: &[Bar]) -> f64 {
+    if bars.len() < 2 {
+        return 252.0;
+    }
+    let mut diffs: Vec<i64> = bars.windows(2).map(|w| (w[1].time - w[0].time) / 1000).collect();
+    diffs.sort_unstable();
+    let secs = diffs[diffs.len() / 2] as f64;
+    if secs > 0.0 {
+        (365.25 * 24.0 * 3600.0 / secs).min(bars.len() as f64).max(1.0)
+    } else {
+        252.0
     }
 }
 
@@ -127,11 +156,7 @@ fn catalog_json() -> String {
     let indicators: Vec<_> = sqx_strategy::indicator_catalog()
         .iter()
         .map(|s| {
-            let params: Vec<_> = s
-                .params
-                .iter()
-                .map(|(n, v)| json!({ "name": n, "value": v }))
-                .collect();
+            let params: Vec<_> = s.params.iter().map(|(n, v)| json!({ "name": n, "value": v })).collect();
             json!({ "name": s.name, "label": s.label, "oscillator": s.is_oscillator, "params": params })
         })
         .collect();
@@ -158,10 +183,28 @@ fn catalog_json() -> String {
     .to_string()
 }
 
-fn data_json(state: &State) -> String {
-    let first = state.bars.first().map(|b| b.time).unwrap_or(0);
-    let last = state.bars.last().map(|b| b.time).unwrap_or(0);
-    json!({ "symbol": state.instrument.name, "bars": state.bars.len(), "first_time": first, "last_time": last }).to_string()
+fn datasources_json(state: &State) -> String {
+    let list: Vec<_> = state
+        .store
+        .list()
+        .iter()
+        .map(|s| json!({ "symbol": s.symbol, "timeframe": s.timeframe, "bars": s.bars, "first": s.first, "last": s.last }))
+        .collect();
+    let default = default_series(state).map(|s| s.symbol.clone()).unwrap_or_default();
+    json!({ "symbols": list, "default": default }).to_string()
+}
+
+fn data_json(state: &State, symbol: &str) -> String {
+    match find_series(state, symbol) {
+        Some(s) => json!({
+            "symbol": s.symbol,
+            "bars": s.bars.len(),
+            "first_time": s.bars.first().map(|b| b.time).unwrap_or(0),
+            "last_time": s.bars.last().map(|b| b.time).unwrap_or(0)
+        })
+        .to_string(),
+        None => json!({ "error": "no data" }).to_string(),
+    }
 }
 
 fn metrics_json(m: &Metrics) -> serde_json::Value {
@@ -182,21 +225,34 @@ fn metrics_json(m: &Metrics) -> serde_json::Value {
 }
 
 fn backtest_json(body: &str, state: &State) -> String {
+    let val: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let symbol = val.get("symbol").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let series = match find_series(state, &symbol) {
+        Some(s) => s,
+        None => return json!({ "error": "no data" }).to_string(),
+    };
     let s: Strategy = match serde_json::from_str(body) {
         Ok(s) => s,
         Err(e) => return json!({ "error": format!("{e}") }).to_string(),
     };
+    let inst = instrument_for(&series.symbol);
+    let pyp = pyp_for(&series.bars);
     let cfg = BacktestConfig::default();
-    let result = backtest(&s, &state.bars, &state.instrument, &cfg);
-    let m = compute_metrics(&result, state.bars.len(), state.periods_per_year);
+    let result = backtest(&s, &series.bars, &inst, &cfg);
+    let m = compute_metrics(&result, series.bars.len(), pyp);
     let equity = result.equity.clone();
     json!({
         "metrics": metrics_json(&m),
         "final_equity": result.final_equity,
         "equity": equity,
         "trades": result.trades.len(),
-        "pseudocode": render_pseudocode(&s)
-    }).to_string()
+        "pseudocode": render_pseudocode(&s),
+        "symbol": series.symbol
+    })
+    .to_string()
 }
 
 fn generate_json(body: &str, state: &State) -> String {
@@ -204,11 +260,19 @@ fn generate_json(body: &str, state: &State) -> String {
     struct Req {
         count: usize,
         seed: u64,
+        #[serde(default)]
+        symbol: String,
     }
     let req: Req = match serde_json::from_str(body) {
         Ok(r) => r,
         Err(e) => return json!({ "error": format!("{e}") }).to_string(),
     };
+    let series = match find_series(state, &req.symbol) {
+        Some(s) => s,
+        None => return json!({ "error": "no data" }).to_string(),
+    };
+    let inst = instrument_for(&series.symbol);
+    let pyp = pyp_for(&series.bars);
     let count = req.count.clamp(1, 2000);
     let gen = GeneratorConfig::default();
     let mut rng = rand::rngs::StdRng::seed_from_u64(req.seed);
@@ -216,7 +280,7 @@ fn generate_json(body: &str, state: &State) -> String {
         .map(|i| random_strategy(&mut rng, &format!("s{i:04}"), &gen))
         .collect();
     let cfg = BacktestConfig::default();
-    let scored = backtest_batch(&strategies, &state.bars, &state.instrument, &cfg, state.periods_per_year);
+    let scored = backtest_batch(&strategies, &series.bars, &inst, &cfg, pyp);
     let ranked = rank(scored, Fitness::ProfitFactor, 5);
     let rows: Vec<_> = ranked
         .iter()
@@ -231,7 +295,7 @@ fn generate_json(body: &str, state: &State) -> String {
             })
         })
         .collect();
-    json!({ "results": rows }).to_string()
+    json!({ "results": rows, "symbol": series.symbol }).to_string()
 }
 
 fn portfolio_json(body: &str, state: &State) -> String {
@@ -242,11 +306,19 @@ fn portfolio_json(body: &str, state: &State) -> String {
         top: usize,
         min_k: usize,
         max_k: usize,
+        #[serde(default)]
+        symbol: String,
     }
     let req: Req = match serde_json::from_str(body) {
         Ok(r) => r,
         Err(e) => return json!({ "error": format!("{e}") }).to_string(),
     };
+    let series = match find_series(state, &req.symbol) {
+        Some(s) => s,
+        None => return json!({ "error": "no data" }).to_string(),
+    };
+    let inst = instrument_for(&series.symbol);
+    let pyp = pyp_for(&series.bars);
     let count = req.count.clamp(10, 2000);
     let gen = GeneratorConfig::default();
     let mut rng = rand::rngs::StdRng::seed_from_u64(req.seed);
@@ -255,17 +327,14 @@ fn portfolio_json(body: &str, state: &State) -> String {
         .collect();
     let names: Vec<String> = strategies.iter().map(|s| s.name.clone()).collect();
     let cfg = BacktestConfig::default();
-    let results = sqx_portfolio::backtest_all(&strategies, &state.bars, &state.instrument, &cfg);
+    let results = sqx_portfolio::backtest_all(&strategies, &series.bars, &inst, &cfg);
     let mets: Vec<Metrics> = results
         .iter()
-        .map(|r| compute_metrics(r, state.bars.len(), state.periods_per_year))
+        .map(|r| compute_metrics(r, series.bars.len(), pyp))
         .collect();
     let mut order: Vec<usize> = (0..results.len()).collect();
     order.sort_by(|&a, &b| {
-        mets[b]
-            .profit_factor
-            .partial_cmp(&mets[a].profit_factor)
-            .unwrap_or(std::cmp::Ordering::Equal)
+        mets[b].profit_factor.partial_cmp(&mets[a].profit_factor).unwrap_or(std::cmp::Ordering::Equal)
     });
     order.retain(|&i| mets[i].number_of_trades >= 5.0 && mets[i].profit_factor.is_finite());
     order.truncate(req.top.clamp(2, 15));
@@ -278,14 +347,7 @@ fn portfolio_json(body: &str, state: &State) -> String {
     let comp: Vec<sqx_backtest::BacktestResult> = subset.iter().map(|&i| sel[i].clone()).collect();
     let comp_names: Vec<String> = subset.iter().map(|&i| sel_names[i].clone()).collect();
     let weights = sqx_portfolio::equal_weights(comp.len());
-    let pf = sqx_portfolio::combine(
-        &comp_names,
-        &comp,
-        &weights,
-        cfg.initial_deposit,
-        state.bars.len(),
-        state.periods_per_year,
-    );
+    let pf = sqx_portfolio::combine(&comp_names, &comp, &weights, cfg.initial_deposit, series.bars.len(), pyp);
     let comps: Vec<_> = pf
         .components
         .iter()
@@ -303,7 +365,8 @@ fn portfolio_json(body: &str, state: &State) -> String {
         "metrics": metrics_json(&pf.metrics),
         "equity": pf.equity,
         "correlation": pf.correlation,
-        "components": comps
+        "components": comps,
+        "symbol": series.symbol
     })
     .to_string()
 }

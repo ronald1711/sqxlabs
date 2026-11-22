@@ -15,6 +15,7 @@ independently from the documented behaviour and public domain knowledge.
 | Area | Crate | Notes |
 |---|---|---|
 | Data model | sqx-core | Bars, timeframes, instruments, directions |
+| Data Manager | sqx-data | Multi-symbol bar store, CSV import, listing |
 | Indicators | sqx-indicators | 40+ dependency-free indicators + signal helpers |
 | Strategy model | sqx-strategy | Building blocks, conditions, signals, rules, money management, pseudo-code, block catalog |
 | Backtester | sqx-backtest | Event-driven, no look-ahead, SL/PT/trailing/BE, costs, equity |
@@ -56,6 +57,12 @@ cargo run -q -p sqx-cli -- optimize --data data/eurusd_sample.csv --windows 6 --
 
 # Build a portfolio: best subset of generated strategies (equal weights + correlation)
 cargo run -q -p sqx-cli -- portfolio --data data/eurusd_sample.csv --count 300 --top 12
+
+# Multi-market cross-check (one strategy on every symbol in a folder)
+cargo run -q -p sqx-cli -- crosscheck --strategy examples/rsi-mean-reversion.json --data-dir data
+
+# Serve the dashboard with multiple symbols (symbol = file stem)
+cargo run -q -p sqx-cli -- serve --data-dir data
 
 # Start the web dashboard, then open http://127.0.0.1:8080
 cargo run -q -p sqx-cli -- serve --data data/eurusd_sample.csv

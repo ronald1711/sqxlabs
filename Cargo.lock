@@ -276,6 +276,7 @@ dependencies = [
  "serde_json",
  "sqx-backtest",
  "sqx-core",
+ "sqx-data",
  "sqx-export",
  "sqx-indicators",
  "sqx-metrics",
@@ -292,6 +293,13 @@ name = "sqx-core"
 version = "0.1.0"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "sqx-data"
+version = "0.1.0"
+dependencies = [
+ "sqx-core",
 ]
 
 [[package]]
@@ -373,6 +381,7 @@ dependencies = [
  "serde_json",
  "sqx-backtest",
  "sqx-core",
+ "sqx-data",
  "sqx-metrics",
  "sqx-optimizer",
  "sqx-portfolio",

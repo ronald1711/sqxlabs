@@ -49,7 +49,10 @@
 <header>
   <h1>SqxLabs</h1>
   <span class="badge">StrategyQuant open-source port · Rust</span>
-  <span id="data-info" style="margin-left:auto"></span>
+  <span style="margin-left:auto; display:flex; gap:10px; align-items:center;">
+    <select id="symbol-select"></select>
+    <span id="data-info"></span>
+  </span>
 </header>
 <main>
   <div>
@@ -141,10 +144,30 @@ async function getJSON(url) { const r = await fetch(url); return r.json(); }
 async function postJSON(url, body) { const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: body }); return r.json(); }
 function fmt(v, d) { if (v == null || Number.isNaN(v)) return "-"; if (v === Infinity) return "inf"; return v.toFixed(d); }
 function cls(v) { return v < 0 ? "neg" : "pos"; }
+function selectedSymbol() {
+  var el = document.getElementById("symbol-select");
+  return el ? el.value : "";
+}
+
+async function refreshDataInfo() {
+  const sym = selectedSymbol();
+  const d = await getJSON("/api/data?symbol=" + encodeURIComponent(sym));
+  document.getElementById("data-info").innerHTML = "<b>" + (d.symbol || sym) + "</b> <span>" + (d.bars || 0) + " bars</span>";
+}
 
 async function loadInfo() {
-  const d = await getJSON("/api/data");
-  document.getElementById("data-info").innerHTML = "<b>" + d.symbol + "</b> <span>" + d.bars + " bars</span>";
+  const ds = await getJSON("/api/datasources");
+  const sel = document.getElementById("symbol-select");
+  sel.innerHTML = "";
+  (ds.symbols || []).forEach(function(s) {
+    var opt = document.createElement("option");
+    opt.value = s.symbol;
+    opt.textContent = s.symbol + " (" + s.bars + " bars)";
+    sel.appendChild(opt);
+  });
+  if (ds.default) { sel.value = ds.default; }
+  sel.onchange = refreshDataInfo;
+  await refreshDataInfo();
 }
 
 function renderChips() {
@@ -371,8 +394,14 @@ async function runBacktest() {
   const status = document.getElementById("bt-status");
   const out = document.getElementById("bt-results");
   status.textContent = "Running...";
+  let body;
+  try {
+    var obj = JSON.parse(document.getElementById("strategy").value);
+    obj.symbol = selectedSymbol();
+    body = JSON.stringify(obj);
+  } catch (e) { status.textContent = "Invalid JSON"; return; }
   let d;
-  try { d = await postJSON("/api/backtest", document.getElementById("strategy").value); }
+  try { d = await postJSON("/api/backtest", body); }
   catch (e) { status.textContent = "Error"; return; }
   status.textContent = "";
   if (d.error) { out.innerHTML = "<span class=\"neg\">" + d.error + "</span>"; return; }
@@ -405,7 +434,7 @@ document.getElementById("btn-generate").onclick = async function() {
   const seed = Number(document.getElementById("seed").value);
   const box = document.getElementById("gen-results");
   box.textContent = "Generating...";
-  const d = await postJSON("/api/generate", JSON.stringify({ count: count, seed: seed }));
+  const d = await postJSON("/api/generate", JSON.stringify({ count: count, seed: seed, symbol: selectedSymbol() }));
   if (d.error) { box.innerHTML = "<span class=\"neg\">" + d.error + "</span>"; return; }
   let rows = "<table><tr><th>Name</th><th>Profit factor</th><th>Net profit</th><th>Trades</th><th>DD %</th></tr>";
   d.results.forEach(function(r) {
@@ -427,6 +456,7 @@ document.getElementById("pf-build").onclick = async function() {
   const d = await postJSON("/api/portfolio", JSON.stringify({
     count: Number(document.getElementById("pf-count").value),
     seed: Number(document.getElementById("pf-seed").value),
+    symbol: selectedSymbol(),
     top: 12, min_k: 2, max_k: 4
   }));
   if (d.error) { box.innerHTML = "<span class=\"neg\">" + d.error + "</span>"; return; }

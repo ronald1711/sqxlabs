@@ -5,7 +5,8 @@ use clap::{Parser, Subcommand};
 use rand::SeedableRng;
 
 use sqx_backtest::{backtest, BacktestConfig, BacktestResult};
-use sqx_core::{Bar, Instrument};
+use sqx_core::{Bar, Instrument, Timeframe};
+use sqx_data::DataStore;
 use sqx_metrics::{compute as compute_metrics, render as render_metrics};
 use sqx_optimizer::{backtest_batch, genetic_evolve, rank, random_strategy, walk_forward, Fitness, GeneticConfig, GeneratorConfig};
 use sqx_project::{Databank, MetricSummary, Project, StrategyRecord};
@@ -136,8 +137,12 @@ enum Cmd {
         /// Listen address, e.g. 127.0.0.1:8080.
         #[arg(long, default_value = "127.0.0.1:8080")]
         addr: String,
+        /// Single CSV file (symbol from --symbol).
         #[arg(long)]
-        data: PathBuf,
+        data: Option<PathBuf>,
+        /// Directory of *.csv files (symbol = file stem).
+        #[arg(long)]
+        data_dir: Option<PathBuf>,
         #[arg(long, default_value = "EURUSD")]
         symbol: String,
     },
@@ -155,6 +160,15 @@ enum Cmd {
         min_k: usize,
         #[arg(long, default_value_t = 4)]
         max_k: usize,
+    },
+    /// Multi-market cross-check: backtest one strategy on every symbol in a folder.
+    Crosscheck {
+        #[arg(long)]
+        strategy: PathBuf,
+        #[arg(long)]
+        data_dir: PathBuf,
+        #[arg(long, default_value_t = 5)]
+        min_trades: usize,
     },
 }
 
@@ -267,11 +281,23 @@ fn main() -> Result<()> {
             println!("  OOS max DD %      : {:.2}", report.oos_max_dd_pct);
             Ok(())
         }
-        Cmd::Serve { addr, data, symbol } => {
-            let bars = load_bars(&data)?;
-            let inst = instrument(&symbol);
-            println!("Serving {} bars for {} on http://{}", bars.len(), symbol, addr);
-            sqx_web::serve(&addr, bars, inst).map_err(|e| anyhow!(e))?;
+        Cmd::Serve { addr, data, data_dir, symbol } => {
+            let mut store = DataStore::new();
+            if let Some(dir) = data_dir {
+                let loaded = store.import_dir(dir.to_str().unwrap(), Timeframe::M1).map_err(|e| anyhow!(e))?;
+                for (s, n) in &loaded {
+                    println!("Loaded {} bars for {}", n, s);
+                }
+            } else if let Some(file) = data {
+                let n = store.import_csv(file.to_str().unwrap(), &symbol, Timeframe::M1).map_err(|e| anyhow!(e))?;
+                println!("Loaded {} bars for {}", n, symbol);
+            } else {
+                return Err(anyhow!("serve requires --data or --data-dir"));
+            }
+            if store.is_empty() {
+                return Err(anyhow!("no data loaded"));
+            }
+            sqx_web::serve(&addr, store).map_err(|e| anyhow!(e))?;
             Ok(())
         }
         Cmd::Portfolio { data, count, seed, top, min_k, max_k } => {
@@ -315,6 +341,38 @@ fn main() -> Result<()> {
                 let s: Vec<String> = row.iter().map(|v| format!("{:.2}", v)).collect();
                 println!("    {}", s.join("  "));
             }
+            Ok(())
+        }
+        Cmd::Crosscheck { strategy, data_dir, min_trades } => {
+            let s: Strategy = load_strategy(&strategy)?;
+            let mut store = DataStore::new();
+            store.import_dir(data_dir.to_str().unwrap(), Timeframe::M1).map_err(|e| anyhow!(e))?;
+            if store.is_empty() {
+                return Err(anyhow!("no data in {}", data_dir.display()));
+            }
+            let cfg = BacktestConfig::default();
+            println!("Multi-market cross-check for {}", s.name);
+            let mut profitable = 0;
+            let mut total = 0;
+            for series in &store.series {
+                let inst = instrument(&series.symbol);
+                let pyp = resolve_periods_per_year(series.bars.len(), 0.0, &series.bars);
+                let r = backtest(&s, &series.bars, &inst, &cfg);
+                let m = compute_metrics(&r, series.bars.len(), pyp);
+                let enough = m.number_of_trades >= min_trades as f64;
+                if enough {
+                    total += 1;
+                    if m.net_profit > 0.0 {
+                        profitable += 1;
+                    }
+                }
+                println!(
+                    "  {:<16} net={:>10.2} PF={:>7.2} DD%={:>6.2} trades={:>4}{}",
+                    series.symbol, m.net_profit, m.profit_factor, m.max_drawdown_pct, m.number_of_trades,
+                    if enough { "" } else { "  (too few trades)" }
+                );
+            }
+            println!("  Profitable on {}/{} markets (>= {} trades)", profitable, total, min_trades);
             Ok(())
         }
     }

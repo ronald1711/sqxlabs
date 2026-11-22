@@ -1,0 +1,9 @@
+[package]
+name = "sqx-data"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Data Manager: multi-symbol/timeframe bar store and CSV import."
+
+[dependencies]
+sqx-core = { path = "../sqx-core" }
