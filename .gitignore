@@ -7,5 +7,6 @@ scripts/*
 !scripts/mt5_export.py
 data/slice.db
 data/mt5/
+data/*.csv
 data/assistant.json
 *.rs.bk
