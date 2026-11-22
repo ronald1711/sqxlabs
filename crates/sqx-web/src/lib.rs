@@ -105,6 +105,7 @@ fn route(method: &str, path: &str, body: &str, state: &State) -> (&'static str, 
     match (method, path) {
         ("GET", "/") | ("GET", "/index.html") => ("200 OK", "text/html; charset=utf-8", INDEX.to_string()),
         ("GET", "/api/indicators") => ("200 OK", "application/json", indicators_json()),
+        ("GET", "/api/catalog") => ("200 OK", "application/json", catalog_json()),
         ("GET", "/api/data") => ("200 OK", "application/json", data_json(state)),
         ("POST", "/api/backtest") => ("200 OK", "application/json", backtest_json(body, state)),
         ("POST", "/api/generate") => ("200 OK", "application/json", generate_json(body, state)),
@@ -119,6 +120,27 @@ fn indicators_json() -> String {
         .map(|s| json!({ "name": s.name, "label": s.label, "oscillator": s.is_oscillator }))
         .collect();
     json!({ "indicators": list }).to_string()
+}
+
+fn catalog_json() -> String {
+    let indicators: Vec<_> = sqx_strategy::indicator_catalog()
+        .iter()
+        .map(|s| {
+            let params: Vec<_> = s
+                .params
+                .iter()
+                .map(|(n, v)| json!({ "name": n, "value": v }))
+                .collect();
+            json!({ "name": s.name, "label": s.label, "oscillator": s.is_oscillator, "params": params })
+        })
+        .collect();
+    json!({
+        "indicators": indicators,
+        "comparators": ["Gt", "Gte", "Lt", "Lte", "Eq", "Neq", "CrossAbove", "CrossBelow", "Rising", "Falling"],
+        "price_fields": ["Open", "High", "Low", "Close", "Typical", "Volume"],
+        "signal_kinds": ["LongEntry", "ShortEntry", "LongExit", "ShortExit"]
+    })
+    .to_string()
 }
 
 fn data_json(state: &State) -> String {

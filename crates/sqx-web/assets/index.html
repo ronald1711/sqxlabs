@@ -19,7 +19,9 @@
   #data-info b { color:var(--fg); font-weight:600; }
   button { background:var(--acc); color:#fff; border:0; border-radius:6px; padding:9px 16px; font-size:14px; cursor:pointer; }
   button:hover { filter:brightness(1.1); }
-  input[type=number] { background:#0b0f1a; border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:8px; width:90px; }
+  input[type=number], input[type=text], select { background:#0b0f1a; border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:8px; }
+  input[type=number] { width:80px; }
+  input[type=text] { width:160px; }
   textarea { width:100%; height:180px; background:#0b0f1a; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:12px; font-family:ui-monospace,Menlo,monospace; font-size:12px; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
   th, td { text-align:right; padding:6px 8px; border-bottom:1px solid var(--line); }
@@ -33,6 +35,14 @@
   #chart { width:100%; height:220px; }
   .row { display:flex; gap:10px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
   .muted { color:var(--dim); font-size:12px; }
+  .sig-editor { border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
+  .sig-editor h3 { margin:0 0 10px; font-size:14px; font-weight:600; color:var(--fg); }
+  .cond-row { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+  .cond-row select, .cond-row input { font-size:12px; padding:6px; }
+  .cond-row .remove { background:#3a2430; padding:4px 9px; font-size:12px; }
+  .cond-row label { color:var(--dim); font-size:11px; }
+  .sig-head { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  .add-cond { background:#22314f; padding:6px 12px; font-size:12px; }
 </style>
 </head>
 <body>
@@ -61,6 +71,23 @@
   </div>
   <div>
     <div class="card">
+      <h2>AlgoWizard — visual strategy editor</h2>
+      <div class="row">
+        <label><input type="checkbox" id="aw-long" checked> Long</label>
+        <label><input type="checkbox" id="aw-short"> Short</label>
+        <label class="muted">Name</label>
+        <input type="text" id="aw-name" value="My strategy">
+        <label class="muted">SL pts</label>
+        <input type="number" id="aw-sl" value="100" min="0">
+        <label class="muted">TP pts</label>
+        <input type="number" id="aw-pt" value="200" min="0">
+        <label class="muted">Lots</label>
+        <input type="number" id="aw-lots" value="0.1" step="0.01" min="0.01">
+        <button id="aw-backtest">Build &amp; Backtest</button>
+      </div>
+      <div id="aw-signals"></div>
+    </div>
+    <div class="card" style="margin-top:18px">
       <h2>Backtest a strategy</h2>
       <textarea id="strategy"></textarea>
       <div class="row" style="margin-top:12px">
@@ -87,6 +114,8 @@
 }
 </script>
 <script>
+var CATALOG = null;
+
 async function getJSON(url) { const r = await fetch(url); return r.json(); }
 async function postJSON(url, body) { const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: body }); return r.json(); }
 function fmt(v, d) { if (v == null || Number.isNaN(v)) return "-"; if (v === Infinity) return "inf"; return v.toFixed(d); }
@@ -97,28 +126,158 @@ async function loadInfo() {
   document.getElementById("data-info").innerHTML = "<b>" + d.symbol + "</b> <span>" + d.bars + " bars</span>";
 }
 
-async function loadCatalog() {
-  const d = await getJSON("/api/indicators");
+function renderChips() {
   const box = document.getElementById("catalog");
-  box.innerHTML = d.indicators.map(function(i) { return "<span class=\"chip" + (i.oscillator ? " osc" : "") + "\">" + i.name + "</span>"; }).join("");
+  box.innerHTML = CATALOG.indicators.map(function(i) { return "<span class=\"chip" + (i.oscillator ? " osc" : "") + "\">" + i.name + "</span>"; }).join("");
 }
 
-document.getElementById("strategy").value = document.getElementById("default-strategy").textContent.trim();
+function leftOptions() {
+  let html = "";
+  CATALOG.price_fields.forEach(function(f) { html += "<option value=\"price:" + f + "\">Price: " + f + "</option>"; });
+  CATALOG.indicators.forEach(function(i) { html += "<option value=\"ind:" + i.name + "\">" + i.name + "</option>"; });
+  return html;
+}
+function rightOptions() {
+  let html = "<option value=\"const\">Constant</option>";
+  CATALOG.price_fields.forEach(function(f) { html += "<option value=\"price:" + f + "\">Price: " + f + "</option>"; });
+  return html;
+}
+function cmpOptions() {
+  return CATALOG.comparators.map(function(c) { return "<option value=\"" + c + "\">" + c + "</option>"; }).join("");
+}
 
-document.getElementById("btn-generate").onclick = async function() {
-  const count = Number(document.getElementById("count").value);
-  const seed = Number(document.getElementById("seed").value);
-  const box = document.getElementById("gen-results");
-  box.textContent = "Generating...";
-  const d = await postJSON("/api/generate", JSON.stringify({ count: count, seed: seed }));
-  if (d.error) { box.innerHTML = "<span class=\"neg\">" + d.error + "</span>"; return; }
-  let rows = "<table><tr><th>Name</th><th>Profit factor</th><th>Net profit</th><th>Trades</th><th>DD %</th></tr>";
-  d.results.forEach(function(r) {
-    rows += "<tr><td>" + r.name + "</td><td class=\"" + cls(r.profit_factor - 1) + "\">" + fmt(r.profit_factor, 2) + "</td><td class=\"" + cls(r.net_profit) + "\">" + fmt(r.net_profit, 2) + "</td><td>" + fmt(r.trades, 0) + "</td><td>" + fmt(r.dd_pct, 2) + "</td></tr>";
+function buildConditionRow() {
+  const row = document.createElement("div");
+  row.className = "cond-row";
+  row.innerHTML = "<select class=\"left-type\">" + leftOptions() + "</select>" +
+    "<span class=\"left-params\"></span>" +
+    "<select class=\"cmp\">" + cmpOptions() + "</select>" +
+    "<select class=\"right-type\">" + rightOptions() + "</select>" +
+    "<span class=\"right-value\"></span>" +
+    "<button class=\"remove\" title=\"Remove\">x</button>";
+  row.querySelector(".left-type").onchange = function() { updateLeftParams(row); };
+  row.querySelector(".cmp").onchange = function() { updateCmp(row); };
+  row.querySelector(".right-type").onchange = function() { updateRightValue(row); };
+  row.querySelector(".remove").onclick = function() { row.remove(); };
+  updateLeftParams(row);
+  updateRightValue(row);
+  updateCmp(row);
+  return row;
+}
+
+function updateLeftParams(row) {
+  const sel = row.querySelector(".left-type").value;
+  const span = row.querySelector(".left-params");
+  if (sel.indexOf("ind:") === 0) {
+    const name = sel.slice(4);
+    const spec = CATALOG.indicators.find(function(i) { return i.name === name; });
+    span.innerHTML = spec.params.map(function(p) {
+      return "<label>" + p.name + "</label><input type=\"number\" class=\"param\" data-name=\"" + p.name + "\" value=\"" + p.value + "\">";
+    }).join("");
+  } else {
+    span.innerHTML = "";
+  }
+}
+
+function updateRightValue(row) {
+  const sel = row.querySelector(".right-type").value;
+  const span = row.querySelector(".right-value");
+  if (sel === "const") {
+    span.innerHTML = "<input type=\"number\" class=\"const\" value=\"50\">";
+  } else {
+    span.innerHTML = "";
+  }
+}
+
+function updateCmp(row) {
+  const cmp = row.querySelector(".cmp").value;
+  const unary = cmp === "Rising" || cmp === "Falling";
+  row.querySelector(".right-type").style.display = unary ? "none" : "";
+  row.querySelector(".right-value").style.display = unary ? "none" : "";
+}
+
+function buildSignalEditor(kind) {
+  const sec = document.createElement("div");
+  sec.className = "sig-editor";
+  sec.id = "sig-" + kind;
+  sec.innerHTML = "<div class=\"sig-head\"><h3>" + kind + "</h3>" +
+    "<select class=\"join\"><option value=\"And\">AND</option><option value=\"Or\">OR</option></select>" +
+    "<button class=\"add-cond\">+ Add condition</button></div>" +
+    "<div class=\"conds\"></div>";
+  sec.querySelector(".add-cond").onclick = function() {
+    sec.querySelector(".conds").appendChild(buildConditionRow());
+  };
+  // start with one condition for entry signals
+  if (kind === "LongEntry" || kind === "ShortEntry") {
+    const row = buildConditionRow();
+    sec.querySelector(".conds").appendChild(row);
+    if (kind === "LongEntry") {
+      row.querySelector(".left-type").value = "ind:RSI";
+      row.querySelector(".cmp").value = "CrossBelow";
+      row.querySelector(".right-type").value = "const";
+      updateLeftParams(row);
+      updateRightValue(row);
+      row.querySelector(".right-value .const").value = "30";
+    }
+  }
+  return sec;
+}
+
+function renderEditor() {
+  const box = document.getElementById("aw-signals");
+  box.innerHTML = "";
+  CATALOG.signal_kinds.forEach(function(kind) { box.appendChild(buildSignalEditor(kind)); });
+}
+
+function operandLeft(row) {
+  const type = row.querySelector(".left-type").value;
+  if (type.indexOf("price:") === 0) { return { "Price": [type.slice(6), 0] }; }
+  if (type.indexOf("ind:") === 0) {
+    const name = type.slice(4);
+    const params = [];
+    row.querySelectorAll(".left-params .param").forEach(function(inp) { params.push({ "name": inp.dataset.name, "value": parseFloat(inp.value) }); });
+    return { "Indicator": [name, params] };
+  }
+  return { "Const": 0 };
+}
+
+function operandRight(row) {
+  const type = row.querySelector(".right-type").value;
+  if (type === "const") {
+    const v = parseFloat(row.querySelector(".right-value .const").value);
+    return { "Const": isNaN(v) ? 0 : v };
+  }
+  if (type.indexOf("price:") === 0) { return { "Price": [type.slice(6), 0] }; }
+  return { "Const": 0 };
+}
+
+function buildStrategyJSON() {
+  const sl = parseFloat(document.getElementById("aw-sl").value);
+  const pt = parseFloat(document.getElementById("aw-pt").value);
+  const strategy = {
+    name: document.getElementById("aw-name").value || "My strategy",
+    long: document.getElementById("aw-long").checked,
+    short: document.getElementById("aw-short").checked,
+    signals: [],
+    exits: [],
+    stop_loss: (sl > 0) ? { "Points": sl } : null,
+    profit_target: (pt > 0) ? { "Points": pt } : null,
+    money_management: { "FixedSize": { "size": parseFloat(document.getElementById("aw-lots").value) || 0.1 } }
+  };
+  CATALOG.signal_kinds.forEach(function(kind) {
+    const sec = document.getElementById("sig-" + kind);
+    const join = sec.querySelector(".join").value;
+    const conditions = [];
+    sec.querySelectorAll(".cond-row").forEach(function(row) {
+      const cmp = row.querySelector(".cmp").value;
+      const c = { "left": operandLeft(row), "cmp": cmp };
+      if (cmp === "Rising" || cmp === "Falling") { c.right = { "Const": 0 }; } else { c.right = operandRight(row); }
+      conditions.push(c);
+    });
+    strategy.signals.push({ "kind": kind, "conditions": conditions, "join": join, "fuzzy": null });
   });
-  rows += "</table>";
-  box.innerHTML = rows;
-};
+  return JSON.stringify(strategy, null, 2);
+}
 
 function drawChart(equity) {
   const svg = document.getElementById("chart");
@@ -135,7 +294,7 @@ function drawChart(equity) {
   svg.innerHTML = "<svg width=\"100%\" height=\"220\" viewBox=\"0 0 " + w + " " + h + "\"><polyline fill=\"none\" stroke=\"#4f8cff\" stroke-width=\"1.5\" points=\"" + pts + "\"/></svg>";
 }
 
-document.getElementById("btn-backtest").onclick = async function() {
+async function runBacktest() {
   const status = document.getElementById("bt-status");
   const out = document.getElementById("bt-results");
   status.textContent = "Running...";
@@ -164,7 +323,36 @@ document.getElementById("btn-backtest").onclick = async function() {
   tbl += "</table>";
   out.innerHTML = "<p class=\"muted\">" + d.trades + " trades · final equity " + fmt(d.final_equity, 2) + "</p>" + tbl + "<h2 style=\"margin-top:16px\">Equity curve</h2><div id=\"chart\"></div><h2 style=\"margin-top:16px\">Pseudo-code</h2><pre>" + d.pseudocode + "</pre>";
   drawChart(d.equity);
+}
+
+document.getElementById("strategy").value = document.getElementById("default-strategy").textContent.trim();
+
+document.getElementById("btn-generate").onclick = async function() {
+  const count = Number(document.getElementById("count").value);
+  const seed = Number(document.getElementById("seed").value);
+  const box = document.getElementById("gen-results");
+  box.textContent = "Generating...";
+  const d = await postJSON("/api/generate", JSON.stringify({ count: count, seed: seed }));
+  if (d.error) { box.innerHTML = "<span class=\"neg\">" + d.error + "</span>"; return; }
+  let rows = "<table><tr><th>Name</th><th>Profit factor</th><th>Net profit</th><th>Trades</th><th>DD %</th></tr>";
+  d.results.forEach(function(r) {
+    rows += "<tr><td>" + r.name + "</td><td class=\"" + cls(r.profit_factor - 1) + "\">" + fmt(r.profit_factor, 2) + "</td><td class=\"" + cls(r.net_profit) + "\">" + fmt(r.net_profit, 2) + "</td><td>" + fmt(r.trades, 0) + "</td><td>" + fmt(r.dd_pct, 2) + "</td></tr>";
+  });
+  rows += "</table>";
+  box.innerHTML = rows;
 };
+
+document.getElementById("btn-backtest").onclick = runBacktest;
+document.getElementById("aw-backtest").onclick = function() {
+  document.getElementById("strategy").value = buildStrategyJSON();
+  runBacktest();
+};
+
+async function loadCatalog() {
+  CATALOG = await getJSON("/api/catalog");
+  renderChips();
+  renderEditor();
+}
 
 loadInfo();
 loadCatalog();
