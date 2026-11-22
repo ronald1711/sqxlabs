@@ -226,6 +226,10 @@
           <button id="res-portfolio">Combine top 5 → portfolio</button>
           <button id="res-clear" style="background:#3a2430">Clear</button>
         </div>
+        <div class="row">
+          <input type="text" id="res-filter" placeholder="filter name" style="width:140px">
+          <input type="number" id="res-minpf" placeholder="min PF" step="0.1" style="width:90px">
+        </div>
         <div id="res-grid" class="muted">Run the Optimizer or Generate to fill the databank.</div>
         <div id="res-portfolio-out" class="muted" style="margin-top:12px"></div>
       </div>
@@ -860,7 +864,13 @@ function renderResults() {
   if (!box) return;
   if (!RESULTS.length) { box.innerHTML = "<p class=\"muted\">Run the Optimizer or Generate to fill the databank.</p>"; return; }
   var cols = [["name","Name"],["profit_factor","PF"],["net_profit","Net"],["trades","Trades"],["dd_pct","DD %"]];
-  var order = RESULTS.map(function(r, i) { return i; });
+  var fname = (document.getElementById("res-filter") ? document.getElementById("res-filter").value : "").toLowerCase();
+  var minpfEl = document.getElementById("res-minpf");
+  var minpf = minpfEl ? (parseFloat(minpfEl.value) || 0) : 0;
+  var order = RESULTS.map(function(r, i) { return i; }).filter(function(i) {
+    var r = RESULTS[i];
+    return (!fname || (r.name || "").toLowerCase().indexOf(fname) >= 0) && ((r.profit_factor || 0) >= minpf);
+  });
   order.sort(function(a, b) {
     var av = RESULTS[a][RES_SORT], bv = RESULTS[b][RES_SORT];
     if (typeof av === "string") return av < bv ? 1 : -1;
@@ -889,6 +899,10 @@ function renderResults() {
 }
 var resClear = document.getElementById("res-clear");
 if (resClear) resClear.onclick = async function() { await postJSON("/api/databank/clear", "{}"); await refreshDatabank(); };
+["res-filter", "res-minpf"].forEach(function(id) {
+  var el = document.getElementById(id);
+  if (el) el.oninput = function() { renderResults(); };
+});
 var resPortfolio = document.getElementById("res-portfolio");
 if (resPortfolio) resPortfolio.onclick = async function() {
   var out = document.getElementById("res-portfolio-out");
