@@ -40,6 +40,9 @@ cargo test
 # List the indicator catalog
 cargo run -q -p sqx-cli -- indicators
 
+# environment check (toolchain, data files, port, MT5 runtime)
+cargo run -q -p sqx-cli -- doctor
+
 # QuantAnalyzer-style analysis report (monthly returns, drawdown periods,
 # trade statistics, rolling Sharpe)
 cargo run -q -p sqx-cli -- analyze --strategy examples/rsi-mean-reversion.json --data data/mt5/EURUSD_M5.csv

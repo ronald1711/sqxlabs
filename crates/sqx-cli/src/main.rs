@@ -196,7 +196,12 @@ enum Cmd {
         data_dir: Option<PathBuf>,
         #[arg(long, default_value = "EURUSD")]
         symbol: String,
+        /// Open the dashboard in the default browser.
+        #[arg(long)]
+        open: bool,
     },
+    /// Check the environment: toolchain, data files, port, MT5 runtime.
+    Doctor,
     /// Build a portfolio from generated strategies (equal weights, best subset).
     Portfolio {
         #[arg(long)]
@@ -426,7 +431,7 @@ fn main() -> Result<()> {
             println!("  OOS max DD %      : {:.2}", report.oos_max_dd_pct);
             Ok(())
         }
-        Cmd::Serve { addr, data, data_dir, symbol } => {
+        Cmd::Serve { addr, data, data_dir, symbol, open } => {
             let mut store = DataStore::new();
             if let Some(dir) = data_dir {
                 let loaded = store.import_dir(dir.to_str().unwrap(), Timeframe::M1).map_err(|e| anyhow!(e))?;
@@ -445,7 +450,55 @@ fn main() -> Result<()> {
             if store.is_empty() {
                 return Err(anyhow!("no data loaded"));
             }
+            if open {
+                let url = format!("http://{addr}");
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(600));
+                    #[cfg(target_os = "macos")]
+                    let _ = std::process::Command::new("open").arg(&url).status();
+                    #[cfg(target_os = "linux")]
+                    let _ = std::process::Command::new("xdg-open").arg(&url).status();
+                    #[cfg(target_os = "windows")]
+                    let _ = std::process::Command::new("cmd").args(["/C", "start", &url]).status();
+                });
+            }
             sqx_web::serve(&addr, store).map_err(|e| anyhow!(e))?;
+            Ok(())
+        }
+        Cmd::Doctor => {
+            println!("SqxLabs doctor");
+            let rustc = std::process::Command::new("rustc")
+                .arg("--version")
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "rustc not found".to_string());
+            println!("  rustc: {rustc}");
+            for p in [
+                "data",
+                "data/mt5",
+                "data/projects",
+                "data/databank.json",
+                "data/profiles.json",
+                "examples/rsi-mean-reversion.json",
+            ] {
+                let s = if std::path::Path::new(p).exists() { "ok" } else { "missing" };
+                println!("  {p}: {s}");
+            }
+            match std::net::TcpListener::bind("127.0.0.1:8080") {
+                Ok(_) => println!("  port 8080: free"),
+                Err(e) => println!("  port 8080: {e}"),
+            }
+            let mt5 = std::net::TcpStream::connect_timeout(
+                &"127.0.0.1:8002".parse().unwrap(),
+                std::time::Duration::from_millis(250),
+            )
+            .is_ok();
+            println!(
+                "  MT5 runtime (127.0.0.1:8002): {}",
+                if mt5 { "running" } else { "not running (optional)" }
+            );
             Ok(())
         }
         Cmd::Portfolio { data, count, seed, top, min_k, max_k } => {
