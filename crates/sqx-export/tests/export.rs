@@ -43,3 +43,18 @@ fn pseudocode_roundtrips() {
     let code = export(&rsi_strategy(), Engine::PseudoCode);
     assert!(code.contains("RSI(period=14)"), "pseudo-code should render the RSI condition");
 }
+
+#[test]
+fn ninjascript_exports_csharp() {
+    let code = export(&rsi_strategy(), Engine::NinjaTrader);
+    assert!(code.contains("public class SqxLabsStrategy"));
+    assert!(code.contains("RSI(14)"));
+    assert!(code.contains("OnBarUpdate"));
+}
+
+#[test]
+fn easylanguage_exports_cross() {
+    let code = export(&rsi_strategy(), Engine::EasyLanguage);
+    assert!(code.contains("RSI(Close, 14)"));
+    assert!(code.contains("crosses under"));
+}
