@@ -131,6 +131,24 @@ mod tests {
         assert_eq!(query_param("/x", "name"), "");
         assert_eq!(query_param("/x?name=", "name"), "");
     }
+
+    #[test]
+    fn dedupe_push_keeps_unique_strategies() {
+        let mut db = Vec::new();
+        let row = json!({ "name": "a", "strategy": { "name": "a" } });
+        let row2 = json!({ "name": "b", "strategy": { "name": "b" } });
+        dedupe_push(&mut db, &[row.clone(), row.clone(), row2.clone()]);
+        assert_eq!(db.len(), 2);
+        dedupe_push(&mut db, &[row]);
+        assert_eq!(db.len(), 2);
+    }
+
+    #[test]
+    fn export_json_produces_code() {
+        let body = r#"{"engine":"mql5","strategy":{"name":"t","long":true,"short":false,"signals":[],"exits":[],"stop_loss":null,"profit_target":null,"money_management":{"FixedSize":{"size":0.1}}}}"#;
+        let out = export_json(body);
+        assert!(out.contains("code"), "export should return code: {out}");
+    }
 }
 
 fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static str, &'static str, String) {
@@ -243,21 +261,24 @@ fn datasources_json(state: &State) -> String {
     json!({ "symbols": list, "default": default }).to_string()
 }
 
-fn databank_push(state: &State, rows: &[serde_json::Value]) {
-    let mut db = state.databank.write().unwrap();
-    let mut seen: std::collections::HashSet<String> = db
-        .iter()
-        .filter_map(|r| r.get("strategy").and_then(|s| serde_json::to_string(s).ok()))
-        .collect();
+fn strategy_key(r: &serde_json::Value) -> Option<String> {
+    r.get("strategy").and_then(|s| serde_json::to_string(s).ok())
+}
+
+fn dedupe_push(db: &mut Vec<serde_json::Value>, rows: &[serde_json::Value]) {
+    let mut seen: std::collections::HashSet<String> = db.iter().filter_map(strategy_key).collect();
     for r in rows {
-        let key = r
-            .get("strategy")
-            .and_then(|s| serde_json::to_string(s).ok())
-            .unwrap_or_default();
-        if !key.is_empty() && seen.insert(key) {
-            db.push(r.clone());
+        if let Some(key) = strategy_key(r) {
+            if seen.insert(key) {
+                db.push(r.clone());
+            }
         }
     }
+}
+
+fn databank_push(state: &State, rows: &[serde_json::Value]) {
+    let mut db = state.databank.write().unwrap();
+    dedupe_push(&mut db, rows);
     drop(db);
     persist_databank(state);
 }
@@ -489,7 +510,24 @@ fn pipeline_json(body: &str, state: &State) -> String {
         &GeneratorConfig::default(),
         42,
     );
-    json!({ "log": report.log, "databank": report.databank.len() }).to_string()
+    let rows: Vec<serde_json::Value> = report
+        .databank
+        .iter()
+        .map(|s| {
+            let r = backtest(s, &series.bars, &inst, &cfg);
+            let m = compute_metrics(&r, series.bars.len(), pyp);
+            json!({
+                "name": s.name,
+                "profit_factor": m.profit_factor,
+                "net_profit": m.net_profit,
+                "trades": r.trades.len(),
+                "dd_pct": m.max_drawdown_pct,
+                "strategy": s
+            })
+        })
+        .collect();
+    databank_push(state, &rows);
+    json!({ "log": report.log, "databank": rows.len() }).to_string()
 }
 
 fn optimize_json(body: &str, state: &State) -> String {
