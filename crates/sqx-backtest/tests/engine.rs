@@ -30,7 +30,7 @@ fn always_long_strategy() -> Strategy {
 fn always_long_holds_one_trade() {
     let bars = rising_bars();
     let inst = Instrument::fx("EURUSD");
-    let cfg = BacktestConfig { initial_deposit: 10_000.0, spread_points: 0.0, slippage_points: 0.0, commission_per_lot: 0.0 };
+    let cfg = BacktestConfig { initial_deposit: 10_000.0, spread_points: 0.0, slippage_points: 0.0, commission_per_lot: 0.0, intrabar_up_first: false };
     let result = backtest(&always_long_strategy(), &bars, &inst, &cfg);
     assert_eq!(result.trades.len(), 1, "expected exactly one trade");
     let t = &result.trades[0];

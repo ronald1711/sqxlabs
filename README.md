@@ -113,6 +113,12 @@ pseudo-code of the tested strategy. All endpoints are plain JSON
   RiskFixedPctOfAccount, ATRRiskBased.
 - **Exit blocks**: StopLoss (points/ATR), ProfitTarget (points/ATR),
   TrailingStop, MoveToBreakEven, ExitAfterBars, opposite-signal exit.
+- **Multi-timeframe**: a strategy can carry a `confirmation` signal evaluated on a
+  higher timeframe; entry requires both the base-TF signal and the confirmation
+  (the last completed higher-TF bar is used, so there is no look-ahead).
+- **Intrabar path**: `BacktestConfig.intrabar_up_first` selects which extreme is
+  assumed hit first when both SL and TP fall inside one bar (higher-precision
+  modelling; true tick replay needs tick data).
 
 ## License
 

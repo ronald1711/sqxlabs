@@ -17,6 +17,9 @@ pub struct BacktestConfig {
     pub slippage_points: f64,
     /// Round-trip commission per lot, in account currency.
     pub commission_per_lot: f64,
+    /// Intrabar path assumption: true = high reached before low (more optimistic
+    /// for longs), false = low before high (conservative).
+    pub intrabar_up_first: bool,
 }
 
 impl Default for BacktestConfig {
@@ -26,6 +29,7 @@ impl Default for BacktestConfig {
             spread_points: 0.0,
             slippage_points: 0.0,
             commission_per_lot: 0.0,
+            intrabar_up_first: false,
         }
     }
 }
@@ -73,6 +77,29 @@ pub fn backtest(
         None
     };
 
+    let conf_ok: Option<Vec<bool>> = strategy.confirmation.as_ref().map(|c| {
+        let tf = c.timeframe;
+        let bucket_ms = tf.minutes().unwrap_or(0) * 60_000;
+        if bucket_ms <= 0 {
+            vec![true; bars.len()]
+        } else {
+            let rb = sqx_core::resample(bars, tf);
+            let sigs = crate::evaluate::compile_signal(&c.signal, &rb);
+            let mut active = vec![false; bars.len()];
+            let mut j = 0usize;
+            for i in 0..bars.len() {
+                let t = bars[i].time;
+                while j < rb.len() && rb[j].time + bucket_ms <= t {
+                    j += 1;
+                }
+                if j > 0 {
+                    active[i] = sigs[j - 1];
+                }
+            }
+            active
+        }
+    });
+
     let mut cash = config.initial_deposit;
     let mut position: Option<Position> = None;
     let mut pending: Option<Direction> = None;
@@ -105,7 +132,7 @@ pub fn backtest(
                 Some(m) => trades_today < m,
                 None => true,
             };
-            if within_hours && under_cap {
+            if within_hours && under_cap && conf_ok.as_ref().map_or(true, |c| c.get(i).copied().unwrap_or(true)) {
                 let fill = bar.open + dir.sign() * config.slippage_points * point;
                 let (sl, pt) = stop_profit_levels(strategy, &atr_series, i, fill, dir, point);
                 let sl_points = sl_distance_points(sl, fill, point);
@@ -167,22 +194,28 @@ pub fn backtest(
 
             let mut closed: Option<(f64, ExitReason)> = None;
             if pos.direction == Direction::Long {
+                let pt_hit = pos.profit_target.is_finite() && bar.high >= pos.profit_target;
                 if pos.trailing && bar.low <= pos.trailing_stop {
                     closed = Some((pos.trailing_stop.min(bar.open), ExitReason::TrailingStop));
+                } else if bar.low <= pos.stop_loss && pt_hit && config.intrabar_up_first {
+                    closed = Some((pos.profit_target, ExitReason::ProfitTarget));
                 } else if bar.low <= pos.stop_loss {
                     let px = if bar.open < pos.stop_loss { bar.open } else { pos.stop_loss };
                     closed = Some((px, ExitReason::StopLoss));
-                } else if bar.high >= pos.profit_target && pos.profit_target.is_finite() {
+                } else if pt_hit {
                     let px = if bar.open > pos.profit_target { bar.open } else { pos.profit_target };
                     closed = Some((px, ExitReason::ProfitTarget));
                 }
             } else {
+                let pt_hit = pos.profit_target.is_finite() && bar.low <= pos.profit_target;
                 if pos.trailing && bar.high >= pos.trailing_stop {
                     closed = Some((pos.trailing_stop.max(bar.open), ExitReason::TrailingStop));
+                } else if bar.high >= pos.stop_loss && pt_hit && !config.intrabar_up_first {
+                    closed = Some((pos.profit_target, ExitReason::ProfitTarget));
                 } else if bar.high >= pos.stop_loss {
                     let px = if bar.open > pos.stop_loss { bar.open } else { pos.stop_loss };
                     closed = Some((px, ExitReason::StopLoss));
-                } else if bar.low <= pos.profit_target && pos.profit_target.is_finite() {
+                } else if pt_hit {
                     let px = if bar.open < pos.profit_target { bar.open } else { pos.profit_target };
                     closed = Some((px, ExitReason::ProfitTarget));
                 }

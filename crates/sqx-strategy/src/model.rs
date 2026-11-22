@@ -210,6 +210,13 @@ impl MoneyManagement {
     }
 }
 
+/// A higher-timeframe confirmation signal (multi-timeframe strategy).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Confirmation {
+    pub timeframe: sqx_core::Timeframe,
+    pub signal: Signal,
+}
+
 /// Trade-management options applied during the backtest.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TradingOptions {
@@ -255,6 +262,9 @@ pub struct Strategy {
     /// Trade-management options.
     #[serde(default)]
     pub trading_options: TradingOptions,
+    /// Optional higher-timeframe confirmation gate.
+    #[serde(default)]
+    pub confirmation: Option<Confirmation>,
 }
 
 /// Stop-loss specification.
@@ -285,6 +295,7 @@ impl Strategy {
             profit_target: None,
             money_management: MoneyManagement::default(),
             trading_options: TradingOptions::default(),
+            confirmation: None,
         }
     }
 }

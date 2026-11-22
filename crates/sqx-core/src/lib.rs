@@ -16,3 +16,41 @@ pub use timeframe::Timeframe;
 
 /// A unix timestamp in milliseconds (UTC).
 pub type Timestamp = i64;
+
+/// Resample bars to a coarser timeframe by aggregating OHLCV per period.
+pub fn resample(bars: &[Bar], to: Timeframe) -> Vec<Bar> {
+    let to_min = match to.minutes() {
+        Some(m) => m,
+        None => return bars.to_vec(),
+    };
+    let bucket_ms = to_min * 60_000;
+    let mut out = Vec::new();
+    let mut cur: Option<Bar> = None;
+    let mut cur_bucket = i64::MIN;
+    for b in bars {
+        let bucket = b.time.div_euclid(bucket_ms);
+        match cur {
+            None => {
+                cur = Some(*b);
+                cur_bucket = bucket;
+            }
+            Some(mut c) => {
+                if bucket == cur_bucket {
+                    c.high = c.high.max(b.high);
+                    c.low = c.low.min(b.low);
+                    c.close = b.close;
+                    c.volume += b.volume;
+                    cur = Some(c);
+                } else {
+                    out.push(c);
+                    cur = Some(*b);
+                    cur_bucket = bucket;
+                }
+            }
+        }
+    }
+    if let Some(c) = cur {
+        out.push(c);
+    }
+    out
+}

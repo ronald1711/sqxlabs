@@ -6,4 +6,5 @@ license.workspace = true
 description = "Strategy AST: building blocks, conditions, signals, rules, money management, pseudo-code."
 
 [dependencies]
+sqx-core = { path = "../sqx-core" }
 serde.workspace = true

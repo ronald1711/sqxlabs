@@ -104,6 +104,12 @@ pub struct CompiledSignals {
     pub short_exit: Vec<bool>,
 }
 
+/// Compile a single signal into per-bar booleans (used for confirmation signals).
+pub fn compile_signal(sig: &Signal, bars: &[Bar]) -> Vec<bool> {
+    let mut cache = SeriesCache::new(bars);
+    eval_signal(&mut cache, sig)
+}
+
 /// Compile a strategy into per-bar boolean signals.
 pub fn compile(strategy: &Strategy, bars: &[Bar]) -> CompiledSignals {
     let mut cache = SeriesCache::new(bars);

@@ -207,6 +207,7 @@ fn main() -> Result<()> {
                 spread_points: spread,
                 slippage_points: slippage,
                 commission_per_lot: commission,
+                intrabar_up_first: false,
             };
             let result = backtest(&s, &bars, &instrument, &config);
             let m = compute_metrics(&result, bars.len(), pyp);
