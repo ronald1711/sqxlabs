@@ -149,6 +149,15 @@ pub fn read_ticks_csv(path: &str) -> Result<Vec<Tick>, String> {
 /// Parse a CSV with header timestamp,open,high,low,close,volume (time in unix seconds).
 pub fn read_csv_bars(path: &str) -> Result<Vec<Bar>, String> {
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let bars = read_csv_bars_str(&text)?;
+    if bars.is_empty() {
+        return Err(format!("no bars in {path}"));
+    }
+    Ok(bars)
+}
+
+/// Parse bar CSV text (header timestamp,open,high,low,close,volume; time in seconds).
+pub fn read_csv_bars_str(text: &str) -> Result<Vec<Bar>, String> {
     let mut bars = Vec::new();
     for (idx, line) in text.lines().enumerate() {
         if idx == 0 && line.starts_with("timestamp") {
@@ -168,9 +177,6 @@ pub fn read_csv_bars(path: &str) -> Result<Vec<Bar>, String> {
         let close: f64 = cols[4].trim().parse().map_err(|e| format!("bad close line {}: {e}", idx + 1))?;
         let volume: f64 = cols[5].trim().parse().unwrap_or(0.0);
         bars.push(Bar::new(time * 1000, open, high, low, close, volume));
-    }
-    if bars.is_empty() {
-        return Err(format!("no bars in {path}"));
     }
     Ok(bars)
 }

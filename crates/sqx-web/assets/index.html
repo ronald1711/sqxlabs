@@ -66,6 +66,7 @@
     <button class="nav-btn active" data-tab="builder">Builder</button>
     <button class="nav-btn" data-tab="optimizer">Optimizer</button>
     <button class="nav-btn" data-tab="retester">Retester</button>
+    <button class="nav-btn" data-tab="data">Data Manager</button>
     <button class="nav-btn" data-tab="settings">Settings</button>
     <button class="nav-btn" data-tab="assistant">AI assistant</button>
   </aside>
@@ -114,6 +115,25 @@
     </section>
     <section id="tab-optimizer" class="tab">
       <div class="card">
+        <h2>Optimizer</h2>
+        <div class="row">
+          <label class="muted">Type</label>
+          <select id="opt-kind">
+            <option value="simple">Simple (generate + rank)</option>
+            <option value="walk-forward">Walk-forward</option>
+            <option value="wf-matrix">Walk-forward matrix</option>
+          </select>
+          <label class="muted">Candidates</label>
+          <input type="number" id="opt-count" value="200" min="10" max="2000">
+          <label class="muted">Windows</label>
+          <input type="number" id="opt-windows" value="5" min="2" max="12">
+          <label class="muted">OOS</label>
+          <input type="number" id="opt-oos" value="0.3" min="0.1" max="0.6" step="0.05">
+          <button id="opt-run">Run optimizer</button>
+        </div>
+        <div id="opt-results" class="muted">Pick a type and run. Walk-forward evaluates out-of-sample windows; the matrix sweeps windows × OOS.</div>
+      </div>
+      <div class="card" style="margin-top:18px">
         <h2>Generate &amp; rank</h2>
         <div class="row">
           <label class="muted">Count</label>
@@ -145,6 +165,22 @@
           <span id="rob-status" class="muted"></span>
         </div>
         <div id="rob-results"></div>
+      </div>
+    </section>
+    <section id="tab-data" class="tab">
+      <div class="card">
+        <h2>Data Manager — symbols</h2>
+        <div id="dm-list" class="muted">Loading…</div>
+      </div>
+      <div class="card" style="margin-top:18px">
+        <h2>Import CSV</h2>
+        <div class="row">
+          <label class="muted">Symbol</label>
+          <input type="text" id="dm-symbol" value="EURUSD" style="width:120px">
+          <button id="dm-import">Import</button>
+          <span id="dm-status" class="muted"></span>
+        </div>
+        <textarea id="dm-csv" placeholder="timestamp,open,high,low,close,volume&#10;1700000000,1.10,1.11,1.09,1.105,100"></textarea>
       </div>
     </section>
     <section id="tab-settings" class="tab">
@@ -500,6 +536,22 @@ document.getElementById("btn-generate").onclick = async function() {
   });
   rows += "</table>";
   box.innerHTML = rows;
+  box.querySelectorAll("tr").forEach(function(tr, i) {
+    if (i === 0) return;
+    const td = document.createElement("td");
+    const btn = document.createElement("button");
+    btn.textContent = "Use";
+    btn.style.padding = "4px 9px";
+    btn.style.fontSize = "12px";
+    btn.onclick = function() {
+      const r = d.results[i - 1];
+      if (!r || !r.strategy) return;
+      document.getElementById("strategy").value = JSON.stringify(r.strategy, null, 2);
+      document.querySelector('.nav-btn[data-tab="builder"]').click();
+    };
+    td.appendChild(btn);
+    tr.appendChild(td);
+  });
 };
 
 document.getElementById("btn-backtest").onclick = runBacktest;
@@ -566,6 +618,39 @@ async function loadCatalog() {
   renderMmList();
 }
 
+document.getElementById("opt-run").onclick = async function() {
+  const box = document.getElementById("opt-results");
+  box.textContent = "Running...";
+  const body = Object.assign({
+    kind: document.getElementById("opt-kind").value,
+    count: Number(document.getElementById("opt-count").value),
+    windows: Number(document.getElementById("opt-windows").value),
+    oos: Number(document.getElementById("opt-oos").value),
+    symbol: selectedSymbol()
+  }, settings());
+  const d = await postJSON("/api/optimize", JSON.stringify(body));
+  if (d.error) { box.innerHTML = "<span class=\"neg\">" + d.error + "</span>"; return; }
+  if (d.kind === "simple") {
+    let html = "<table><tr><th>Name</th><th>PF</th><th>Net</th><th>Trades</th><th>DD %</th></tr>";
+    (d.results || []).forEach(function(r) {
+      html += "<tr><td>" + r.name + "</td><td>" + fmt(r.profit_factor, 2) + "</td><td>" + fmt(r.net_profit, 2) + "</td><td>" + fmt(r.trades, 0) + "</td><td>" + fmt(r.dd_pct, 2) + "</td></tr>";
+    });
+    html += "</table>";
+    box.innerHTML = html;
+  } else if (d.kind === "walk-forward") {
+    let html = "<table><tr><th>Windows</th><th>OOS trades</th><th>OOS net</th><th>OOS PF</th><th>OOS win %</th><th>OOS DD %</th></tr>";
+    html += "<tr><td>" + d.windows + "</td><td>" + d.oos_trades + "</td><td>" + fmt(d.oos_net_profit, 2) + "</td><td>" + fmt(d.oos_profit_factor, 2) + "</td><td>" + fmt(d.oos_winning_pct, 1) + "</td><td>" + fmt(d.oos_max_dd_pct, 2) + "</td></tr></table>";
+    box.innerHTML = html;
+  } else {
+    let html = "<table><tr><th>Windows</th><th>OOS</th><th>Net</th><th>PF</th><th>Trades</th><th>DD %</th></tr>";
+    (d.rows || []).forEach(function(r) {
+      html += "<tr><td>" + r.windows + "</td><td>" + fmt(r.oos, 2) + "</td><td>" + fmt(r.net, 2) + "</td><td>" + fmt(r.pf, 2) + "</td><td>" + r.trades + "</td><td>" + fmt(r.dd_pct, 2) + "</td></tr>";
+    });
+    html += "</table>";
+    box.innerHTML = html;
+  }
+};
+
 function settings() {
   var g = function(id, d) { var el = document.getElementById(id); var v = el ? parseFloat(el.value) : NaN; return isNaN(v) ? d : v; };
   return { deposit: g("set-deposit", 10000), spread: g("set-spread", 0), slippage: g("set-slippage", 0), commission: g("set-commission", 0) };
@@ -596,6 +681,36 @@ async function runRobustness() {
 }
 document.getElementById("btn-robust").onclick = runRobustness;
 
+async function refreshDataManager() {
+  const ds = await getJSON("/api/datasources");
+  const box = document.getElementById("dm-list");
+  if (!(ds.symbols || []).length) { box.innerHTML = "<p class=\"muted\">No symbols yet. Paste a CSV below to import one.</p>"; return; }
+  let html = "<table><tr><th>Symbol</th><th>TF</th><th>Bars</th><th></th></tr>";
+  (ds.symbols || []).forEach(function(s) {
+    html += "<tr><td>" + s.symbol + "</td><td>" + s.timeframe + "</td><td>" + s.bars + "</td><td><button class=\"remove\" data-sym=\"" + s.symbol + "\">Delete</button></td></tr>";
+  });
+  html += "</table>";
+  box.innerHTML = html;
+  box.querySelectorAll("button[data-sym]").forEach(function(btn) {
+    btn.onclick = async function() {
+      await postJSON("/api/data/delete", JSON.stringify({ symbol: btn.dataset.sym }));
+      await refreshDataManager();
+      await loadInfo();
+    };
+  });
+}
+document.getElementById("dm-import").onclick = async function() {
+  const symbol = document.getElementById("dm-symbol").value.trim();
+  const csv = document.getElementById("dm-csv").value;
+  const st = document.getElementById("dm-status");
+  st.textContent = "Importing...";
+  const d = await postJSON("/api/data/import", JSON.stringify({ symbol: symbol, csv: csv }));
+  if (d.error) { st.textContent = d.error; return; }
+  st.textContent = "Imported " + (d.bars || 0) + " bars";
+  await refreshDataManager();
+  await loadInfo();
+};
+
 document.querySelectorAll(".nav-btn").forEach(function(b) {
   b.onclick = function() {
     document.querySelectorAll(".nav-btn").forEach(function(x) { x.classList.remove("active"); });
@@ -603,6 +718,7 @@ document.querySelectorAll(".nav-btn").forEach(function(b) {
     b.classList.add("active");
     var t = document.getElementById("tab-" + b.dataset.tab);
     if (t) t.classList.add("active");
+    if (b.dataset.tab === "data") refreshDataManager();
   };
 });
 

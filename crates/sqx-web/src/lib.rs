@@ -5,7 +5,7 @@
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use rand::SeedableRng;
 use serde_json::json;
@@ -14,19 +14,19 @@ use sqx_backtest::{backtest, BacktestConfig};
 use sqx_core::{Bar, Instrument};
 use sqx_data::{DataStore, SymbolSeries};
 use sqx_metrics::{compute as compute_metrics, Metrics};
-use sqx_optimizer::{backtest_batch, rank, random_strategy, Fitness, GeneratorConfig};
+use sqx_optimizer::{backtest_batch, rank, random_strategy, walk_forward, Fitness, GeneratorConfig};
 use sqx_robustness::{monte_carlo_trade_manipulation, what_if};
 use sqx_strategy::{render as render_pseudocode, Strategy};
 
 const INDEX: &str = include_str!("../assets/index.html");
 
 struct State {
-    store: DataStore,
+    store: RwLock<DataStore>,
 }
 
 pub fn serve(addr: &str, store: DataStore) -> std::io::Result<()> {
     println!("SqxLabs web app: http://{addr} ({} symbols)", store.len());
-    let state = Arc::new(State { store });
+    let state = Arc::new(State { store: RwLock::new(store) });
     let listener = TcpListener::bind(addr)?;
     for stream in listener.incoming() {
         match stream {
@@ -112,21 +112,21 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("POST", "/api/portfolio") => ("200 OK", "application/json", portfolio_json(body, state)),
         ("POST", "/api/pseudocode") => ("200 OK", "application/json", pseudocode_json(body)),
         ("POST", "/api/robustness") => ("200 OK", "application/json", robustness_json(body, state)),
+        ("POST", "/api/optimize") => ("200 OK", "application/json", optimize_json(body, state)),
+        ("POST", "/api/data/import") => ("200 OK", "application/json", import_json(body, state)),
+        ("POST", "/api/data/delete") => ("200 OK", "application/json", delete_json(body, state)),
         ("POST", "/api/assistant") => ("200 OK", "application/json", assistant_json(body, state)),
         ("GET", "/api/assistant/config") => ("200 OK", "application/json", assistant_config_json()),
         _ => ("404 Not Found", "text/plain", "not found".to_string()),
     }
 }
 
-fn default_series(state: &State) -> Option<&SymbolSeries> {
-    state.store.series.first()
-}
-
-fn find_series<'a>(state: &'a State, symbol: &str) -> Option<&'a SymbolSeries> {
+fn find_series(state: &State, symbol: &str) -> Option<SymbolSeries> {
+    let st = state.store.read().unwrap();
     if symbol.is_empty() {
-        default_series(state)
+        st.series.first().cloned()
     } else {
-        state.store.get(symbol).or_else(|| default_series(state))
+        st.get(symbol).cloned().or_else(|| st.series.first().cloned())
     }
 }
 
@@ -188,14 +188,114 @@ fn catalog_json() -> String {
 }
 
 fn datasources_json(state: &State) -> String {
-    let list: Vec<_> = state
-        .store
+    let st = state.store.read().unwrap();
+    let list: Vec<_> = st
         .list()
         .iter()
         .map(|s| json!({ "symbol": s.symbol, "timeframe": s.timeframe, "bars": s.bars, "first": s.first, "last": s.last }))
         .collect();
-    let default = default_series(state).map(|s| s.symbol.clone()).unwrap_or_default();
+    let default = st.series.first().map(|s| s.symbol.clone()).unwrap_or_default();
     json!({ "symbols": list, "default": default }).to_string()
+}
+
+fn optimize_json(body: &str, state: &State) -> String {
+    let val: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let kind = val.get("kind").and_then(|v| v.as_str()).unwrap_or("simple").to_string();
+    let symbol = val.get("symbol").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let series = match find_series(state, &symbol) {
+        Some(s) => s,
+        None => return json!({ "error": "no data" }).to_string(),
+    };
+    let inst = instrument_for(&series.symbol);
+    let pyp = pyp_for(&series.bars);
+    let cfg = config_from(&val);
+    let count = val.get("count").and_then(|v| v.as_u64()).unwrap_or(200).clamp(10, 2000) as usize;
+    let seed = val.get("seed").and_then(|v| v.as_u64()).unwrap_or(42);
+    let gen = GeneratorConfig::default();
+    match kind.as_str() {
+        "walk-forward" => {
+            let windows = val.get("windows").and_then(|v| v.as_u64()).unwrap_or(5).clamp(2, 12) as usize;
+            let oos = val.get("oos").and_then(|v| v.as_f64()).unwrap_or(0.3).clamp(0.1, 0.6);
+            let r = walk_forward(&series.bars, &inst, &cfg, pyp, &gen, windows, oos, count.min(200), seed);
+            json!({
+                "kind": "walk-forward",
+                "windows": r.windows,
+                "oos_trades": r.oos_trades,
+                "oos_net_profit": r.oos_net_profit,
+                "oos_profit_factor": r.oos_profit_factor,
+                "oos_winning_pct": r.oos_winning_pct,
+                "oos_max_dd_pct": r.oos_max_dd_pct
+            })
+            .to_string()
+        }
+        "wf-matrix" => {
+            let mut rows = Vec::new();
+            for w in [3usize, 4, 5, 6] {
+                for oos in [0.2f64, 0.3, 0.4] {
+                    let r = walk_forward(&series.bars, &inst, &cfg, pyp, &gen, w, oos, 50, seed);
+                    rows.push(json!({
+                        "windows": w, "oos": oos,
+                        "net": r.oos_net_profit, "pf": r.oos_profit_factor,
+                        "trades": r.oos_trades, "dd_pct": r.oos_max_dd_pct
+                    }));
+                }
+            }
+            json!({ "kind": "wf-matrix", "rows": rows }).to_string()
+        }
+        _ => {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let strategies: Vec<Strategy> = (0..count)
+                .map(|i| random_strategy(&mut rng, &format!("s{i:04}"), &gen))
+                .collect();
+            let scored = backtest_batch(&strategies, &series.bars, &inst, &cfg, pyp);
+            let ranked = rank(scored, Fitness::ProfitFactor, 5);
+            let rows: Vec<_> = ranked
+                .iter()
+                .take(20)
+                .map(|(s, m)| json!({
+                    "name": s.name, "profit_factor": m.profit_factor,
+                    "net_profit": m.net_profit, "trades": m.number_of_trades,
+                    "dd_pct": m.max_drawdown_pct, "strategy": s
+                }))
+                .collect();
+            json!({ "kind": "simple", "results": rows }).to_string()
+        }
+    }
+}
+
+fn import_json(body: &str, state: &State) -> String {
+    let val: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let symbol = val.get("symbol").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let csv = val.get("csv").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if symbol.is_empty() || csv.is_empty() {
+        return json!({ "error": "symbol and csv are required" }).to_string();
+    }
+    let bars = match sqx_data::read_csv_bars_str(&csv) {
+        Ok(b) => b,
+        Err(e) => return json!({ "error": e }).to_string(),
+    };
+    let n = bars.len();
+    state.store.write().unwrap().add(&symbol, sqx_core::Timeframe::M1, bars);
+    json!({ "ok": true, "symbol": symbol, "bars": n }).to_string()
+}
+
+fn delete_json(body: &str, state: &State) -> String {
+    let val: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let symbol = val.get("symbol").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if symbol.is_empty() {
+        return json!({ "error": "symbol required" }).to_string();
+    }
+    state.store.write().unwrap().series.retain(|s| s.symbol != symbol);
+    json!({ "ok": true }).to_string()
 }
 
 fn data_json(state: &State, symbol: &str) -> String {
@@ -418,7 +518,8 @@ fn generate_json(body: &str, state: &State) -> String {
                 "profit_factor": m.profit_factor,
                 "net_profit": m.net_profit,
                 "trades": m.number_of_trades,
-                "dd_pct": m.max_drawdown_pct
+                "dd_pct": m.max_drawdown_pct,
+                "strategy": s
             })
         })
         .collect();
