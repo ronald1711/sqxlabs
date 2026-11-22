@@ -109,6 +109,7 @@ fn route(method: &str, path: &str, body: &str, state: &State) -> (&'static str, 
         ("GET", "/api/data") => ("200 OK", "application/json", data_json(state)),
         ("POST", "/api/backtest") => ("200 OK", "application/json", backtest_json(body, state)),
         ("POST", "/api/generate") => ("200 OK", "application/json", generate_json(body, state)),
+        ("POST", "/api/portfolio") => ("200 OK", "application/json", portfolio_json(body, state)),
         ("POST", "/api/pseudocode") => ("200 OK", "application/json", pseudocode_json(body)),
         _ => ("404 Not Found", "text/plain", "not found".to_string()),
     }
@@ -231,6 +232,80 @@ fn generate_json(body: &str, state: &State) -> String {
         })
         .collect();
     json!({ "results": rows }).to_string()
+}
+
+fn portfolio_json(body: &str, state: &State) -> String {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        count: usize,
+        seed: u64,
+        top: usize,
+        min_k: usize,
+        max_k: usize,
+    }
+    let req: Req = match serde_json::from_str(body) {
+        Ok(r) => r,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let count = req.count.clamp(10, 2000);
+    let gen = GeneratorConfig::default();
+    let mut rng = rand::rngs::StdRng::seed_from_u64(req.seed);
+    let strategies: Vec<Strategy> = (0..count)
+        .map(|i| random_strategy(&mut rng, &format!("p{i:04}"), &gen))
+        .collect();
+    let names: Vec<String> = strategies.iter().map(|s| s.name.clone()).collect();
+    let cfg = BacktestConfig::default();
+    let results = sqx_portfolio::backtest_all(&strategies, &state.bars, &state.instrument, &cfg);
+    let mets: Vec<Metrics> = results
+        .iter()
+        .map(|r| compute_metrics(r, state.bars.len(), state.periods_per_year))
+        .collect();
+    let mut order: Vec<usize> = (0..results.len()).collect();
+    order.sort_by(|&a, &b| {
+        mets[b]
+            .profit_factor
+            .partial_cmp(&mets[a].profit_factor)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    order.retain(|&i| mets[i].number_of_trades >= 5.0 && mets[i].profit_factor.is_finite());
+    order.truncate(req.top.clamp(2, 15));
+    if order.len() < 2 {
+        return json!({ "error": "not enough qualifying strategies" }).to_string();
+    }
+    let sel: Vec<sqx_backtest::BacktestResult> = order.iter().map(|&i| results[i].clone()).collect();
+    let sel_names: Vec<String> = order.iter().map(|&i| names[i].clone()).collect();
+    let subset = sqx_portfolio::best_subset(&sel, req.min_k, req.max_k, cfg.initial_deposit);
+    let comp: Vec<sqx_backtest::BacktestResult> = subset.iter().map(|&i| sel[i].clone()).collect();
+    let comp_names: Vec<String> = subset.iter().map(|&i| sel_names[i].clone()).collect();
+    let weights = sqx_portfolio::equal_weights(comp.len());
+    let pf = sqx_portfolio::combine(
+        &comp_names,
+        &comp,
+        &weights,
+        cfg.initial_deposit,
+        state.bars.len(),
+        state.periods_per_year,
+    );
+    let comps: Vec<_> = pf
+        .components
+        .iter()
+        .map(|c| {
+            json!({
+                "name": c.name,
+                "weight": c.weight,
+                "net_profit": c.net_profit,
+                "max_drawdown_pct": c.max_drawdown_pct,
+                "trades": c.trades
+            })
+        })
+        .collect();
+    json!({
+        "metrics": metrics_json(&pf.metrics),
+        "equity": pf.equity,
+        "correlation": pf.correlation,
+        "components": comps
+    })
+    .to_string()
 }
 
 fn pseudocode_json(body: &str) -> String {

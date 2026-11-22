@@ -23,8 +23,9 @@ independently from the documented behaviour and public domain knowledge.
 | Persistence | sqx-project | Project -> databanks -> ranked strategies (JSON) |
 | Export | sqx-export | MQL4 / MQL5 / PineScript / PseudoCode code generators |
 | Robustness | sqx-robustness | Monte Carlo trade-manipulation |
+| Portfolio | sqx-portfolio | Combine strategies, weights, correlation, best subset |
 | Web | sqx-web | Embedded HTTP server + single-page dashboard |
-| CLI | sqx-cli | backtest / generate / evolve / optimize / export / montecarlo / serve / indicators / pseudocode |
+| CLI | sqx-cli | backtest / generate / evolve / optimize / export / montecarlo / portfolio / serve / indicators / pseudocode |
 
 ## Quick start
 
@@ -52,6 +53,9 @@ cargo run -q -p sqx-cli -- montecarlo --strategy examples/rsi-mean-reversion.jso
 
 # Walk-forward optimization
 cargo run -q -p sqx-cli -- optimize --data data/eurusd_sample.csv --windows 6 --oos 0.25
+
+# Build a portfolio: best subset of generated strategies (equal weights + correlation)
+cargo run -q -p sqx-cli -- portfolio --data data/eurusd_sample.csv --count 300 --top 12
 
 # Start the web dashboard, then open http://127.0.0.1:8080
 cargo run -q -p sqx-cli -- serve --data data/eurusd_sample.csv

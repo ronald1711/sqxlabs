@@ -1,0 +1,12 @@
+[package]
+name = "sqx-portfolio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Portfolio construction: combine strategies, weights, correlation, best subset."
+
+[dependencies]
+sqx-core = { path = "../sqx-core" }
+sqx-strategy = { path = "../sqx-strategy" }
+sqx-backtest = { path = "../sqx-backtest" }
+sqx-metrics = { path = "../sqx-metrics" }

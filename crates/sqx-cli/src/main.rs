@@ -4,12 +4,13 @@ use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
 use rand::SeedableRng;
 
-use sqx_backtest::{backtest, BacktestConfig};
+use sqx_backtest::{backtest, BacktestConfig, BacktestResult};
 use sqx_core::{Bar, Instrument};
 use sqx_metrics::{compute as compute_metrics, render as render_metrics};
 use sqx_optimizer::{backtest_batch, genetic_evolve, rank, random_strategy, walk_forward, Fitness, GeneticConfig, GeneratorConfig};
 use sqx_project::{Databank, MetricSummary, Project, StrategyRecord};
 use sqx_export::{export as export_strategy, Engine};
+use sqx_portfolio::{backtest_all, best_subset, combine, equal_weights};
 use sqx_robustness::monte_carlo_trade_manipulation;
 use sqx_strategy::{render as render_pseudocode, Strategy};
 
@@ -140,6 +141,21 @@ enum Cmd {
         #[arg(long, default_value = "EURUSD")]
         symbol: String,
     },
+    /// Build a portfolio from generated strategies (equal weights, best subset).
+    Portfolio {
+        #[arg(long)]
+        data: PathBuf,
+        #[arg(long, default_value_t = 300)]
+        count: usize,
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
+        #[arg(long, default_value_t = 12)]
+        top: usize,
+        #[arg(long, default_value_t = 2)]
+        min_k: usize,
+        #[arg(long, default_value_t = 4)]
+        max_k: usize,
+    },
 }
 
 fn main() -> Result<()> {
@@ -256,6 +272,49 @@ fn main() -> Result<()> {
             let inst = instrument(&symbol);
             println!("Serving {} bars for {} on http://{}", bars.len(), symbol, addr);
             sqx_web::serve(&addr, bars, inst).map_err(|e| anyhow!(e))?;
+            Ok(())
+        }
+        Cmd::Portfolio { data, count, seed, top, min_k, max_k } => {
+            let bars = load_bars(&data)?;
+            let inst = instrument("EURUSD");
+            let pyp = resolve_periods_per_year(bars.len(), 0.0, &bars);
+            let cfg = BacktestConfig::default();
+            let gen = GeneratorConfig::default();
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let strategies: Vec<Strategy> = (0..count).map(|i| random_strategy(&mut rng, &format!("p{i:04}"), &gen)).collect();
+            let names: Vec<String> = strategies.iter().map(|s| s.name.clone()).collect();
+            let results: Vec<BacktestResult> = backtest_all(&strategies, &bars, &inst, &cfg);
+            let mets: Vec<sqx_metrics::Metrics> = results.iter().map(|r| compute_metrics(r, bars.len(), pyp)).collect();
+            let mut order: Vec<usize> = (0..results.len()).collect();
+            order.sort_by(|&a, &b| mets[b].profit_factor.partial_cmp(&mets[a].profit_factor).unwrap_or(std::cmp::Ordering::Equal));
+            order.retain(|&i| mets[i].number_of_trades >= 5.0 && mets[i].profit_factor.is_finite());
+            order.truncate(top);
+            if order.len() < 2 {
+                println!("Not enough qualifying strategies to build a portfolio");
+                return Ok(());
+            }
+            let sel: Vec<BacktestResult> = order.iter().map(|&i| results[i].clone()).collect();
+            let sel_names: Vec<String> = order.iter().map(|&i| names[i].clone()).collect();
+            let subset = best_subset(&sel, min_k, max_k, cfg.initial_deposit);
+            if subset.len() < 2 {
+                println!("No subset found");
+                return Ok(());
+            }
+            let comp: Vec<BacktestResult> = subset.iter().map(|&i| sel[i].clone()).collect();
+            let comp_names: Vec<String> = subset.iter().map(|&i| sel_names[i].clone()).collect();
+            let weights = equal_weights(comp.len());
+            let pf = combine(&comp_names, &comp, &weights, cfg.initial_deposit, bars.len(), pyp);
+            println!("Portfolio of {} strategies (equal weights)", comp.len());
+            println!("  Net profit {:.2} | PF {:.2} | Max DD {:.2}% | Return/DD {:.2} | Sharpe {:.2}", pf.metrics.net_profit, pf.metrics.profit_factor, pf.metrics.max_drawdown_pct, pf.metrics.return_dd_ratio, pf.metrics.sharpe_ratio);
+            println!("  Components:");
+            for c in &pf.components {
+                println!("    {:<10} w={:.2} net={:.2} dd={:.2}% trades={}", c.name, c.weight, c.net_profit, c.max_drawdown_pct, c.trades);
+            }
+            println!("  Correlation:");
+            for row in &pf.correlation {
+                let s: Vec<String> = row.iter().map(|v| format!("{:.2}", v)).collect();
+                println!("    {}", s.join("  "));
+            }
             Ok(())
         }
     }

@@ -68,6 +68,17 @@
       <h2>Indicator catalog</h2>
       <div id="catalog"></div>
     </div>
+    <div class="card" style="margin-top:18px">
+      <h2>Portfolio composer</h2>
+      <div class="row">
+        <label class="muted">Count</label>
+        <input type="number" id="pf-count" value="300" min="20">
+        <label class="muted">Seed</label>
+        <input type="number" id="pf-seed" value="42">
+        <button id="pf-build">Build portfolio</button>
+      </div>
+      <div id="pf-results" class="muted">Generate strategies, pick the best subset and show the combined portfolio.</div>
+    </div>
   </div>
   <div>
     <div class="card">
@@ -341,8 +352,8 @@ function buildStrategyJSON() {
   return JSON.stringify(strategy, null, 2);
 }
 
-function drawChart(equity) {
-  const svg = document.getElementById("chart");
+function drawChart(equity, id) {
+  const svg = document.getElementById(id || "chart");
   if (!equity || equity.length < 2) { svg.innerHTML = ""; return; }
   const w = 700, h = 220, pad = 6;
   let min = Infinity, max = -Infinity;
@@ -408,6 +419,28 @@ document.getElementById("btn-backtest").onclick = runBacktest;
 document.getElementById("aw-backtest").onclick = function() {
   document.getElementById("strategy").value = buildStrategyJSON();
   runBacktest();
+};
+
+document.getElementById("pf-build").onclick = async function() {
+  const box = document.getElementById("pf-results");
+  box.textContent = "Building...";
+  const d = await postJSON("/api/portfolio", JSON.stringify({
+    count: Number(document.getElementById("pf-count").value),
+    seed: Number(document.getElementById("pf-seed").value),
+    top: 12, min_k: 2, max_k: 4
+  }));
+  if (d.error) { box.innerHTML = "<span class=\"neg\">" + d.error + "</span>"; return; }
+  const m = d.metrics;
+  let html = "<p class=\"muted\">" + d.components.length + " strategies · net " + fmt(m.net_profit, 2) + " · PF " + fmt(m.profit_factor, 2) + " · DD " + fmt(m.max_drawdown_pct, 2) + "% · Return/DD " + fmt(m.return_dd, 2) + "</p>";
+  html += "<table><tr><th>Strategy</th><th>Weight</th><th>Net</th><th>DD %</th><th>Trades</th></tr>";
+  d.components.forEach(function(c) { html += "<tr><td>" + c.name + "</td><td>" + fmt(c.weight, 2) + "</td><td>" + fmt(c.net_profit, 2) + "</td><td>" + fmt(c.max_drawdown_pct, 2) + "</td><td>" + fmt(c.trades, 0) + "</td></tr>"; });
+  html += "</table>";
+  html += "<h2 style=\"margin-top:16px\">Correlation</h2><table>";
+  d.correlation.forEach(function(row) { html += "<tr>"; row.forEach(function(v) { html += "<td>" + fmt(v, 2) + "</td>"; }); html += "</tr>"; });
+  html += "</table>";
+  html += "<h2 style=\"margin-top:16px\">Portfolio equity</h2><div id=\"pf-chart\"></div>";
+  box.innerHTML = html;
+  drawChart(d.equity, "pf-chart");
 };
 
 async function loadCatalog() {

@@ -10,6 +10,7 @@ members = [
   "crates/sqx-project",
   "crates/sqx-export",
   "crates/sqx-robustness",
+  "crates/sqx-portfolio",
   "crates/sqx-web",
   "crates/sqx-cli",
 ]

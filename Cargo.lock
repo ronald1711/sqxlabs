@@ -280,6 +280,7 @@ dependencies = [
  "sqx-indicators",
  "sqx-metrics",
  "sqx-optimizer",
+ "sqx-portfolio",
  "sqx-project",
  "sqx-robustness",
  "sqx-strategy",
@@ -327,6 +328,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sqx-portfolio"
+version = "0.1.0"
+dependencies = [
+ "sqx-backtest",
+ "sqx-core",
+ "sqx-metrics",
+ "sqx-strategy",
+]
+
+[[package]]
 name = "sqx-project"
 version = "0.1.0"
 dependencies = [
@@ -364,6 +375,7 @@ dependencies = [
  "sqx-core",
  "sqx-metrics",
  "sqx-optimizer",
+ "sqx-portfolio",
  "sqx-strategy",
 ]
 
