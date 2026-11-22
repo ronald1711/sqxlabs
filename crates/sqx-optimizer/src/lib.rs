@@ -178,14 +178,32 @@ pub fn backtest_batch(
     config: &BacktestConfig,
     periods_per_year: f64,
 ) -> Vec<(Strategy, Metrics)> {
-    strategies
-        .iter()
-        .map(|s| {
-            let result = backtest(s, bars, instrument, config);
-            let metrics = compute_metrics(&result, bars.len(), periods_per_year);
-            (s.clone(), metrics)
-        })
-        .collect()
+    let one = |s: &Strategy| {
+        let result = backtest(s, bars, instrument, config);
+        let metrics = compute_metrics(&result, bars.len(), periods_per_year);
+        (s.clone(), metrics)
+    };
+    let n = strategies.len();
+    if n < 8 {
+        return strategies.iter().map(one).collect();
+    }
+    let threads = std::thread::available_parallelism()
+        .map(|v| v.get())
+        .unwrap_or(4)
+        .min(8)
+        .min(n);
+    let chunk = (n + threads - 1) / threads;
+    let mut out: Vec<(Strategy, Metrics)> = Vec::with_capacity(n);
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = strategies
+            .chunks(chunk)
+            .map(|part| scope.spawn(move || part.iter().map(one).collect::<Vec<_>>()))
+            .collect();
+        for h in handles {
+            out.extend(h.join().unwrap());
+        }
+    });
+    out
 }
 
 /// Rank results by fitness (descending); NAN fitness is dropped.
