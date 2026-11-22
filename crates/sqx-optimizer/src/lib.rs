@@ -44,6 +44,8 @@ pub struct GeneratorConfig {
     /// Trade long / short sides.
     pub long: bool,
     pub short: bool,
+    /// Per-indicator parameter ranges: (indicator, param, min, max).
+    pub param_ranges: Vec<(String, String, f64, f64)>,
 }
 
 impl Default for GeneratorConfig {
@@ -56,6 +58,7 @@ impl Default for GeneratorConfig {
             fixed_size: 0.1,
             long: true,
             short: true,
+            param_ranges: Vec::new(),
         }
     }
 }
@@ -83,19 +86,19 @@ pub fn random_strategy(rng: &mut StdRng, name: &str, config: &GeneratorConfig) -
 
     // Long entry signal: n random conditions.
     let n = rng.gen_range(config.min_conditions..=config.max_conditions);
-    let long_conditions: Vec<Condition> = (0..n).map(|_| random_condition(rng, &catalog)).collect();
+    let long_conditions: Vec<Condition> = (0..n).map(|_| random_condition(rng, &catalog, config)).collect();
     s.signals.push(Signal::new(SignalKind::LongEntry, long_conditions, Join::And));
 
     // Short entry mirrors long (negated family), or is generated independently.
     if config.short {
         let n = rng.gen_range(config.min_conditions..=config.max_conditions);
-        let short_conditions: Vec<Condition> = (0..n).map(|_| random_condition(rng, &catalog)).collect();
+        let short_conditions: Vec<Condition> = (0..n).map(|_| random_condition(rng, &catalog, config)).collect();
         s.signals.push(Signal::new(SignalKind::ShortEntry, short_conditions, Join::And));
     }
 
     // Long/short exit: close on opposite signal (a random condition) or none.
     if rng.gen_bool(0.5) {
-        let c = random_condition(rng, &catalog);
+        let c = random_condition(rng, &catalog, config);
         s.signals.push(Signal::new(SignalKind::LongExit, vec![c.clone()], Join::And));
         s.signals.push(Signal::new(SignalKind::ShortExit, vec![c], Join::And));
     }
@@ -113,9 +116,30 @@ pub fn random_strategy(rng: &mut StdRng, name: &str, config: &GeneratorConfig) -
 }
 
 /// Generate a random condition from the catalog.
-fn random_condition(rng: &mut StdRng, catalog: &[BlockSpec]) -> Condition {
+fn params_for(spec: &BlockSpec, rng: &mut StdRng, ranges: &[(String, String, f64, f64)]) -> Vec<Param> {
+    spec.params
+        .iter()
+        .map(|(name, def)| {
+            let v = match ranges.iter().find(|(ind, p, _, _)| ind == &spec.base && p == name) {
+                Some((_, _, lo, hi)) if (hi - lo).abs() > 1e-12 => {
+                    let sampled = rng.gen_range(*lo..=*hi);
+                    if lo.fract() == 0.0 && hi.fract() == 0.0 {
+                        sampled.round()
+                    } else {
+                        sampled
+                    }
+                }
+                Some((_, _, lo, _)) => *lo,
+                None => *def,
+            };
+            Param::new(name, v)
+        })
+        .collect()
+}
+
+fn random_condition(rng: &mut StdRng, catalog: &[BlockSpec], config: &GeneratorConfig) -> Condition {
     let spec = catalog.choose(rng).unwrap();
-    let params: Vec<Param> = spec.params.iter().map(|(n, v)| Param::new(n, *v)).collect();
+    let params: Vec<Param> = params_for(&spec, rng, &config.param_ranges);
     if let Some(cmp) = spec.cmp {
         return Condition::new(Operand::Indicator(spec.base.clone(), params), cmp, Operand::Const(0.0));
     }
@@ -305,14 +329,14 @@ fn mutate(s: &mut Strategy, config: &GeneratorConfig, rng: &mut StdRng) {
         0 => {
             if let Some(sig) = s.signals.iter_mut().find(|sig| !sig.conditions.is_empty()) {
                 let idx = rng.gen_range(0..sig.conditions.len());
-                sig.conditions[idx] = random_condition(rng, &catalog);
+                sig.conditions[idx] = random_condition(rng, &catalog, config);
             }
         }
         // Add a condition to a signal.
         1 => {
             if let Some(sig) = s.signals.iter_mut().next() {
                 if sig.conditions.len() < config.max_conditions {
-                    sig.conditions.push(random_condition(rng, &catalog));
+                    sig.conditions.push(random_condition(rng, &catalog, config));
                 }
             }
         }

@@ -474,6 +474,22 @@ fn metrics_json(m: &Metrics) -> serde_json::Value {
 fn gen_config_from(val: &serde_json::Value) -> GeneratorConfig {
     let f = |k: &str, d: f64| val.get(k).and_then(|v| v.as_f64()).unwrap_or(d);
     let u = |k: &str, d: usize| val.get(k).and_then(|v| v.as_u64()).unwrap_or(d as u64) as usize;
+    let param_ranges = val
+        .get("param_ranges")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|r| {
+                    Some((
+                        r.get("indicator")?.as_str()?.to_string(),
+                        r.get("param")?.as_str()?.to_string(),
+                        r.get("min")?.as_f64()?,
+                        r.get("max")?.as_f64()?,
+                    ))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     GeneratorConfig {
         min_conditions: u("min_conditions", 1).clamp(1, 6),
         max_conditions: u("max_conditions", 3).clamp(1, 6),
@@ -482,6 +498,7 @@ fn gen_config_from(val: &serde_json::Value) -> GeneratorConfig {
         fixed_size: f("size", 0.1),
         long: val.get("long").and_then(|v| v.as_bool()).unwrap_or(true),
         short: val.get("short").and_then(|v| v.as_bool()).unwrap_or(true),
+        param_ranges,
     }
 }
 
@@ -658,6 +675,15 @@ fn generate_json(body: &str, state: &State) -> String {
         long: Option<bool>,
         #[serde(default)]
         short: Option<bool>,
+        #[serde(default)]
+        param_ranges: Vec<ParamRange>,
+    }
+    #[derive(serde::Deserialize)]
+    struct ParamRange {
+        indicator: String,
+        param: String,
+        min: f64,
+        max: f64,
     }
     let req: Req = match serde_json::from_str(body) {
         Ok(r) => r,
@@ -678,6 +704,7 @@ fn generate_json(body: &str, state: &State) -> String {
         fixed_size: req.size.unwrap_or(0.1),
         long: req.long.unwrap_or(true),
         short: req.short.unwrap_or(true),
+        param_ranges: req.param_ranges.into_iter().map(|r| (r.indicator, r.param, r.min, r.max)).collect(),
     };
     let mut rng = rand::rngs::StdRng::seed_from_u64(req.seed);
     let strategies: Vec<Strategy> = (0..count)

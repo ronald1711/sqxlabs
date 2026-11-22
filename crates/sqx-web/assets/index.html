@@ -161,6 +161,8 @@
           <label><input type="checkbox" id="gen-long" checked> Long</label>
           <label><input type="checkbox" id="gen-short" checked> Short</label>
         </div>
+        <label class="muted" style="display:block; margin-top:8px;">Parameter ranges — one per line: INDICATOR.param=min..max</label>
+        <textarea id="gen-ranges" style="height:80px;" placeholder="RSI.period=5..30&#10;SMA.period=10..50"></textarea>
       </div>
       <div class="card" style="margin-top:18px">
         <h2>Optimizer</h2>
@@ -792,13 +794,22 @@ document.getElementById("opt-run").onclick = async function() {
 
 function genSettings() {
   var g = function(id, d) { var el = document.getElementById(id); var v = el ? parseFloat(el.value) : NaN; return isNaN(v) ? d : v; };
+  var ranges = [];
+  var box = document.getElementById("gen-ranges");
+  if (box) {
+    box.value.split("\n").forEach(function(line) {
+      var m = line.trim().match(/^([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\s*=\s*(-?[0-9.]+)\s*\.\.\s*(-?[0-9.]+)$/);
+      if (m) ranges.push({ indicator: m[1], param: m[2], min: parseFloat(m[3]), max: parseFloat(m[4]) });
+    });
+  }
   return {
     min_conditions: g("gen-minc", 1), max_conditions: g("gen-maxc", 3),
     sl_min: g("gen-slmin", 0), sl_max: g("gen-slmax", 200),
     pt_min: g("gen-ptmin", 0), pt_max: g("gen-ptmax", 400),
     size: g("gen-size", 0.1),
     long: document.getElementById("gen-long").checked,
-    short: document.getElementById("gen-short").checked
+    short: document.getElementById("gen-short").checked,
+    param_ranges: ranges
   };
 }
 

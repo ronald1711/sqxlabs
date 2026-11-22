@@ -84,6 +84,7 @@ impl Assistant {
                     fixed_size: 0.1,
                     long: true,
                     short: true,
+                    param_ranges: Vec::new(),
                 };
                 self.generated = (0..count)
                     .map(|i| random_strategy(&mut rng, &format!("llm-{i:04}"), &cfg))
