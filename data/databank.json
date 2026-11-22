@@ -152,7 +152,7 @@
       },
       "name": "b1-146",
       "profit_target": {
-        "Points": 216.34988885655505
+        "Points": 216.34988885655503
       },
       "short": true,
       "signals": [
@@ -900,7 +900,7 @@
     "dd_pct": 0.0824571876165834,
     "name": "b1-81",
     "net_profit": 3917.6613951034865,
-    "profit_factor": 98.98515532695791,
+    "profit_factor": 98.98515532695792,
     "strategy": {
       "confirmation": null,
       "exits": [],
@@ -1177,5 +1177,2180 @@
       }
     },
     "trades": 712
+  },
+  {
+    "dd_pct": 0.1930808161998123,
+    "name": "b1-58",
+    "net_profit": 3810.2598238218025,
+    "profit_factor": 395.22776284758595,
+    "strategy": {
+      "confirmation": null,
+      "exits": [],
+      "long": true,
+      "money_management": {
+        "FixedSize": {
+          "size": 0.1
+        }
+      },
+      "name": "b1-58",
+      "profit_target": {
+        "Points": 234.5051036267068
+      },
+      "short": true,
+      "signals": [
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "ATR",
+                  [
+                    {
+                      "name": "period",
+                      "value": 14.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "ParabolicSAR",
+                  [
+                    {
+                      "name": "step",
+                      "value": 0.02
+                    },
+                    {
+                      "name": "max",
+                      "value": 0.2
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "CrossBelow",
+              "left": {
+                "Indicator": [
+                  "LinRegSlope",
+                  [
+                    {
+                      "name": "period",
+                      "value": 14.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "ATRBandsLower",
+                  [
+                    {
+                      "name": "period",
+                      "value": 14.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "AlligatorJaw",
+                  []
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongExit"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "AlligatorJaw",
+                  []
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortExit"
+        }
+      ],
+      "stop_loss": {
+        "Points": 148.8019657406448
+      },
+      "trading_options": {
+        "exit_at_end_of_day": false,
+        "exit_on_friday": false,
+        "limit_hours": null,
+        "max_trades_per_day": null
+      }
+    },
+    "trades": 88
+  },
+  {
+    "dd_pct": 0.1165526038146926,
+    "name": "b1-8",
+    "net_profit": 2905.316127447079,
+    "profit_factor": 367.9363458644259,
+    "strategy": {
+      "confirmation": null,
+      "exits": [],
+      "long": true,
+      "money_management": {
+        "FixedSize": {
+          "size": 0.1
+        }
+      },
+      "name": "b1-8",
+      "profit_target": {
+        "Points": 55.236158472837495
+      },
+      "short": true,
+      "signals": [
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "SMMA",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "Bias",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "ADX",
+                  [
+                    {
+                      "name": "period",
+                      "value": 14.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "PivotR2",
+                  []
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "ROC",
+                  [
+                    {
+                      "name": "period",
+                      "value": 10.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "StdDev",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongExit"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "StdDev",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortExit"
+        }
+      ],
+      "stop_loss": {
+        "Points": 111.47637169473765
+      },
+      "trading_options": {
+        "exit_at_end_of_day": false,
+        "exit_on_friday": false,
+        "limit_hours": null,
+        "max_trades_per_day": null
+      }
+    },
+    "trades": 392
+  },
+  {
+    "dd_pct": 0.06548059930750577,
+    "name": "b1-136",
+    "net_profit": 4594.324769430493,
+    "profit_factor": 219.78717374609414,
+    "strategy": {
+      "confirmation": null,
+      "exits": [],
+      "long": true,
+      "money_management": {
+        "FixedSize": {
+          "size": 0.1
+        }
+      },
+      "name": "b1-136",
+      "profit_target": {
+        "Points": 72.42257796613234
+      },
+      "short": true,
+      "signals": [
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "IchimokuTenkan",
+                  []
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "PivotR1",
+                  []
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "Fisher",
+                  [
+                    {
+                      "name": "period",
+                      "value": 9.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "BearsPower",
+                  [
+                    {
+                      "name": "period",
+                      "value": 13.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "KCMiddle",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    },
+                    {
+                      "name": "mult",
+                      "value": 2.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongExit"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "KCMiddle",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    },
+                    {
+                      "name": "mult",
+                      "value": 2.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortExit"
+        }
+      ],
+      "stop_loss": {
+        "Points": 147.3314115022754
+      },
+      "trading_options": {
+        "exit_at_end_of_day": false,
+        "exit_on_friday": false,
+        "limit_hours": null,
+        "max_trades_per_day": null
+      }
+    },
+    "trades": 919
+  },
+  {
+    "dd_pct": 0.0561720531000824,
+    "name": "b1-182",
+    "net_profit": 6309.474207732276,
+    "profit_factor": 143.47639425066444,
+    "strategy": {
+      "confirmation": null,
+      "exits": [],
+      "long": true,
+      "money_management": {
+        "FixedSize": {
+          "size": 0.1
+        }
+      },
+      "name": "b1-182",
+      "profit_target": {
+        "Points": 86.66690062073845
+      },
+      "short": true,
+      "signals": [
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "DonchianUpper",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "GannHiLo",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "DonchianMiddle",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Lt",
+              "left": {
+                "Indicator": [
+                  "WilliamsR",
+                  [
+                    {
+                      "name": "period",
+                      "value": 14.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 68.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongExit"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Lt",
+              "left": {
+                "Indicator": [
+                  "WilliamsR",
+                  [
+                    {
+                      "name": "period",
+                      "value": 14.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 68.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortExit"
+        }
+      ],
+      "stop_loss": {
+        "Points": 192.24502758337772
+      },
+      "trading_options": {
+        "exit_at_end_of_day": false,
+        "exit_on_friday": false,
+        "limit_hours": null,
+        "max_trades_per_day": null
+      }
+    },
+    "trades": 1884
+  },
+  {
+    "dd_pct": 0.3557504853472633,
+    "name": "b1-138",
+    "net_profit": 2240.440642005773,
+    "profit_factor": 22.098146818135014,
+    "strategy": {
+      "confirmation": null,
+      "exits": [],
+      "long": true,
+      "money_management": {
+        "FixedSize": {
+          "size": 0.1
+        }
+      },
+      "name": "b1-138",
+      "profit_target": {
+        "Points": 56.038792528882865
+      },
+      "short": true,
+      "signals": [
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "ATRBandsUpper",
+                  [
+                    {
+                      "name": "period",
+                      "value": 14.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Gt",
+              "left": {
+                "Indicator": [
+                  "TwiggsMF",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "HeikinAshiClose",
+                  []
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "Disparity",
+                  [
+                    {
+                      "name": "period",
+                      "value": 14.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "Fisher",
+                  [
+                    {
+                      "name": "period",
+                      "value": 9.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongExit"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "Fisher",
+                  [
+                    {
+                      "name": "period",
+                      "value": 9.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortExit"
+        }
+      ],
+      "stop_loss": {
+        "Points": 53.53834532591334
+      },
+      "trading_options": {
+        "exit_at_end_of_day": false,
+        "exit_on_friday": false,
+        "limit_hours": null,
+        "max_trades_per_day": null
+      }
+    },
+    "trades": 418
+  },
+  {
+    "dd_pct": 1.9319747458999152,
+    "name": "b1-2",
+    "net_profit": 4604.782219907237,
+    "profit_factor": 21.78931214015379,
+    "strategy": {
+      "confirmation": null,
+      "exits": [],
+      "long": true,
+      "money_management": {
+        "FixedSize": {
+          "size": 0.1
+        }
+      },
+      "name": "b1-2",
+      "profit_target": {
+        "Points": 143.97239427523022
+      },
+      "short": true,
+      "signals": [
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "CMO",
+                  [
+                    {
+                      "name": "period",
+                      "value": 14.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "AlligatorTeeth",
+                  []
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "KCLower",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    },
+                    {
+                      "name": "mult",
+                      "value": 2.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongExit"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "KCLower",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    },
+                    {
+                      "name": "mult",
+                      "value": 2.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortExit"
+        }
+      ],
+      "stop_loss": {
+        "Points": 188.3133234272344
+      },
+      "trading_options": {
+        "exit_at_end_of_day": false,
+        "exit_on_friday": false,
+        "limit_hours": null,
+        "max_trades_per_day": null
+      }
+    },
+    "trades": 1046
+  },
+  {
+    "dd_pct": 1.6204215991956852,
+    "name": "b1-45",
+    "net_profit": 1866.7771316733026,
+    "profit_factor": 17.229403168882328,
+    "strategy": {
+      "confirmation": null,
+      "exits": [],
+      "long": true,
+      "money_management": {
+        "FixedSize": {
+          "size": 0.1
+        }
+      },
+      "name": "b1-45",
+      "profit_target": {
+        "Points": 283.11450249858115
+      },
+      "short": true,
+      "signals": [
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "GatorUpper",
+                  []
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "Median",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "ChaikinVolatility",
+                  [
+                    {
+                      "name": "period",
+                      "value": 10.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "LaguerreRSI",
+                  []
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "AwesomeOsc",
+                  []
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortEntry"
+        }
+      ],
+      "stop_loss": {
+        "Points": 115.02438581676199
+      },
+      "trading_options": {
+        "exit_at_end_of_day": false,
+        "exit_on_friday": false,
+        "limit_hours": null,
+        "max_trades_per_day": null
+      }
+    },
+    "trades": 8
+  },
+  {
+    "dd_pct": 0.09217130493600997,
+    "name": "b1-30",
+    "net_profit": 543.8759088233725,
+    "profit_factor": 14.446874702122829,
+    "strategy": {
+      "confirmation": null,
+      "exits": [],
+      "long": true,
+      "money_management": {
+        "FixedSize": {
+          "size": 0.1
+        }
+      },
+      "name": "b1-30",
+      "profit_target": {
+        "Points": 223.86972048649412
+      },
+      "short": true,
+      "signals": [
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "RMI",
+                  [
+                    {
+                      "name": "period",
+                      "value": 14.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "ChandeForecast",
+                  [
+                    {
+                      "name": "period",
+                      "value": 14.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Lt",
+              "left": {
+                "Price": [
+                  "Low",
+                  2
+                ]
+              },
+              "right": {
+                "Indicator": [
+                  "StochRSI",
+                  [
+                    {
+                      "name": "period",
+                      "value": 14.0
+                    }
+                  ]
+                ]
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "SMAEnvelopeLower",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "CrossAbove",
+              "left": {
+                "Price": [
+                  "Open",
+                  1
+                ]
+              },
+              "right": {
+                "Indicator": [
+                  "Skewness",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "CMF",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongExit"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "CMF",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortExit"
+        }
+      ],
+      "stop_loss": {
+        "Points": 52.256971818892794
+      },
+      "trading_options": {
+        "exit_at_end_of_day": false,
+        "exit_on_friday": false,
+        "limit_hours": null,
+        "max_trades_per_day": null
+      }
+    },
+    "trades": 126
+  },
+  {
+    "dd_pct": 2.0280760084264777,
+    "name": "b1-159",
+    "net_profit": 4077.350910733708,
+    "profit_factor": 11.95363098253529,
+    "strategy": {
+      "confirmation": null,
+      "exits": [],
+      "long": true,
+      "money_management": {
+        "FixedSize": {
+          "size": 0.1
+        }
+      },
+      "name": "b1-159",
+      "profit_target": {
+        "Points": 211.68146637054085
+      },
+      "short": true,
+      "signals": [
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "TrueRange",
+                  []
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "MACD",
+                  [
+                    {
+                      "name": "fast",
+                      "value": 12.0
+                    },
+                    {
+                      "name": "slow",
+                      "value": 26.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "KCLower",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    },
+                    {
+                      "name": "mult",
+                      "value": 2.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "PivotP",
+                  []
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongExit"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "PivotP",
+                  []
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortExit"
+        }
+      ],
+      "stop_loss": {
+        "Points": 77.2892768850239
+      },
+      "trading_options": {
+        "exit_at_end_of_day": false,
+        "exit_on_friday": false,
+        "limit_hours": null,
+        "max_trades_per_day": null
+      }
+    },
+    "trades": 345
+  },
+  {
+    "dd_pct": 0.5363144295593923,
+    "name": "b1-42",
+    "net_profit": 2152.079437128917,
+    "profit_factor": 9.344378218660102,
+    "strategy": {
+      "confirmation": null,
+      "exits": [],
+      "long": true,
+      "money_management": {
+        "FixedSize": {
+          "size": 0.1
+        }
+      },
+      "name": "b1-42",
+      "profit_target": {
+        "Points": 225.07554047801094
+      },
+      "short": true,
+      "signals": [
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "PivotR2",
+                  []
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "CrossAbove",
+              "left": {
+                "Indicator": [
+                  "MFI",
+                  [
+                    {
+                      "name": "period",
+                      "value": 14.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "MACD",
+                  [
+                    {
+                      "name": "fast",
+                      "value": 12.0
+                    },
+                    {
+                      "name": "slow",
+                      "value": 26.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "RVI",
+                  [
+                    {
+                      "name": "period",
+                      "value": 10.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongExit"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "RVI",
+                  [
+                    {
+                      "name": "period",
+                      "value": 10.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortExit"
+        }
+      ],
+      "stop_loss": {
+        "Points": 164.3690680061485
+      },
+      "trading_options": {
+        "exit_at_end_of_day": false,
+        "exit_on_friday": false,
+        "limit_hours": null,
+        "max_trades_per_day": null
+      }
+    },
+    "trades": 502
+  },
+  {
+    "dd_pct": 1.4439601994966058,
+    "name": "b1-71",
+    "net_profit": 2799.232666665192,
+    "profit_factor": 9.335343774075568,
+    "strategy": {
+      "confirmation": null,
+      "exits": [],
+      "long": true,
+      "money_management": {
+        "FixedSize": {
+          "size": 0.1
+        }
+      },
+      "name": "b1-71",
+      "profit_target": {
+        "Points": 130.62748197729093
+      },
+      "short": true,
+      "signals": [
+        {
+          "conditions": [
+            {
+              "cmp": "CrossAbove",
+              "left": {
+                "Price": [
+                  "Open",
+                  0
+                ]
+              },
+              "right": {
+                "Indicator": [
+                  "TSI",
+                  []
+                ]
+              }
+            },
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "HMA",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "SMAEnvelopeUpper",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "ATR",
+                  [
+                    {
+                      "name": "period",
+                      "value": 14.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "PVT",
+                  []
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortEntry"
+        }
+      ],
+      "stop_loss": {
+        "Points": 55.97115013163001
+      },
+      "trading_options": {
+        "exit_at_end_of_day": false,
+        "exit_on_friday": false,
+        "limit_hours": null,
+        "max_trades_per_day": null
+      }
+    },
+    "trades": 30
+  },
+  {
+    "dd_pct": 1.3623032834547935,
+    "name": "b1-125",
+    "net_profit": 3043.7681648687603,
+    "profit_factor": 9.190479864882288,
+    "strategy": {
+      "confirmation": null,
+      "exits": [],
+      "long": true,
+      "money_management": {
+        "FixedSize": {
+          "size": 0.1
+        }
+      },
+      "name": "b1-125",
+      "profit_target": {
+        "Points": 284.6159046241886
+      },
+      "short": true,
+      "signals": [
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "AwesomeOsc",
+                  []
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "CCI",
+                  [
+                    {
+                      "name": "period",
+                      "value": 14.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "CrossBelow",
+              "left": {
+                "Price": [
+                  "Low",
+                  2
+                ]
+              },
+              "right": {
+                "Indicator": [
+                  "ZScore",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "BBMiddle",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    },
+                    {
+                      "name": "mult",
+                      "value": 2.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortEntry"
+        }
+      ],
+      "stop_loss": {
+        "Points": 61.93711510358339
+      },
+      "trading_options": {
+        "exit_at_end_of_day": false,
+        "exit_on_friday": false,
+        "limit_hours": null,
+        "max_trades_per_day": null
+      }
+    },
+    "trades": 18
+  },
+  {
+    "dd_pct": 0.6315683574392381,
+    "name": "b1-33",
+    "net_profit": 3563.5353893247657,
+    "profit_factor": 8.958205090025103,
+    "strategy": {
+      "confirmation": null,
+      "exits": [],
+      "long": true,
+      "money_management": {
+        "FixedSize": {
+          "size": 0.1
+        }
+      },
+      "name": "b1-33",
+      "profit_target": {
+        "Points": 150.30282268672786
+      },
+      "short": true,
+      "signals": [
+        {
+          "conditions": [
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "EOM",
+                  [
+                    {
+                      "name": "period",
+                      "value": 14.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            },
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "StochD",
+                  [
+                    {
+                      "name": "period",
+                      "value": 3.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "ParabolicSAR",
+                  [
+                    {
+                      "name": "step",
+                      "value": 0.02
+                    },
+                    {
+                      "name": "max",
+                      "value": 0.2
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "ParabolicSAR",
+                  [
+                    {
+                      "name": "step",
+                      "value": 0.02
+                    },
+                    {
+                      "name": "max",
+                      "value": 0.2
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongExit"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "ParabolicSAR",
+                  [
+                    {
+                      "name": "step",
+                      "value": 0.02
+                    },
+                    {
+                      "name": "max",
+                      "value": 0.2
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortExit"
+        }
+      ],
+      "stop_loss": {
+        "Points": 61.236863763145976
+      },
+      "trading_options": {
+        "exit_at_end_of_day": false,
+        "exit_on_friday": false,
+        "limit_hours": null,
+        "max_trades_per_day": null
+      }
+    },
+    "trades": 1087
+  },
+  {
+    "dd_pct": 1.8271689844842973,
+    "name": "b1-75",
+    "net_profit": 2733.8747971063513,
+    "profit_factor": 8.486474891130143,
+    "strategy": {
+      "confirmation": null,
+      "exits": [],
+      "long": true,
+      "money_management": {
+        "FixedSize": {
+          "size": 0.1
+        }
+      },
+      "name": "b1-75",
+      "profit_target": {
+        "Points": 172.16944303285985
+      },
+      "short": true,
+      "signals": [
+        {
+          "conditions": [
+            {
+              "cmp": "CrossAbove",
+              "left": {
+                "Price": [
+                  "Typical",
+                  2
+                ]
+              },
+              "right": {
+                "Indicator": [
+                  "BBUpper",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    },
+                    {
+                      "name": "mult",
+                      "value": 2.0
+                    }
+                  ]
+                ]
+              }
+            },
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "PivotP",
+                  []
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "Lowest",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortEntry"
+        }
+      ],
+      "stop_loss": {
+        "Points": 60.86252958085322
+      },
+      "trading_options": {
+        "exit_at_end_of_day": false,
+        "exit_on_friday": false,
+        "limit_hours": null,
+        "max_trades_per_day": null
+      }
+    },
+    "trades": 24
+  },
+  {
+    "dd_pct": 0.6459446649366003,
+    "name": "b1-170",
+    "net_profit": 1606.2676225095183,
+    "profit_factor": 7.727871785957772,
+    "strategy": {
+      "confirmation": null,
+      "exits": [],
+      "long": true,
+      "money_management": {
+        "FixedSize": {
+          "size": 0.1
+        }
+      },
+      "name": "b1-170",
+      "profit_target": {
+        "Points": 184.1785637527921
+      },
+      "short": true,
+      "signals": [
+        {
+          "conditions": [
+            {
+              "cmp": "CrossAbove",
+              "left": {
+                "Price": [
+                  "Low",
+                  0
+                ]
+              },
+              "right": {
+                "Indicator": [
+                  "LaguerreRSI",
+                  []
+                ]
+              }
+            },
+            {
+              "cmp": "Rising",
+              "left": {
+                "Indicator": [
+                  "TwiggsMF",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Gt",
+              "left": {
+                "Price": [
+                  "Open",
+                  1
+                ]
+              },
+              "right": {
+                "Indicator": [
+                  "PivotS1",
+                  []
+                ]
+              }
+            },
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "BBBandwidth",
+                  [
+                    {
+                      "name": "period",
+                      "value": 20.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortEntry"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "Fisher",
+                  [
+                    {
+                      "name": "period",
+                      "value": 9.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "LongExit"
+        },
+        {
+          "conditions": [
+            {
+              "cmp": "Falling",
+              "left": {
+                "Indicator": [
+                  "Fisher",
+                  [
+                    {
+                      "name": "period",
+                      "value": 9.0
+                    }
+                  ]
+                ]
+              },
+              "right": {
+                "Const": 0.0
+              }
+            }
+          ],
+          "fuzzy": null,
+          "join": "And",
+          "kind": "ShortExit"
+        }
+      ],
+      "stop_loss": {
+        "Points": 140.37792751760963
+      },
+      "trading_options": {
+        "exit_at_end_of_day": false,
+        "exit_on_friday": false,
+        "limit_hours": null,
+        "max_trades_per_day": null
+      }
+    },
+    "trades": 324
   }
 ]

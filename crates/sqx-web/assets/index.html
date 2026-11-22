@@ -6,6 +6,7 @@
 <title>SqxLabs — StrategyQuant open-source port</title>
 <style>
   :root { --bg:#0f1420; --panel:#171e2e; --line:#26304a; --fg:#e6ebf5; --dim:#8b96b3; --acc:#4f8cff; --good:#34c98e; --bad:#ff6b6b; }
+  body.light { --bg:#f6f7fb; --panel:#ffffff; --line:#dde3ee; --fg:#111827; --dim:#6b7280; --acc:#2563eb; --good:#059669; --bad:#dc2626; }
   * { box-sizing: border-box; }
   body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--fg); }
   header { padding:18px 24px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:14px; }
@@ -26,10 +27,10 @@
   #data-info b { color:var(--fg); font-weight:600; }
   button { background:var(--acc); color:#fff; border:0; border-radius:6px; padding:9px 16px; font-size:14px; cursor:pointer; }
   button:hover { filter:brightness(1.1); }
-  input[type=number], input[type=text], select { background:#0b0f1a; border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:8px; }
+  input[type=number], input[type=text], select { background:var(--bg); border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:8px; }
   input[type=number] { width:80px; }
   input[type=text] { width:160px; }
-  textarea { width:100%; height:180px; background:#0b0f1a; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:12px; font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+  textarea { width:100%; height:180px; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:12px; font-family:ui-monospace,Menlo,monospace; font-size:12px; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
   th, td { text-align:right; padding:6px 8px; border-bottom:1px solid var(--line); }
   th:first-child, td:first-child { text-align:left; }
@@ -38,7 +39,7 @@
   #catalog { display:flex; flex-wrap:wrap; gap:6px; }
   .chip { font-size:12px; padding:4px 9px; border:1px solid var(--line); border-radius:999px; color:var(--dim); }
   .chip.osc { border-color:#2a4a66; color:#8fbcff; }
-  pre { background:#0b0f1a; border:1px solid var(--line); border-radius:8px; padding:12px; font-size:12px; overflow:auto; white-space:pre-wrap; }
+  pre { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:12px; font-size:12px; overflow:auto; white-space:pre-wrap; }
   #chart { width:100%; height:220px; }
   .row { display:flex; gap:10px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
   .muted { color:var(--dim); font-size:12px; }
@@ -59,6 +60,7 @@
   <span style="margin-left:auto; display:flex; gap:10px; align-items:center;">
     <select id="symbol-select"></select>
     <span id="data-info"></span>
+    <button id="theme-toggle" style="background:var(--panel); color:var(--fg); border:1px solid var(--line); padding:6px 10px; font-size:12px;">Theme</button>
   </span>
 </header>
 <main>
@@ -78,6 +80,13 @@
       <div class="card">
         <h2>Overview</h2>
         <div id="home-stats" class="row" style="gap:28px"></div>
+      </div>
+      <div class="card" style="margin-top:18px">
+        <h2>Quick run</h2>
+        <div class="row">
+          <button id="home-tour">Run full tour (pipeline → databank)</button>
+          <span id="home-tour-status" class="muted"></span>
+        </div>
       </div>
       <div class="card" style="margin-top:18px">
         <h2>Getting started</h2>
@@ -1077,6 +1086,26 @@ async function refreshHome() {
     "<div><b>" + ((pf.brokers || []).length) + "</b><div class=\"muted\">broker profiles</div></div>" +
     "<div><b>" + (ai.model || "-") + "</b><div class=\"muted\">AI model</div></div>";
 }
+
+var tour = document.getElementById("home-tour");
+if (tour) tour.onclick = async function() {
+  var st = document.getElementById("home-tour-status");
+  st.textContent = "Running pipeline...";
+  var body = Object.assign({ symbol: selectedSymbol(), count: 200, keep: 15 }, settings(), genSettings());
+  var d = await postJSON("/api/pipeline", JSON.stringify(body));
+  if (d.error) { st.textContent = d.error; return; }
+  st.textContent = "Databank: " + (d.databank || 0) + " strategies";
+  await refreshDatabank();
+  await refreshHome();
+  document.querySelector('.nav-btn[data-tab="results"]').click();
+};
+
+if (localStorage.getItem("theme") === "light") document.body.classList.add("light");
+var themeBtn = document.getElementById("theme-toggle");
+if (themeBtn) themeBtn.onclick = function() {
+  document.body.classList.toggle("light");
+  localStorage.setItem("theme", document.body.classList.contains("light") ? "light" : "dark");
+};
 
 loadInfo();
 loadCatalog();
