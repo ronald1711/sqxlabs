@@ -18,6 +18,7 @@ sqx-export = { path = "../sqx-export" }
 sqx-robustness = { path = "../sqx-robustness" }
 sqx-web = { path = "../sqx-web" }
 sqx-portfolio = { path = "../sqx-portfolio" }
+sqx-pipeline = { path = "../sqx-pipeline" }
 clap.workspace = true
 anyhow.workspace = true
 serde_json.workspace = true

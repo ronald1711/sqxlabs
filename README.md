@@ -25,6 +25,7 @@ independently from the documented behaviour and public domain knowledge.
 | Export | sqx-export | MQL4 / MQL5 / PineScript / PseudoCode code generators |
 | Robustness | sqx-robustness | Monte Carlo trade-manipulation |
 | Portfolio | sqx-portfolio | Combine strategies, weights, correlation, best subset |
+| Custom Projects | sqx-pipeline | Build -> Retest -> Optimize pipeline with GoToTask |
 | Web | sqx-web | Embedded HTTP server + single-page dashboard |
 | CLI | sqx-cli | backtest / generate / evolve / optimize / export / montecarlo / portfolio / serve / indicators / pseudocode |
 
@@ -63,6 +64,9 @@ cargo run -q -p sqx-cli -- crosscheck --strategy examples/rsi-mean-reversion.jso
 
 # Serve the dashboard with multiple symbols (symbol = file stem)
 cargo run -q -p sqx-cli -- serve --data-dir data
+
+# Run a custom-project pipeline (Build -> Retest -> Optimize)
+cargo run -q -p sqx-cli -- pipeline --data data/eurusd_sample.csv --count 200 --keep 20
 
 # Start the web dashboard, then open http://127.0.0.1:8080
 cargo run -q -p sqx-cli -- serve --data data/eurusd_sample.csv

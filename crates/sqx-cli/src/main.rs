@@ -170,6 +170,15 @@ enum Cmd {
         #[arg(long, default_value_t = 5)]
         min_trades: usize,
     },
+    /// Run a custom-project pipeline: Build -> Retest -> Optimize.
+    Pipeline {
+        #[arg(long)]
+        data: PathBuf,
+        #[arg(long, default_value_t = 200)]
+        count: usize,
+        #[arg(long, default_value_t = 20)]
+        keep: usize,
+    },
 }
 
 fn main() -> Result<()> {
@@ -373,6 +382,20 @@ fn main() -> Result<()> {
                 );
             }
             println!("  Profitable on {}/{} markets (>= {} trades)", profitable, total, min_trades);
+            Ok(())
+        }
+        Cmd::Pipeline { data, count, keep } => {
+            let bars = load_bars(&data)?;
+            let inst = instrument("EURUSD");
+            let pyp = resolve_periods_per_year(bars.len(), 0.0, &bars);
+            let cfg = BacktestConfig::default();
+            let gen = GeneratorConfig::default();
+            let pipeline = sqx_pipeline::default_pipeline(count, keep);
+            println!("Pipeline: {}", pipeline.name);
+            let report = sqx_pipeline::run(&pipeline, &bars, &inst, &cfg, pyp, &gen, 42);
+            for line in &report.log {
+                println!("  {}", line);
+            }
             Ok(())
         }
     }

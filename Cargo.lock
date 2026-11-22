@@ -281,6 +281,7 @@ dependencies = [
  "sqx-indicators",
  "sqx-metrics",
  "sqx-optimizer",
+ "sqx-pipeline",
  "sqx-portfolio",
  "sqx-project",
  "sqx-robustness",
@@ -332,6 +333,19 @@ dependencies = [
  "sqx-backtest",
  "sqx-core",
  "sqx-metrics",
+ "sqx-strategy",
+]
+
+[[package]]
+name = "sqx-pipeline"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "sqx-backtest",
+ "sqx-core",
+ "sqx-metrics",
+ "sqx-optimizer",
+ "sqx-robustness",
  "sqx-strategy",
 ]
 
