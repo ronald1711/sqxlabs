@@ -124,6 +124,18 @@
         <div id="bt-results"></div>
       </div>
       <div class="card" style="margin-top:18px">
+        <h2>Strategy project</h2>
+        <div class="row">
+          <label class="muted">Name</label>
+          <input type="text" id="prj-name" value="my-strategy">
+          <button id="prj-save">Save strategy</button>
+        </div>
+        <div class="row">
+          <select id="prj-select" style="flex:1"></select>
+          <button id="prj-load">Load</button>
+        </div>
+      </div>
+      <div class="card" style="margin-top:18px">
         <h2>Indicator catalog</h2>
         <div id="catalog"></div>
       </div>
@@ -596,7 +608,7 @@ document.getElementById("btn-generate").onclick = async function() {
   });
   rows += "</table>";
   box.innerHTML = rows;
-  addResults(d.results);
+  refreshDatabank();
   box.querySelectorAll("tr").forEach(function(tr, i) {
     if (i === 0) return;
     const td = document.createElement("td");
@@ -616,6 +628,34 @@ document.getElementById("btn-generate").onclick = async function() {
 };
 
 document.getElementById("btn-backtest").onclick = runBacktest;
+
+async function refreshProjects() {
+  const d = await getJSON("/api/project/list");
+  const sel = document.getElementById("prj-select");
+  sel.innerHTML = "";
+  (d.projects || []).forEach(function(p) {
+    var o = document.createElement("option");
+    o.value = p; o.textContent = p;
+    sel.appendChild(o);
+  });
+}
+document.getElementById("prj-save").onclick = async function() {
+  const name = document.getElementById("prj-name").value.trim();
+  let obj;
+  try { obj = JSON.parse(document.getElementById("strategy").value); }
+  catch (e) { alert("Invalid strategy JSON"); return; }
+  const d = await postJSON("/api/project/save", JSON.stringify({ name: name, strategy: obj }));
+  if (d.error) { alert(d.error); return; }
+  await refreshProjects();
+};
+document.getElementById("prj-load").onclick = async function() {
+  const name = document.getElementById("prj-select").value;
+  if (!name) return;
+  const d = await getJSON("/api/project/load?name=" + encodeURIComponent(name));
+  if (d.error) { alert(d.error); return; }
+  document.getElementById("strategy").value = JSON.stringify(d, null, 2);
+};
+refreshProjects();
 
 document.getElementById("btn-export").onclick = async function() {
   const st = document.getElementById("exp-status");
@@ -733,7 +773,7 @@ document.getElementById("opt-run").onclick = async function() {
     });
     html += "</table>";
     box.innerHTML = html;
-    addResults(d.results);
+    refreshDatabank();
   } else if (d.kind === "walk-forward") {
     let html = "<table><tr><th>Windows</th><th>OOS trades</th><th>OOS net</th><th>OOS PF</th><th>OOS win %</th><th>OOS DD %</th></tr>";
     html += "<tr><td>" + d.windows + "</td><td>" + d.oos_trades + "</td><td>" + fmt(d.oos_net_profit, 2) + "</td><td>" + fmt(d.oos_profit_factor, 2) + "</td><td>" + fmt(d.oos_winning_pct, 1) + "</td><td>" + fmt(d.oos_max_dd_pct, 2) + "</td></tr></table>";
@@ -763,8 +803,9 @@ function genSettings() {
 }
 
 var RESULTS = [];
-function addResults(rows) {
-  (rows || []).forEach(function(r) { RESULTS.push(r); });
+async function refreshDatabank() {
+  const d = await getJSON("/api/databank");
+  RESULTS = d.rows || [];
   renderResults();
 }
 var RES_SORT = "profit_factor";
@@ -803,7 +844,7 @@ function renderResults() {
   });
 }
 var resClear = document.getElementById("res-clear");
-if (resClear) resClear.onclick = function() { RESULTS = []; renderResults(); };
+if (resClear) resClear.onclick = async function() { await postJSON("/api/databank/clear", "{}"); await refreshDatabank(); };
 
 function settings() {
   var g = function(id, d) { var el = document.getElementById(id); var v = el ? parseFloat(el.value) : NaN; return isNaN(v) ? d : v; };
@@ -873,6 +914,7 @@ document.querySelectorAll(".nav-btn").forEach(function(b) {
     var t = document.getElementById("tab-" + b.dataset.tab);
     if (t) t.classList.add("active");
     if (b.dataset.tab === "data") refreshDataManager();
+    if (b.dataset.tab === "results") refreshDatabank();
   };
 });
 

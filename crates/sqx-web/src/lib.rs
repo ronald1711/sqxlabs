@@ -22,11 +22,16 @@ const INDEX: &str = include_str!("../assets/index.html");
 
 struct State {
     store: RwLock<DataStore>,
+    databank: RwLock<Vec<serde_json::Value>>,
 }
 
 pub fn serve(addr: &str, store: DataStore) -> std::io::Result<()> {
     println!("SqxLabs web app: http://{addr} ({} symbols)", store.len());
-    let state = Arc::new(State { store: RwLock::new(store) });
+    let databank = std::fs::read_to_string("data/databank.json")
+        .ok()
+        .and_then(|t| serde_json::from_str::<Vec<serde_json::Value>>(&t).ok())
+        .unwrap_or_default();
+    let state = Arc::new(State { store: RwLock::new(store), databank: RwLock::new(databank) });
     let listener = TcpListener::bind(addr)?;
     for stream in listener.incoming() {
         match stream {
@@ -99,6 +104,17 @@ fn query_symbol(path: &str) -> (&str, String) {
     }
 }
 
+fn query_param(path: &str, key: &str) -> String {
+    match path.split_once('?') {
+        Some((_, q)) => q
+            .split('&')
+            .find_map(|kv| kv.strip_prefix(&format!("{key}=")))
+            .map(|s| s.to_string())
+            .unwrap_or_default(),
+        None => String::new(),
+    }
+}
+
 fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static str, &'static str, String) {
     let (path, qsym) = query_symbol(full_path);
     match (method, path) {
@@ -119,6 +135,11 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("POST", "/api/data/delete") => ("200 OK", "application/json", delete_json(body, state)),
         ("POST", "/api/assistant") => ("200 OK", "application/json", assistant_json(body, state)),
         ("GET", "/api/assistant/config") => ("200 OK", "application/json", assistant_config_json()),
+        ("GET", "/api/databank") => ("200 OK", "application/json", databank_json(state)),
+        ("POST", "/api/databank/clear") => ("200 OK", "application/json", databank_clear(state)),
+        ("GET", "/api/project/list") => ("200 OK", "application/json", project_list_json()),
+        ("GET", "/api/project/load") => ("200 OK", "application/json", project_load_json(&query_param(full_path, "name"))),
+        ("POST", "/api/project/save") => ("200 OK", "application/json", project_save_json(body)),
         _ => ("404 Not Found", "text/plain", "not found".to_string()),
     }
 }
@@ -198,6 +219,77 @@ fn datasources_json(state: &State) -> String {
         .collect();
     let default = st.series.first().map(|s| s.symbol.clone()).unwrap_or_default();
     json!({ "symbols": list, "default": default }).to_string()
+}
+
+fn persist_databank(state: &State) {
+    let rows = state.databank.read().unwrap();
+    let _ = std::fs::create_dir_all("data");
+    let _ = std::fs::write(
+        "data/databank.json",
+        serde_json::to_string_pretty(&*rows).unwrap_or_default(),
+    );
+}
+
+fn databank_json(state: &State) -> String {
+    let rows = state.databank.read().unwrap();
+    json!({ "rows": *rows, "count": rows.len() }).to_string()
+}
+
+fn databank_clear(state: &State) -> String {
+    state.databank.write().unwrap().clear();
+    persist_databank(state);
+    json!({ "ok": true }).to_string()
+}
+
+fn safe_name(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect()
+}
+
+fn project_list_json() -> String {
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir("data/projects") {
+        for e in entries.flatten() {
+            if let Some(stem) = e.path().file_stem().and_then(|s| s.to_str()) {
+                out.push(stem.to_string());
+            }
+        }
+    }
+    out.sort();
+    json!({ "projects": out }).to_string()
+}
+
+fn project_load_json(name: &str) -> String {
+    let safe = safe_name(name);
+    match std::fs::read_to_string(format!("data/projects/{safe}.json")) {
+        Ok(text) => text,
+        Err(e) => json!({ "error": e.to_string() }).to_string(),
+    }
+}
+
+fn project_save_json(body: &str) -> String {
+    let val: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let name = val.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    if name.is_empty() {
+        return json!({ "error": "name required" }).to_string();
+    }
+    let strategy = match val.get("strategy") {
+        Some(v) => v.clone(),
+        None => return json!({ "error": "strategy required" }).to_string(),
+    };
+    let dir = std::path::Path::new("data/projects");
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        return json!({ "error": e.to_string() }).to_string();
+    }
+    let path = dir.join(format!("{}.json", safe_name(&name)));
+    match std::fs::write(&path, serde_json::to_string_pretty(&strategy).unwrap_or_default()) {
+        Ok(_) => json!({ "ok": true, "name": name }).to_string(),
+        Err(e) => json!({ "error": e.to_string() }).to_string(),
+    }
 }
 
 fn export_json(body: &str) -> String {
@@ -310,6 +402,8 @@ fn optimize_json(body: &str, state: &State) -> String {
                     "dd_pct": m.max_drawdown_pct, "strategy": s
                 }))
                 .collect();
+            state.databank.write().unwrap().extend(rows.iter().cloned());
+            persist_databank(state);
             json!({ "kind": "simple", "results": rows }).to_string()
         }
     }
@@ -612,6 +706,8 @@ fn generate_json(body: &str, state: &State) -> String {
             })
         })
         .collect();
+    state.databank.write().unwrap().extend(rows.iter().cloned());
+    persist_databank(state);
     json!({ "results": rows, "symbol": series.symbol }).to_string()
 }
 
