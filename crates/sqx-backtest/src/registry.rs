@@ -19,6 +19,7 @@ pub fn compute(name: &str, params: &[sqx_strategy::Param], bars: &[Bar]) -> Opti
     let c = ind::closes(bars);
     let h = ind::highs(bars);
     let l = ind::lows(bars);
+    let o = ind::opens(bars);
     let res = match name {
         "SMA" => ind::sma(&c, period(params, 20)),
         "EMA" => ind::ema(&c, period(params, 20)),
@@ -133,6 +134,27 @@ pub fn compute(name: &str, params: &[sqx_strategy::Param], bars: &[Bar]) -> Opti
         "DonchianMiddle" => ind::donchian_middle(&h, &l, period(params, 20)),
         "OBV" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::obv(&c, &vol) },
         "MFI" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::mfi(&h, &l, &c, &vol, period(params, 14)) },
+        "TRIX" => ind::trix(&c, period(params, 15)),
+        "DPO" => ind::dpo(&c, period(params, 20)),
+        "AD" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::ad_line(&h, &l, &c, &vol) },
+        "ChaikinOsc" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::chaikin_osc(&h, &l, &c, &vol) },
+        "CMF" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::cmf(&h, &l, &c, &vol, period(params, 20)) },
+        "ForceIndex" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::force_index(&c, &vol, period(params, 13)) },
+        "MassIndex" => ind::mass_index(&h, &l),
+        "UltimateOsc" => ind::ultimate_osc(&h, &l, &c, 7, 14, 28),
+        "CMO" => ind::cmo(&c, period(params, 14)),
+        "TSI" => ind::tsi(&c, 25, 13),
+        "RVI" => ind::rvi(&h, &l, &c, &o, period(params, 10)),
+        "Coppock" => ind::coppock(&c),
+        "AccelOsc" => ind::accel_osc(&h, &l),
+        "HeikinAshiClose" => ind::heikin_ashi_close(&h, &l, &c, &o),
+        "PivotP" => ind::pivot_p(&h, &l, &c),
+        "UlcerIndex" => ind::ulcer_index(&c, period(params, 14)),
+        "RSquared" => ind::r_squared(&c, period(params, 20)),
+        "Percentile" => ind::percentile(&c, period(params, 20), 0.5),
+        "Median" => ind::median(&c, period(params, 20)),
+        "Skewness" => ind::skewness(&c, period(params, 20)),
+        "PVT" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::pvt(&c, &vol) },
         _ => return None,
     };
     Some(res)

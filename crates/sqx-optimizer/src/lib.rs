@@ -16,8 +16,8 @@ use sqx_backtest::{backtest, BacktestConfig};
 use sqx_core::{Bar, Instrument};
 use sqx_metrics::{compute as compute_metrics, Metrics};
 use sqx_strategy::{
-    indicator_catalog, Comparator, Condition, Join, MoneyManagement, Operand, ProfitTarget,
-    Signal, SignalKind, StopLoss, Strategy, BINARY_COMPARATORS, UNARY_COMPARATORS,
+    block_catalog, BlockSpec, Comparator, Condition, Join, MoneyManagement, Operand, Param,
+    ProfitTarget, Signal, SignalKind, StopLoss, Strategy, BINARY_COMPARATORS, UNARY_COMPARATORS,
 };
 
 /// Fitness measure used to rank strategies.
@@ -75,7 +75,7 @@ pub fn fitness(m: &Metrics, kind: Fitness, min_trades: usize) -> f64 {
 
 /// Generate one random strategy.
 pub fn random_strategy(rng: &mut StdRng, name: &str, config: &GeneratorConfig) -> Strategy {
-    let catalog = indicator_catalog();
+    let catalog = block_catalog();
     let mut s = Strategy::new(name);
     s.long = config.long;
     s.short = config.short;
@@ -83,19 +83,19 @@ pub fn random_strategy(rng: &mut StdRng, name: &str, config: &GeneratorConfig) -
 
     // Long entry signal: n random conditions.
     let n = rng.gen_range(config.min_conditions..=config.max_conditions);
-    let long_conditions: Vec<Condition> = (0..n).map(|_| random_condition(rng, catalog)).collect();
+    let long_conditions: Vec<Condition> = (0..n).map(|_| random_condition(rng, &catalog)).collect();
     s.signals.push(Signal::new(SignalKind::LongEntry, long_conditions, Join::And));
 
     // Short entry mirrors long (negated family), or is generated independently.
     if config.short {
         let n = rng.gen_range(config.min_conditions..=config.max_conditions);
-        let short_conditions: Vec<Condition> = (0..n).map(|_| random_condition(rng, catalog)).collect();
+        let short_conditions: Vec<Condition> = (0..n).map(|_| random_condition(rng, &catalog)).collect();
         s.signals.push(Signal::new(SignalKind::ShortEntry, short_conditions, Join::And));
     }
 
     // Long/short exit: close on opposite signal (a random condition) or none.
     if rng.gen_bool(0.5) {
-        let c = random_condition(rng, catalog);
+        let c = random_condition(rng, &catalog);
         s.signals.push(Signal::new(SignalKind::LongExit, vec![c.clone()], Join::And));
         s.signals.push(Signal::new(SignalKind::ShortExit, vec![c], Join::And));
     }
@@ -113,39 +113,24 @@ pub fn random_strategy(rng: &mut StdRng, name: &str, config: &GeneratorConfig) -
 }
 
 /// Generate a random condition from the catalog.
-fn random_condition(rng: &mut StdRng, catalog: &[sqx_strategy::IndicatorSpec]) -> Condition {
-    let pattern = rng.gen_range(0..3);
-    match pattern {
-        // Price crosses/compares to an indicator.
-        0 => {
-            let spec = catalog.choose(rng).unwrap();
-            let cmp = *BINARY_COMPARATORS.choose(rng).unwrap();
-            let field = *sqx_strategy::PRICE_FIELDS.choose(rng).unwrap();
-            let shift = rng.gen_range(0..3);
-            let left = Operand::Price(field, shift);
-            let right = Operand::Indicator(spec.name.to_string(), spec.default_params());
-            Condition::new(left, cmp, right)
-        }
-        // Oscillator vs a constant level.
-        1 => {
-            let oscillators: Vec<_> = catalog.iter().filter(|s| s.is_oscillator).collect();
-            if oscillators.is_empty() {
-                return random_condition(rng, catalog);
-            }
-            let spec = oscillators.choose(rng).unwrap();
-            let level = oscillator_level(rng, spec.name);
-            let cmp = *[Comparator::Gt, Comparator::Lt, Comparator::CrossAbove, Comparator::CrossBelow].choose(rng).unwrap();
-            let left = Operand::Indicator(spec.name.to_string(), spec.default_params());
-            let right = Operand::Const(level);
-            Condition::new(left, cmp, right)
-        }
-        // Unary: indicator rising / falling.
-        _ => {
-            let spec = catalog.choose(rng).unwrap();
-            let cmp = *UNARY_COMPARATORS.choose(rng).unwrap();
-            let left = Operand::Indicator(spec.name.to_string(), spec.default_params());
-            Condition::new(left, cmp, Operand::Const(0.0))
-        }
+fn random_condition(rng: &mut StdRng, catalog: &[BlockSpec]) -> Condition {
+    let spec = catalog.choose(rng).unwrap();
+    let params: Vec<Param> = spec.params.iter().map(|(n, v)| Param::new(n, *v)).collect();
+    if let Some(cmp) = spec.cmp {
+        return Condition::new(Operand::Indicator(spec.base.clone(), params), cmp, Operand::Const(0.0));
+    }
+    if rng.gen_bool(0.5) {
+        let cmp = *BINARY_COMPARATORS.choose(rng).unwrap();
+        let field = *sqx_strategy::PRICE_FIELDS.choose(rng).unwrap();
+        let shift = rng.gen_range(0..3);
+        Condition::new(Operand::Price(field, shift), cmp, Operand::Indicator(spec.base.clone(), params))
+    } else if spec.is_oscillator {
+        let level = oscillator_level(rng, &spec.base);
+        let cmp = *[Comparator::Gt, Comparator::Lt, Comparator::CrossAbove, Comparator::CrossBelow].choose(rng).unwrap();
+        Condition::new(Operand::Indicator(spec.base.clone(), params), cmp, Operand::Const(level))
+    } else {
+        let cmp = *UNARY_COMPARATORS.choose(rng).unwrap();
+        Condition::new(Operand::Indicator(spec.base.clone(), params), cmp, Operand::Const(0.0))
     }
 }
 
@@ -313,21 +298,21 @@ fn crossover(a: &Strategy, b: &Strategy, rng: &mut StdRng) -> Strategy {
 
 /// Mutate a strategy in place.
 fn mutate(s: &mut Strategy, config: &GeneratorConfig, rng: &mut StdRng) {
-    let catalog = indicator_catalog();
+    let catalog = block_catalog();
     let roll = rng.gen_range(0..4);
     match roll {
         // Replace a random condition.
         0 => {
             if let Some(sig) = s.signals.iter_mut().find(|sig| !sig.conditions.is_empty()) {
                 let idx = rng.gen_range(0..sig.conditions.len());
-                sig.conditions[idx] = random_condition(rng, catalog);
+                sig.conditions[idx] = random_condition(rng, &catalog);
             }
         }
         // Add a condition to a signal.
         1 => {
             if let Some(sig) = s.signals.iter_mut().next() {
                 if sig.conditions.len() < config.max_conditions {
-                    sig.conditions.push(random_condition(rng, catalog));
+                    sig.conditions.push(random_condition(rng, &catalog));
                 }
             }
         }

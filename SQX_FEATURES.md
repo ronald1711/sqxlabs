@@ -116,7 +116,7 @@ NinjaTrader8, AlgoCloud Stockpicker, AlgoCloud Single-asset.
 | Export MQL4/MQL5/PineScript | done |
 | Export NinjaTrader / EasyLanguage | missing |
 | Tick-precision backtests | partial (needs tick data) |
-| Indicators | 55 of ~250 |
+| Indicators | 76 base (228 building blocks with Rising/Falling variants) of ~250 |
 | MCP server (engine as tools) | done (sqx-mcp) |
 | Q AI Assistant / AlgoCloud / QuantAnalyzer | not ported |
 | Custom Java snippets / AlgoWizard custom blocks | missing (Rust blocks are compiled in) |

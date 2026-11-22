@@ -10,6 +10,7 @@
 
 mod extra;
 mod ma;
+mod more;
 mod osc;
 mod signal;
 mod trend;
@@ -18,6 +19,7 @@ mod volatility;
 
 pub use extra::*;
 pub use ma::*;
+pub use more::*;
 pub use osc::*;
 pub use signal::*;
 pub use trend::*;

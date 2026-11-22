@@ -79,7 +79,64 @@ pub fn indicator_catalog() -> &'static [IndicatorSpec] {
         IndicatorSpec { name: "DonchianMiddle", label: "Donchian middle", params: &[("period", 20.0)], is_oscillator: false },
         IndicatorSpec { name: "OBV", label: "On-balance volume", params: &[], is_oscillator: false },
         IndicatorSpec { name: "MFI", label: "Money flow index", params: &[("period", 14.0)], is_oscillator: true },
+        IndicatorSpec { name: "TRIX", label: "TRIX", params: &[("period", 15.0)], is_oscillator: true },
+        IndicatorSpec { name: "DPO", label: "Detrended price oscillator", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "AD", label: "Accumulation/Distribution", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "ChaikinOsc", label: "Chaikin oscillator", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "CMF", label: "Chaikin money flow", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "ForceIndex", label: "Force index", params: &[("period", 13.0)], is_oscillator: true },
+        IndicatorSpec { name: "MassIndex", label: "Mass index", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "UltimateOsc", label: "Ultimate oscillator", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "CMO", label: "Chande momentum", params: &[("period", 14.0)], is_oscillator: true },
+        IndicatorSpec { name: "TSI", label: "True strength index", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "RVI", label: "Relative vigor index", params: &[("period", 10.0)], is_oscillator: true },
+        IndicatorSpec { name: "Coppock", label: "Coppock curve", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "AccelOsc", label: "Accelerator oscillator", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "HeikinAshiClose", label: "Heikin Ashi close", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "PivotP", label: "Pivot point", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "UlcerIndex", label: "Ulcer index", params: &[("period", 14.0)], is_oscillator: false },
+        IndicatorSpec { name: "RSquared", label: "R-squared", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "Percentile", label: "Rolling percentile", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "Median", label: "Rolling median", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "Skewness", label: "Skewness", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "PVT", label: "Price volume trend", params: &[], is_oscillator: false },
     ]
+}
+
+/// A selectable building block: a base indicator, or a signal variant of it.
+#[derive(Debug, Clone)]
+pub struct BlockSpec {
+    pub name: String,
+    pub base: String,
+    /// Some(comparator) for signal variants (e.g. RSI Rising); None for the base indicator.
+    pub cmp: Option<Comparator>,
+    pub params: Vec<(&'static str, f64)>,
+    pub is_oscillator: bool,
+}
+
+/// The full block catalog used by the generator: every base indicator plus its
+/// Rising/Falling signal variants.
+pub fn block_catalog() -> Vec<BlockSpec> {
+    let mut out = Vec::new();
+    for spec in indicator_catalog() {
+        out.push(BlockSpec {
+            name: spec.name.to_string(),
+            base: spec.name.to_string(),
+            cmp: None,
+            params: spec.params.to_vec(),
+            is_oscillator: spec.is_oscillator,
+        });
+        for (suffix, cmp) in [("Rising", Comparator::Rising), ("Falling", Comparator::Falling)] {
+            out.push(BlockSpec {
+                name: format!("{}{}", spec.name, suffix),
+                base: spec.name.to_string(),
+                cmp: Some(cmp),
+                params: spec.params.to_vec(),
+                is_oscillator: spec.is_oscillator,
+            });
+        }
+    }
+    out
 }
 
 /// Binary comparators suitable for the generator.
