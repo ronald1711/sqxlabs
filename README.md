@@ -76,6 +76,7 @@ Then start the web app for the same data:
 cargo run -q -p sqx-cli -- serve --data data/mt5/EURUSD_M5.csv --symbol EURUSD
 ```
 
+```bash
 # Generate 300 random strategies, backtest, rank, print top 10
 cargo run -q -p sqx-cli -- generate --data data/eurusd_sample.csv --count 300 --top 10
 
