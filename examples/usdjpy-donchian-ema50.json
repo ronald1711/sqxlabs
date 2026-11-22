@@ -1,0 +1,45 @@
+{
+  "name": "USDJPY Donchian breakout + EMA50 trend (H1)",
+  "long": true,
+  "short": true,
+  "signals": [
+    {
+      "kind": "LongEntry",
+      "join": "And",
+      "fuzzy": null,
+      "conditions": [
+        { "left": { "Price": ["Close", 0] }, "cmp": "CrossAbove", "right": { "Indicator": ["DonchianUpper", [{ "name": "period", "value": 20.0 }]] } },
+        { "left": { "Indicator": ["EMA", [{ "name": "period", "value": 50.0 }]] }, "cmp": "Rising", "right": { "Const": 0.0 } }
+      ]
+    },
+    {
+      "kind": "ShortEntry",
+      "join": "And",
+      "fuzzy": null,
+      "conditions": [
+        { "left": { "Price": ["Close", 0] }, "cmp": "CrossBelow", "right": { "Indicator": ["DonchianLower", [{ "name": "period", "value": 20.0 }]] } },
+        { "left": { "Indicator": ["EMA", [{ "name": "period", "value": 50.0 }]] }, "cmp": "Falling", "right": { "Const": 0.0 } }
+      ]
+    },
+    {
+      "kind": "LongExit",
+      "join": "And",
+      "fuzzy": null,
+      "conditions": [
+        { "left": { "Price": ["Close", 0] }, "cmp": "CrossBelow", "right": { "Indicator": ["DonchianMiddle", [{ "name": "period", "value": 20.0 }]] } }
+      ]
+    },
+    {
+      "kind": "ShortExit",
+      "join": "And",
+      "fuzzy": null,
+      "conditions": [
+        { "left": { "Price": ["Close", 0] }, "cmp": "CrossAbove", "right": { "Indicator": ["DonchianMiddle", [{ "name": "period", "value": 20.0 }]] } }
+      ]
+    }
+  ],
+  "exits": [],
+  "stop_loss": { "Atr": { "period": 14, "mult": 2.0 } },
+  "profit_target": { "Atr": { "period": 14, "mult": 4.0 } },
+  "money_management": { "RiskFixedBalancePct": { "risk": 1.0 } }
+}

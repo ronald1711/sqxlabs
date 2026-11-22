@@ -37,20 +37,61 @@ pub fn lowest(src: &[f64], n: usize) -> Vec<f64> {
     out
 }
 
+/// Rolling maximum over the *previous* `n` values (excluding the current bar).
+/// Leading `n` values are `NAN`. Used for Donchian-style breakout bands, where
+/// the current bar must be able to exceed the channel to signal a breakout.
+pub fn highest_prior(src: &[f64], n: usize) -> Vec<f64> {
+    if n == 0 {
+        return vec![f64::NAN; src.len()];
+    }
+    let mut out = vec![f64::NAN; src.len()];
+    for i in 0..src.len() {
+        if i >= n {
+            let start = i - n;
+            let mut m = f64::NEG_INFINITY;
+            for v in &src[start..i] {
+                if *v > m { m = *v; }
+            }
+            out[i] = m;
+        }
+    }
+    out
+}
+
+/// Rolling minimum over the *previous* `n` values (excluding the current bar).
+/// Leading `n` values are `NAN`. Companion to [`highest_prior`].
+pub fn lowest_prior(src: &[f64], n: usize) -> Vec<f64> {
+    if n == 0 {
+        return vec![f64::NAN; src.len()];
+    }
+    let mut out = vec![f64::NAN; src.len()];
+    for i in 0..src.len() {
+        if i >= n {
+            let start = i - n;
+            let mut m = f64::INFINITY;
+            for v in &src[start..i] {
+                if *v < m { m = *v; }
+            }
+            out[i] = m;
+        }
+    }
+    out
+}
+
 /// Rolling sum over the trailing `n` values.
 pub fn sum(src: &[f64], n: usize) -> Vec<f64> {
     if n == 0 {
         return vec![f64::NAN; src.len()];
     }
     let mut out = vec![f64::NAN; src.len()];
-    let mut acc = 0.0;
     for i in 0..src.len() {
-        acc += src[i];
-        if i >= n {
-            acc -= src[i - n];
-        }
         if i + 1 >= n {
-            out[i] = acc;
+            let start = i + 1 - n;
+            let window = &src[start..=i];
+            if window.iter().any(|v| v.is_nan()) {
+                continue;
+            }
+            out[i] = window.iter().sum();
         }
     }
     out

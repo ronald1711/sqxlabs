@@ -7,11 +7,12 @@
 
 mod engine;
 mod evaluate;
-mod registry;
+pub mod registry;
 
 pub use engine::{backtest, backtest_ticks, BacktestConfig};
 pub use evaluate::compile_signal;
 pub use evaluate::CompiledSignals;
+pub use registry::compute;
 
 use sqx_core::{Direction, Timestamp};
 

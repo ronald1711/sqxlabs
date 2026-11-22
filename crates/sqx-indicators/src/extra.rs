@@ -1,7 +1,7 @@
 //! Additional indicators: Ichimoku, Vortex, Kaufman ER, Gann HiLo, Aroon
 //! oscillator, Stochastic RSI, Donchian channel, OBV and MFI.
 
-use crate::{highest, lowest, ma::*, rsi, sum, Series};
+use crate::{highest, highest_prior, lowest, lowest_prior, ma::*, rsi, sum, Series};
 
 fn mid(h: &[f64], l: &[f64], n: usize) -> Series {
     let hh = highest(h, n);
@@ -109,16 +109,16 @@ pub fn stoch_rsi(src: &[f64], rsi_n: usize, stoch_n: usize) -> Series {
 }
 
 pub fn donchian_upper(h: &[f64], n: usize) -> Series {
-    highest(h, n)
+    highest_prior(h, n)
 }
 
 pub fn donchian_lower(l: &[f64], n: usize) -> Series {
-    lowest(l, n)
+    lowest_prior(l, n)
 }
 
 pub fn donchian_middle(h: &[f64], l: &[f64], n: usize) -> Series {
-    let u = highest(h, n);
-    let d = lowest(l, n);
+    let u = highest_prior(h, n);
+    let d = lowest_prior(l, n);
     (0..h.len()).map(|i| (u[i] + d[i]) / 2.0).collect()
 }
 
