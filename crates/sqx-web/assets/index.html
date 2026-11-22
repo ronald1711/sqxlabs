@@ -950,6 +950,7 @@ function renderResults() {
       if (!r || !r.strategy) return;
       document.getElementById("strategy").value = JSON.stringify(r.strategy, null, 2);
       document.querySelector('.nav-btn[data-tab="builder"]').click();
+      if (typeof runBacktest === "function") runBacktest();
     };
   });
   box.querySelectorAll("button[data-exp]").forEach(function(b) {
