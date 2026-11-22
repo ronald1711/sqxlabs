@@ -737,6 +737,94 @@ pub fn autocorrelation(c: &[f64], n: usize, lag: usize) -> Series {
     out
 }
 
+pub fn variance(c: &[f64], n: usize) -> Series {
+    let sd = crate::stddev(c, n);
+    sd.iter().map(|v| v * v).collect()
+}
+
+pub fn mad(c: &[f64], n: usize) -> Series {
+    let med = percentile(c, n, 0.5);
+    let len = c.len();
+    let mut out = vec![f64::NAN; len];
+    for i in n.saturating_sub(1)..len {
+        let start = i + 1 - n;
+        let mut dev: Vec<f64> = (start..=i).map(|j| (c[j] - med[i]).abs()).collect();
+        dev.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        out[i] = dev[dev.len() / 2];
+    }
+    out
+}
+
+pub fn iqr(c: &[f64], n: usize) -> Series {
+    let q1 = percentile(c, n, 0.25);
+    let q3 = percentile(c, n, 0.75);
+    (0..c.len()).map(|i| q3[i] - q1[i]).collect()
+}
+
+pub fn linreg_forecast(c: &[f64], n: usize) -> Series {
+    let len = c.len();
+    let mut out = vec![f64::NAN; len];
+    for i in 0..len {
+        if i + 1 >= n {
+            let ys = &c[i + 1 - n..=i];
+            let xm = (n - 1) as f64 / 2.0;
+            let ym = ys.iter().sum::<f64>() / n as f64;
+            let (mut sxy, mut sxx) = (0.0, 0.0);
+            for (k, v) in ys.iter().enumerate() {
+                let dx = k as f64 - xm;
+                sxy += dx * (v - ym);
+                sxx += dx * dx;
+            }
+            let b = if sxx != 0.0 { sxy / sxx } else { 0.0 };
+            out[i] = ym + b * (n as f64 - 1.0 - xm);
+        }
+    }
+    out
+}
+
+fn ha_series(o: &[f64], h: &[f64], l: &[f64], c: &[f64]) -> (Series, Series, Series, Series) {
+    let len = o.len();
+    let mut ha_close = vec![f64::NAN; len];
+    let mut ha_open = vec![f64::NAN; len];
+    for i in 0..len {
+        ha_close[i] = (o[i] + h[i] + l[i] + c[i]) / 4.0;
+        ha_open[i] = if i == 0 { (o[i] + c[i]) / 2.0 } else { (ha_open[i - 1] + ha_close[i - 1]) / 2.0 };
+    }
+    let ha_high: Vec<f64> = (0..len).map(|i| h[i].max(ha_open[i]).max(ha_close[i])).collect();
+    let ha_low: Vec<f64> = (0..len).map(|i| l[i].min(ha_open[i]).min(ha_close[i])).collect();
+    (ha_open, ha_high, ha_low, ha_close)
+}
+
+pub fn heikin_ashi_open(o: &[f64], h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    ha_series(o, h, l, c).0
+}
+
+pub fn heikin_ashi_high(o: &[f64], h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    ha_series(o, h, l, c).1
+}
+
+pub fn heikin_ashi_low(o: &[f64], h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    ha_series(o, h, l, c).2
+}
+
+pub fn adr(h: &[f64], l: &[f64], n: usize) -> Series {
+    let r: Vec<f64> = (0..h.len()).map(|i| h[i] - l[i]).collect();
+    sma(&r, n)
+}
+
+pub fn range_ratio(h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    (0..h.len())
+        .map(|i| if c[i] != 0.0 { (h[i] - l[i]) / c[i] } else { f64::NAN })
+        .collect()
+}
+
+pub fn true_range_pct(h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    let tr = tr_of(h, l, c);
+    (0..c.len())
+        .map(|i| if c[i] != 0.0 { tr[i] / c[i] * 100.0 } else { f64::NAN })
+        .collect()
+}
+
 pub fn fisher(h: &[f64], l: &[f64], n: usize) -> Series {
     let len = h.len();
     let hh = highest(h, n);

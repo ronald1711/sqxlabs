@@ -164,6 +164,16 @@ pub fn indicator_catalog() -> &'static [IndicatorSpec] {
         IndicatorSpec { name: "OpenCloseRange", label: "Open-close range", params: &[], is_oscillator: true },
         IndicatorSpec { name: "PriceChannelMiddle", label: "Price channel middle", params: &[("period", 20.0)], is_oscillator: false },
         IndicatorSpec { name: "Autocorrelation", label: "Autocorrelation", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "Variance", label: "Variance", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "MAD", label: "Median absolute deviation", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "IQR", label: "Interquartile range", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "LinRegForecast", label: "Linear regression forecast", params: &[("period", 14.0)], is_oscillator: false },
+        IndicatorSpec { name: "HeikinAshiOpen", label: "Heikin Ashi open", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "HeikinAshiHigh", label: "Heikin Ashi high", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "HeikinAshiLow", label: "Heikin Ashi low", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "ADR", label: "Average daily range", params: &[("period", 14.0)], is_oscillator: false },
+        IndicatorSpec { name: "RangeRatio", label: "Range ratio", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "TrueRangePct", label: "True range %", params: &[], is_oscillator: true },
     ]
 }
 

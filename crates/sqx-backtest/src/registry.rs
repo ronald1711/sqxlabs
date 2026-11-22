@@ -224,6 +224,16 @@ pub fn compute(name: &str, params: &[sqx_strategy::Param], bars: &[Bar]) -> Opti
         "OpenCloseRange" => ind::open_close_range(&o, &c),
         "PriceChannelMiddle" => ind::price_channel_middle(&h, &l, period(params, 20)),
         "Autocorrelation" => ind::autocorrelation(&c, period(params, 20), 1),
+        "Variance" => ind::variance(&c, period(params, 20)),
+        "MAD" => ind::mad(&c, period(params, 20)),
+        "IQR" => ind::iqr(&c, period(params, 20)),
+        "LinRegForecast" => ind::linreg_forecast(&c, period(params, 14)),
+        "HeikinAshiOpen" => ind::heikin_ashi_open(&o, &h, &l, &c),
+        "HeikinAshiHigh" => ind::heikin_ashi_high(&o, &h, &l, &c),
+        "HeikinAshiLow" => ind::heikin_ashi_low(&o, &h, &l, &c),
+        "ADR" => ind::adr(&h, &l, period(params, 14)),
+        "RangeRatio" => ind::range_ratio(&h, &l, &c),
+        "TrueRangePct" => ind::true_range_pct(&h, &l, &c),
         _ => return None,
     };
     Some(res)
