@@ -180,6 +180,16 @@ pub fn compute(name: &str, params: &[sqx_strategy::Param], bars: &[Bar]) -> Opti
         "ChaikinVolatility" => ind::chaikin_volatility(&h, &l, period(params, 10)),
         "PsychologicalLine" => ind::psychological_line(&c, period(params, 12)),
         "CenterOfGravity" => ind::center_of_gravity(&c, period(params, 10)),
+        "Klinger" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::klinger(&h, &l, &c, &vol, 34, 55) },
+        "KST" => ind::kst(&c),
+        "RMI" => ind::rmi(&c, period(params, 14)),
+        "TII" => ind::tii(&c, period(params, 14)),
+        "VWMA" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::vwma(&c, &vol, period(params, 20)) },
+        "PivotR1" => ind::pivot_r1(&h, &l, &c),
+        "PivotS1" => ind::pivot_s1(&h, &l, &c),
+        "PriceChannelUpper" => ind::price_channel_upper(&h, period(params, 20)),
+        "PriceChannelLower" => ind::price_channel_lower(&l, period(params, 20)),
+        "Slope" => ind::slope(&c, period(params, 14)),
         _ => return None,
     };
     Some(res)

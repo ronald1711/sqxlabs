@@ -357,6 +357,152 @@ pub fn center_of_gravity(c: &[f64], n: usize) -> Series {
     out
 }
 
+pub fn klinger(h: &[f64], l: &[f64], c: &[f64], v: &[f64], fast: usize, slow: usize) -> Series {
+    let len = h.len();
+    let mut vf = vec![0.0; len];
+    let mut cm = 0.0;
+    let mut prev_trend = 0.0;
+    for i in 1..len {
+        let hlc = h[i] + l[i] + c[i];
+        let phlc = h[i - 1] + l[i - 1] + c[i - 1];
+        let trend = if hlc > phlc { 1.0 } else if hlc < phlc { -1.0 } else { 0.0 };
+        let dm = (h[i] - l[i]).abs();
+        let pdm = (h[i - 1] - l[i - 1]).abs();
+        if i == 1 {
+            cm = dm;
+        } else if trend == prev_trend {
+            cm += dm;
+        } else {
+            cm = pdm + dm;
+        }
+        prev_trend = trend;
+        let r = if cm != 0.0 { (2.0 * dm / cm - 1.0).abs() } else { 0.0 };
+        vf[i] = v[i] * r * trend * 100.0;
+    }
+    let f = ema(&vf, fast);
+    let s = ema(&vf, slow);
+    (0..len).map(|i| f[i] - s[i]).collect()
+}
+
+pub fn kst(c: &[f64]) -> Series {
+    let r1 = roc(c, 10);
+    let r2 = roc(c, 15);
+    let r3 = roc(c, 20);
+    let r4 = roc(c, 30);
+    let s1 = sma(&r1, 10);
+    let s2 = sma(&r2, 10);
+    let s3 = sma(&r3, 10);
+    let s4 = sma(&r4, 15);
+    (0..c.len())
+        .map(|i| s1[i] + 2.0 * s2[i] + 3.0 * s3[i] + 4.0 * s4[i])
+        .collect()
+}
+
+pub fn rmi(c: &[f64], n: usize) -> Series {
+    let len = c.len();
+    let mut mom = vec![0.0; len];
+    for i in n..len {
+        mom[i] = c[i] - c[i - n];
+    }
+    let mut out = vec![f64::NAN; len];
+    for i in (2 * n)..len {
+        let (mut up, mut dn) = (0.0, 0.0);
+        for j in (i - n + 1)..=i {
+            let d = mom[j] - mom[j - 1];
+            if d > 0.0 {
+                up += d;
+            } else {
+                dn += -d;
+            }
+        }
+        out[i] = if up + dn == 0.0 { 50.0 } else { up / (up + dn) * 100.0 };
+    }
+    out
+}
+
+pub fn tii(c: &[f64], n: usize) -> Series {
+    let len = c.len();
+    let mut out = vec![f64::NAN; len];
+    for i in n..len {
+        let (mut up, mut dn) = (0.0, 0.0);
+        for j in (i - n + 1)..=i {
+            let d = c[j] - c[j - 1];
+            if d > 0.0 {
+                up += d;
+            } else {
+                dn += -d;
+            }
+        }
+        out[i] = if up + dn == 0.0 { 50.0 } else { up / (up + dn) * 100.0 };
+    }
+    out
+}
+
+pub fn vwma(c: &[f64], v: &[f64], n: usize) -> Series {
+    let len = c.len();
+    let mut out = vec![f64::NAN; len];
+    for i in n.saturating_sub(1)..len {
+        let start = i + 1 - n;
+        let mut num = 0.0;
+        let mut den = 0.0;
+        for j in start..=i {
+            num += c[j] * v[j];
+            den += v[j];
+        }
+        out[i] = if den != 0.0 { num / den } else { f64::NAN };
+    }
+    out
+}
+
+pub fn pivot_r1(h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    let p = pivot_p(h, l, c);
+    (0..h.len()).map(|i| 2.0 * p[i] - l[i]).collect()
+}
+
+pub fn pivot_s1(h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    let p = pivot_p(h, l, c);
+    (0..h.len()).map(|i| 2.0 * p[i] - h[i]).collect()
+}
+
+pub fn linreg_slope(c: &[f64], n: usize) -> Series {
+    let len = c.len();
+    let mut out = vec![f64::NAN; len];
+    for i in 0..len {
+        if i + 1 >= n {
+            let ys = &c[i + 1 - n..=i];
+            let xm = (n - 1) as f64 / 2.0;
+            let ym = ys.iter().sum::<f64>() / n as f64;
+            let (mut sxy, mut sxx) = (0.0, 0.0);
+            for (k, v) in ys.iter().enumerate() {
+                let dx = k as f64 - xm;
+                sxy += dx * (v - ym);
+                sxx += dx * dx;
+            }
+            out[i] = if sxx != 0.0 { sxy / sxx } else { 0.0 };
+        }
+    }
+    out
+}
+
+pub fn price_channel_upper(h: &[f64], n: usize) -> Series {
+    highest(h, n)
+}
+
+pub fn price_channel_lower(l: &[f64], n: usize) -> Series {
+    lowest(l, n)
+}
+
+pub fn slope(c: &[f64], n: usize) -> Series {
+    let s = sma(c, n);
+    let mut out = vec![f64::NAN; c.len()];
+    for i in n..c.len() {
+        if !s[i].is_nan() && !s[i - n].is_nan() {
+            out[i] = (s[i] - s[i - n]) / n as f64;
+        }
+    }
+    out
+}
+
 pub fn fisher(h: &[f64], l: &[f64], n: usize) -> Series {
     let len = h.len();
     let hh = highest(h, n);

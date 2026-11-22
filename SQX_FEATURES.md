@@ -115,7 +115,7 @@ NinjaTrader8, AlgoCloud Stockpicker, AlgoCloud Single-asset.
 | AlgoWizard-style editor | done (signals/conditions + MM/trading-options sidebar) |
 | Export MQL4/MQL5/PineScript/NinjaScript/EasyLanguage | done |
 | Tick-precision backtests | done (`backtest_ticks`, tick CSV export from MT5) |
-| Indicators | 101 base (303 building blocks with Rising/Falling variants) — beyond the ~250 target |
+| Indicators | 112 base (336 building blocks with Rising/Falling variants) — beyond the ~250 target |
 | MCP server (engine as tools) | done (sqx-mcp) |
 | QuantAnalyzer-style analysis | done (sqx-analyzer: monthly returns, drawdown periods, trade stats, rolling Sharpe) |
 | Q AI Assistant / AlgoCloud | not ported (separate commercial products) |

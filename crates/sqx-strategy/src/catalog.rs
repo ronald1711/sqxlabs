@@ -125,6 +125,17 @@ pub fn indicator_catalog() -> &'static [IndicatorSpec] {
         IndicatorSpec { name: "ChaikinVolatility", label: "Chaikin volatility", params: &[("period", 10.0)], is_oscillator: true },
         IndicatorSpec { name: "PsychologicalLine", label: "Psychological line", params: &[("period", 12.0)], is_oscillator: true },
         IndicatorSpec { name: "CenterOfGravity", label: "Center of gravity", params: &[("period", 10.0)], is_oscillator: true },
+        IndicatorSpec { name: "Klinger", label: "Klinger volume oscillator", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "KST", label: "Know sure thing", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "RMI", label: "Relative momentum index", params: &[("period", 14.0)], is_oscillator: true },
+        IndicatorSpec { name: "TII", label: "Trend intensity index", params: &[("period", 14.0)], is_oscillator: true },
+        IndicatorSpec { name: "VWMA", label: "Volume-weighted MA", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "PivotR1", label: "Pivot R1", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "PivotS1", label: "Pivot S1", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "LinRegSlope", label: "Linear regression slope", params: &[("period", 14.0)], is_oscillator: true },
+        IndicatorSpec { name: "PriceChannelUpper", label: "Price channel upper", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "PriceChannelLower", label: "Price channel lower", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "Slope", label: "SMA slope", params: &[("period", 14.0)], is_oscillator: true },
     ]
 }
 
