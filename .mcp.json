@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "sqxlabs": {
+      "command": "/Volumes/E-512GB/projects/StrategyQuant/target/debug/sqx-mcp",
+      "env": {
+        "SQX_QUESTDB_HOST": "192.168.10.33",
+        "SQX_QUESTDB_PORT": "9000"
+      }
+    }
+  }
+}

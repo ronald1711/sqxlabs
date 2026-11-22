@@ -11,8 +11,8 @@ use rand::SeedableRng;
 use serde_json::json;
 
 use sqx_backtest::{backtest, BacktestConfig, BacktestResult};
-use sqx_core::{Bar, Instrument};
-use sqx_data::{DataStore, SymbolSeries};
+use sqx_core::{Bar, Instrument, Timeframe};
+use sqx_data::{DataStore, QuestdbClient, SymbolSeries};
 use sqx_metrics::{compute as compute_metrics, Metrics};
 use sqx_optimizer::{backtest_batch, rank, random_strategy, walk_forward, Fitness, GeneratorConfig};
 use sqx_robustness::{monte_carlo_trade_manipulation, what_if};
@@ -23,15 +23,16 @@ const INDEX: &str = include_str!("../assets/index.html");
 struct State {
     store: RwLock<DataStore>,
     databank: RwLock<Vec<serde_json::Value>>,
+    questdb: Option<QuestdbClient>,
 }
 
-pub fn serve(addr: &str, store: DataStore) -> std::io::Result<()> {
+pub fn serve(addr: &str, store: DataStore, questdb: Option<QuestdbClient>) -> std::io::Result<()> {
     println!("SqxLabs web app: http://{addr} ({} symbols)", store.len());
     let databank = std::fs::read_to_string("data/databank.json")
         .ok()
         .and_then(|t| serde_json::from_str::<Vec<serde_json::Value>>(&t).ok())
         .unwrap_or_default();
-    let state = Arc::new(State { store: RwLock::new(store), databank: RwLock::new(databank) });
+    let state = Arc::new(State { store: RwLock::new(store), databank: RwLock::new(databank), questdb });
     let listener = TcpListener::bind(addr)?;
     for stream in listener.incoming() {
         match stream {
@@ -158,6 +159,8 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("GET", "/api/indicators") => ("200 OK", "application/json", indicators_json()),
         ("GET", "/api/catalog") => ("200 OK", "application/json", catalog_json()),
         ("GET", "/api/datasources") => ("200 OK", "application/json", datasources_json(state)),
+        ("GET", "/api/questdb/symbols") => ("200 OK", "application/json", questdb_symbols_json(state)),
+        ("POST", "/api/questdb/load") => ("200 OK", "application/json", questdb_load_json(body, state)),
         ("GET", "/api/data") => ("200 OK", "application/json", data_json(state, &qsym)),
         ("POST", "/api/backtest") => ("200 OK", "application/json", backtest_json(body, state)),
         ("POST", "/api/generate") => ("200 OK", "application/json", generate_json(body, state)),
@@ -172,6 +175,7 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("POST", "/api/data/delete") => ("200 OK", "application/json", delete_json(body, state)),
         ("POST", "/api/assistant") => ("200 OK", "application/json", assistant_json(body, state)),
         ("GET", "/api/assistant/config") => ("200 OK", "application/json", assistant_config_json()),
+        ("POST", "/api/assistant/config") => ("200 OK", "application/json", assistant_config_save_json(body)),
         ("GET", "/api/databank") => ("200 OK", "application/json", databank_json(state)),
         ("GET", "/api/databank.csv") => ("200 OK", "text/csv; charset=utf-8", databank_csv(state)),
         ("POST", "/api/databank/clear") => ("200 OK", "application/json", databank_clear(state)),
@@ -261,6 +265,45 @@ fn datasources_json(state: &State) -> String {
         .collect();
     let default = st.series.first().map(|s| s.symbol.clone()).unwrap_or_default();
     json!({ "symbols": list, "default": default }).to_string()
+}
+
+fn questdb_symbols_json(state: &State) -> String {
+    let client = match &state.questdb {
+        None => return json!({ "error": "QuestDB not configured (start with --questdb)" }).to_string(),
+        Some(c) => c,
+    };
+    match client.list_symbols() {
+        Ok(syms) => json!({ "symbols": syms }).to_string(),
+        Err(e) => json!({ "error": e }).to_string(),
+    }
+}
+
+fn questdb_load_json(body: &str, state: &State) -> String {
+    let client = match &state.questdb {
+        None => return json!({ "error": "QuestDB not configured (start with --questdb)" }).to_string(),
+        Some(c) => c,
+    };
+    let val: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let symbol = val.get("symbol").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    if symbol.is_empty() {
+        return json!({ "error": "symbol required" }).to_string();
+    }
+    let timeframe: Timeframe = match val.get("timeframe").and_then(|v| v.as_str()).unwrap_or("M5").parse() {
+        Ok(t) => t,
+        Err(e) => return json!({ "error": e }).to_string(),
+    };
+    let limit = val.get("limit").and_then(|v| v.as_u64()).unwrap_or(5000).clamp(100, 100_000) as usize;
+    match client.fetch_bars(&symbol, timeframe, None, None, Some(limit)) {
+        Ok(bars) => {
+            let n = bars.len();
+            state.store.write().unwrap().add(&symbol, timeframe, bars);
+            json!({ "ok": true, "symbol": symbol, "timeframe": timeframe.label(), "bars": n }).to_string()
+        }
+        Err(e) => json!({ "error": e }).to_string(),
+    }
 }
 
 fn strategy_key(r: &serde_json::Value) -> Option<String> {
@@ -787,24 +830,70 @@ fn robustness_json(body: &str, state: &State) -> String {
     .to_string()
 }
 
+fn assistant_config_file() -> std::path::PathBuf {
+    std::path::Path::new("data").join("assistant.json")
+}
+
+/// The persisted (UI-saved) assistant settings, if any.
+fn assistant_config_load() -> serde_json::Value {
+    std::fs::read_to_string(assistant_config_file())
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .unwrap_or_else(|| json!({}))
+}
+
+/// Resolve the LLM config: UI-saved values take precedence over env vars,
+/// which take precedence over the auto-detect (Ollama on 11434, else Groq).
 fn llm_config() -> sqx_assistant::LlmConfig {
-    let base_url = std::env::var("SQX_LLM_BASE_URL").unwrap_or_else(|_| {
+    let saved = assistant_config_load();
+    let saved_base = saved.get("base_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let saved_model = saved.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let saved_key = saved.get("api_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+    let base_url = if !saved_base.is_empty() {
+        saved_base
+    } else if let Ok(v) = std::env::var("SQX_LLM_BASE_URL") {
+        v
+    } else {
         let addr = "127.0.0.1:11434".parse().unwrap();
         if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(250)).is_ok() {
             "http://127.0.0.1:11434/v1".to_string()
         } else {
             "https://api.groq.com/openai/v1".to_string()
         }
-    });
-    let model = std::env::var("SQX_LLM_MODEL").unwrap_or_else(|_| {
-        if base_url.contains("11434") {
-            "llama3.1".to_string()
-        } else {
-            "llama-3.3-70b-versatile".to_string()
-        }
-    });
-    let api_key = std::env::var("SQX_LLM_API_KEY").unwrap_or_default();
+    };
+    let model = if !saved_model.is_empty() {
+        saved_model
+    } else if let Ok(v) = std::env::var("SQX_LLM_MODEL") {
+        v
+    } else if base_url.contains("11434") {
+        "llama3.1".to_string()
+    } else {
+        "llama-3.3-70b-versatile".to_string()
+    };
+    let api_key = if !saved_key.is_empty() {
+        saved_key
+    } else {
+        std::env::var("SQX_LLM_API_KEY").unwrap_or_default()
+    };
     sqx_assistant::LlmConfig { base_url, model, api_key, max_rounds: 6 }
+}
+
+fn assistant_config_save_json(body: &str) -> String {
+    let val: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let base_url = val.get("base_url").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let model = val.get("model").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let api_key = val.get("api_key").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let mut saved = assistant_config_load();
+    saved["base_url"] = json!(base_url);
+    saved["model"] = json!(model);
+    saved["api_key"] = json!(api_key);
+    let _ = std::fs::create_dir_all("data");
+    let _ = std::fs::write(assistant_config_file(), serde_json::to_string_pretty(&saved).unwrap_or_default());
+    json!({ "ok": true, "api_key_set": !api_key.is_empty() }).to_string()
 }
 
 fn assistant_config_json() -> String {

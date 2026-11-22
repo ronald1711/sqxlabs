@@ -7,3 +7,6 @@ description = "Data Manager: multi-symbol/timeframe bar store and CSV import."
 
 [dependencies]
 sqx-core = { path = "../sqx-core" }
+serde_json.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+ureq = { version = "2", default-features = false }

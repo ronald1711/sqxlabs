@@ -36,3 +36,34 @@ impl std::fmt::Display for Timeframe {
         f.write_str(self.label())
     }
 }
+
+/// Parse a timeframe from a label ("M5", "H1", "D1", ...) or a QuestDB-style
+/// unit ("1m", "5m", "1h", "1d", ...).
+impl std::str::FromStr for Timeframe {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use Timeframe::*;
+        let t = s.trim();
+        let up = t.to_ascii_uppercase();
+        let low = t.to_ascii_lowercase();
+        Ok(match (up.as_str(), low.as_str()) {
+            ("M1", _) | (_, "1m") => M1,
+            ("M2", _) | (_, "2m") => M2,
+            ("M3", _) | (_, "3m") => M3,
+            ("M5", _) | (_, "5m") => M5,
+            ("M10", _) | (_, "10m") => M10,
+            ("M15", _) | (_, "15m") => M15,
+            ("M30", _) | (_, "30m") => M30,
+            ("H1", _) | (_, "1h") => H1,
+            ("H2", _) | (_, "2h") => H2,
+            ("H4", _) | (_, "4h") => H4,
+            ("H6", _) | (_, "6h") => H6,
+            ("H8", _) | (_, "8h") => H8,
+            ("H12", _) | (_, "12h") => H12,
+            ("D1", _) | (_, "1d") => D1,
+            ("W1", _) | (_, "1w") | (_, "7d") => W1,
+            ("MN1", _) | (_, "1mn") | (_, "1mth") | (_, "1mon") => MN1,
+            _ => return Err(format!("unknown timeframe '{t}'")),
+        })
+    }
+}

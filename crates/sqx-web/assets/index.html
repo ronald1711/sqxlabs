@@ -287,6 +287,22 @@
         <textarea id="dm-csv" placeholder="timestamp,open,high,low,close,volume&#10;1700000000,1.10,1.11,1.09,1.105,100"></textarea>
       </div>
       <div class="card" style="margin-top:18px">
+        <h2>QuestDB</h2>
+        <div class="row">
+          <button id="qdb-list">Load symbols</button>
+          <label class="muted">Timeframe</label>
+          <select id="qdb-tf">
+            <option>M1</option><option selected>M5</option><option>M15</option><option>M30</option>
+            <option>H1</option><option>H4</option><option>D1</option><option>W1</option><option>MN1</option>
+          </select>
+          <label class="muted">Limit</label>
+          <input type="number" id="qdb-limit" value="5000" style="width:90px">
+          <button id="qdb-load">Load selected</button>
+          <span id="qdb-status" class="muted"></span>
+        </div>
+        <div id="qdb-symbols" class="muted" style="margin-top:10px">Click “Load symbols” to fetch the symbol list from QuestDB.</div>
+      </div>
+      <div class="card" style="margin-top:18px">
         <h2>Broker profiles</h2>
         <div id="bp-list" class="muted">No profiles yet.</div>
         <div class="row" style="margin-top:10px">
@@ -341,6 +357,32 @@
         <p class="muted">Applied to Builder backtests and Optimizer runs.</p>
         <h2 style="margin-top:18px">AI model</h2>
         <div id="set-ai" class="muted" style="font-size:12px;"></div>
+        <div class="row" style="margin-top:10px">
+          <button id="ai-load-models">Load / refresh models (models.dev)</button>
+          <label class="muted"><input type="checkbox" id="ai-text-only" checked> text-capable only</label>
+          <span id="ai-models-status" class="muted"></span>
+        </div>
+        <div class="row">
+          <label class="muted">Provider</label>
+          <select id="ai-provider" style="width:180px"></select>
+          <label class="muted">Model</label>
+          <select id="ai-model-select" style="width:240px"></select>
+        </div>
+        <div class="row">
+          <label class="muted">Base URL</label>
+          <input type="text" id="ai-base" placeholder="https://api.groq.com/openai/v1" style="flex:1">
+        </div>
+        <div class="row">
+          <label class="muted">Model</label>
+          <input type="text" id="ai-model" placeholder="llama-3.3-70b-versatile" style="width:220px">
+        </div>
+        <div class="row">
+          <label class="muted">API key</label>
+          <input type="password" id="ai-key" placeholder="sk-…" style="flex:1">
+          <button id="ai-save">Save</button>
+          <span id="ai-save-status" class="muted"></span>
+        </div>
+        <p class="muted">Stored locally in data/assistant.json. Leave Base URL/Model empty to auto-use Ollama on 127.0.0.1:11434 (no key needed).</p>
       </div>
     </section>
     <section id="tab-assistant" class="tab">
@@ -777,6 +819,12 @@ async function refreshAiStatus() {
     if (a) a.textContent = txt;
     const s = document.getElementById("set-ai");
     if (s) s.textContent = txt;
+    const b = document.getElementById("ai-base");
+    if (b && !b.value) b.value = d.base_url || "";
+    const m = document.getElementById("ai-model");
+    if (m && !m.value) m.value = d.model || "";
+    const k = document.getElementById("ai-key");
+    if (k) k.placeholder = d.api_key_set ? "•••••• (set)" : "sk-…";
   } catch (e) {}
 }
 
@@ -794,6 +842,136 @@ async function askAssistant() {
   }
 }
 document.getElementById("btn-ai").onclick = askAssistant;
+
+document.getElementById("ai-save").onclick = async function() {
+  const st = document.getElementById("ai-save-status");
+  const base = document.getElementById("ai-base").value.trim();
+  const model = document.getElementById("ai-model").value.trim();
+  const key = document.getElementById("ai-key").value.trim();
+  st.textContent = "Saving…";
+  const d = await postJSON("/api/assistant/config", JSON.stringify({ base_url: base, model: model, api_key: key }));
+  if (d.error) { st.textContent = d.error; return; }
+  st.textContent = d.api_key_set ? "Saved (key set)" : "Saved (no key)";
+  await refreshAiStatus();
+};
+
+var AI_PROVIDERS = {
+  "Groq": { base: "https://api.groq.com/openai/v1", models: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama-3.3-70b-specdec"] },
+  "OpenAI": { base: "https://api.openai.com/v1", models: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "o3-mini"] },
+  "OpenRouter": { base: "https://openrouter.ai/api/v1", models: ["openai/gpt-4o", "anthropic/claude-3.5-sonnet", "meta-llama/llama-3.3-70b-instruct", "deepseek/deepseek-chat"] },
+  "xAI": { base: "https://api.x.ai/v1", models: ["grok-4", "grok-3-mini", "grok-3"] },
+  "DeepSeek": { base: "https://api.deepseek.com/v1", models: ["deepseek-chat", "deepseek-reasoner"] },
+  "Mistral": { base: "https://api.mistral.ai/v1", models: ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest"] },
+  "Together AI": { base: "https://api.together.xyz/v1", models: ["meta-llama/Llama-3.3-70B-Instruct-Turbo", "Qwen/Qwen2.5-72B-Instruct-Turbo"] },
+  "Fireworks AI": { base: "https://api.fireworks.ai/inference/v1", models: ["accounts/fireworks/models/llama-v3p3-70b-instruct"] },
+  "Ollama (local)": { base: "http://127.0.0.1:11434/v1", models: ["llama3.1", "llama3", "qwen2.5", "mistral"] }
+};
+
+// Base URLs for providers whose models.dev entry has no `api` field.
+var MODEL_BASE = {
+  "openai": "https://api.openai.com/v1",
+  "groq": "https://api.groq.com/openai/v1",
+  "xai": "https://api.x.ai/v1",
+  "deepseek": "https://api.deepseek.com/v1",
+  "mistral": "https://api.mistral.ai/v1",
+  "togetherai": "https://api.together.xyz/v1",
+  "fireworks-ai": "https://api.fireworks.ai/inference/v1"
+};
+
+var MODELS_CATALOG = null; // full catalog after loading models.dev
+
+function providerCatalog() { return MODELS_CATALOG || AI_PROVIDERS; }
+
+function renderAiProviderSelect() {
+  var sel = document.getElementById("ai-provider");
+  sel.innerHTML = "";
+  Object.keys(providerCatalog()).sort().forEach(function(p) {
+    var o = document.createElement("option");
+    o.value = p; o.textContent = p;
+    sel.appendChild(o);
+  });
+  var c = document.createElement("option");
+  c.value = "Custom…"; c.textContent = "Custom…";
+  sel.appendChild(c);
+}
+
+function renderAiModelSelect(provider) {
+  var sel = document.getElementById("ai-model-select");
+  sel.innerHTML = "";
+  var p = providerCatalog()[provider] || {};
+  var onlyText = document.getElementById("ai-text-only") ? document.getElementById("ai-text-only").checked : false;
+  var models = (onlyText && p.textModels) ? p.textModels : (p.models || []);
+  models.forEach(function(m) {
+    var o = document.createElement("option");
+    o.value = m; o.textContent = m;
+    sel.appendChild(o);
+  });
+  if (!models.length) {
+    var o = document.createElement("option");
+    o.value = ""; o.textContent = "(type model below)";
+    sel.appendChild(o);
+  }
+}
+
+async function loadModels() {
+  const st = document.getElementById("ai-models-status");
+  if (!st) return;
+  st.textContent = "Loading models.dev…";
+  try {
+    const r = await fetch("https://models.dev/api.json");
+    const d = await r.json();
+    var cat = {};
+    Object.keys(AI_PROVIDERS).forEach(function(k) { cat[k] = { base: AI_PROVIDERS[k].base, models: AI_PROVIDERS[k].models.slice(), textModels: AI_PROVIDERS[k].models.slice() }; });
+    Object.keys(d).forEach(function(pid) {
+      var p = d[pid] || {};
+      var base = (p.api && p.api) || MODEL_BASE[pid] || null;
+      if (!base) return;
+      var models = [], textModels = [];
+      Object.keys(p.models || {}).forEach(function(mid) {
+        var m = p.models[mid] || {};
+        var mods = m.modalities || {};
+        var input = mods.input || [], output = mods.output || [];
+        models.push(mid);
+        if (input.indexOf("text") >= 0 && output.indexOf("text") >= 0) textModels.push(mid);
+      });
+      if (!models.length) return;
+      models.sort(); textModels.sort();
+      cat[p.name || pid] = { base: base, models: models, textModels: textModels };
+    });
+    MODELS_CATALOG = cat;
+    var prev = document.getElementById("ai-provider").value;
+    renderAiProviderSelect();
+    document.getElementById("ai-provider").value = (cat[prev] ? prev : "Groq");
+    renderAiModelSelect(document.getElementById("ai-provider").value);
+    var total = 0, textTotal = 0;
+    Object.keys(cat).forEach(function(k) { total += cat[k].models.length; textTotal += (cat[k].textModels || cat[k].models).length; });
+    st.textContent = Object.keys(cat).length + " providers · " + total + " models (" + textTotal + " text-capable)";
+  } catch (e) {
+    st.textContent = "Failed to load models.dev: " + e;
+  }
+}
+
+document.getElementById("ai-provider").onchange = function() {
+  var p = this.value;
+  renderAiModelSelect(p);
+  if (p === "Custom…") { document.getElementById("ai-base").value = ""; return; }
+  var cat = providerCatalog();
+  if (cat[p]) document.getElementById("ai-base").value = cat[p].base;
+  var m = document.getElementById("ai-model-select").value;
+  if (m) document.getElementById("ai-model").value = m;
+};
+
+document.getElementById("ai-model-select").onchange = function() {
+  if (this.value) document.getElementById("ai-model").value = this.value;
+};
+
+document.getElementById("ai-load-models").onclick = loadModels;
+document.getElementById("ai-text-only").onchange = function() {
+  renderAiModelSelect(document.getElementById("ai-provider").value);
+};
+
+renderAiProviderSelect();
+renderAiModelSelect("Groq");
 refreshAiStatus();
 document.getElementById("aw-backtest").onclick = function() {
   document.getElementById("strategy").value = buildStrategyJSON();
@@ -1123,6 +1301,40 @@ document.getElementById("dm-import").onclick = async function() {
   const d = await postJSON("/api/data/import", JSON.stringify({ symbol: symbol, csv: csv }));
   if (d.error) { st.textContent = d.error; return; }
   st.textContent = "Imported " + (d.bars || 0) + " bars";
+  await refreshDataManager();
+  await loadInfo();
+};
+
+document.getElementById("qdb-list").onclick = async function() {
+  const st = document.getElementById("qdb-status");
+  const box = document.getElementById("qdb-symbols");
+  st.textContent = "Fetching symbols…";
+  const d = await getJSON("/api/questdb/symbols");
+  if (d.error) { st.textContent = d.error; box.innerHTML = ""; return; }
+  const syms = d.symbols || [];
+  st.textContent = syms.length + " symbols";
+  if (!syms.length) { box.innerHTML = '<span class="muted">No symbols.</span>'; return; }
+  box.innerHTML = '<div class="row" style="margin-top:6px"><button id="qdb-all" style="padding:3px 8px;font-size:12px">Select all</button><button id="qdb-none" style="padding:3px 8px;font-size:12px">None</button></div>' +
+    syms.map(function(s) { return '<label style="display:inline-flex;align-items:center;gap:6px;margin-right:14px"><input type="checkbox" class="qdb-sym" value="' + s + '" checked> ' + s + '</label>'; }).join("");
+  document.getElementById("qdb-all").onclick = function() { box.querySelectorAll(".qdb-sym").forEach(function(c){ c.checked = true; }); };
+  document.getElementById("qdb-none").onclick = function() { box.querySelectorAll(".qdb-sym").forEach(function(c){ c.checked = false; }); };
+};
+
+document.getElementById("qdb-load").onclick = async function() {
+  const st = document.getElementById("qdb-status");
+  const box = document.getElementById("qdb-symbols");
+  const tf = document.getElementById("qdb-tf").value;
+  const limit = parseInt(document.getElementById("qdb-limit").value) || 5000;
+  const checked = Array.from(box.querySelectorAll(".qdb-sym:checked")).map(function(c){ return c.value; });
+  if (!checked.length) { st.textContent = "Select at least one symbol"; return; }
+  st.textContent = "Loading…";
+  var ok = 0, fail = 0, lastErr = "";
+  for (var i = 0; i < checked.length; i++) {
+    const d = await postJSON("/api/questdb/load", JSON.stringify({ symbol: checked[i], timeframe: tf, limit: limit }));
+    if (d.error) { fail++; lastErr = d.error; } else { ok++; }
+  }
+  st.textContent = "Loaded " + ok + " symbols" + (fail ? " (" + fail + " failed)" : "");
+  if (fail && ok === 0) st.textContent = lastErr;
   await refreshDataManager();
   await loadInfo();
 };

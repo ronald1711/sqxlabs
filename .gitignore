@@ -1,4 +1,5 @@
 /target
+.cargo-home/
 .DS_Store
 algotrader/
 docs/
@@ -6,4 +7,5 @@ scripts/*
 !scripts/mt5_export.py
 data/slice.db
 data/mt5/
+data/assistant.json
 *.rs.bk

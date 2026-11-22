@@ -20,7 +20,7 @@ fn http_endpoints_respond() {
     let addr = "127.0.0.1:18099";
     let store = sqx_data::DataStore::new();
     std::thread::spawn(move || {
-        let _ = sqx_web::serve(addr, store);
+        let _ = sqx_web::serve(addr, store, None);
     });
     std::thread::sleep(Duration::from_millis(400));
 

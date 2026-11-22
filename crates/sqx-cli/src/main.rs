@@ -6,7 +6,7 @@ use rand::SeedableRng;
 
 use sqx_backtest::{backtest, backtest_ticks, BacktestConfig, BacktestResult};
 use sqx_core::{Bar, Instrument, Timeframe};
-use sqx_data::DataStore;
+use sqx_data::{DataStore, QuestdbClient, QuestdbConfig};
 use sqx_metrics::{compute as compute_metrics, render as render_metrics};
 use sqx_optimizer::{backtest_batch, genetic_evolve, rank, random_strategy, walk_forward, Fitness, GeneticConfig, GeneratorConfig};
 use sqx_project::{Databank, MetricSummary, Project, StrategyRecord};
@@ -199,6 +199,24 @@ enum Cmd {
         /// Open the dashboard in the default browser.
         #[arg(long)]
         open: bool,
+        /// Load data from QuestDB instead of CSV.
+        #[arg(long)]
+        questdb: bool,
+        /// Comma-separated symbols to preload from QuestDB (the Data Manager
+        /// tab can also list and load more on demand).
+        #[arg(long, default_value = "EURUSD,GBPUSD,USDJPY")]
+        questdb_symbols: String,
+        /// Timeframe for QuestDB bars (M1/M5/H1/D1/...).
+        #[arg(long, default_value = "M5")]
+        questdb_timeframe: String,
+        /// Most-recent bars per symbol to load from QuestDB.
+        #[arg(long, default_value_t = 5000)]
+        questdb_limit: usize,
+    },
+    /// Query a QuestDB instance for candles (reads the `candles` table).
+    Questdb {
+        #[command(subcommand)]
+        sub: QuestdbCmd,
     },
     /// Check the environment: toolchain, data files, port, MT5 runtime.
     Doctor,
@@ -247,6 +265,33 @@ enum Cmd {
         retest_runs: usize,
         #[arg(long, default_value_t = 6)]
         windows: usize,
+    },
+}
+
+#[derive(Subcommand)]
+enum QuestdbCmd {
+    /// List distinct symbols in the candles table.
+    Symbols,
+    /// Fetch bars and print a summary; optionally write a CSV.
+    Bars {
+        /// Symbol to fetch (e.g. EURUSD).
+        #[arg(long)]
+        symbol: String,
+        /// Timeframe (M1/M5/H1/D1/...).
+        #[arg(long, default_value = "M5")]
+        timeframe: String,
+        /// Most-recent bars to return.
+        #[arg(long, default_value_t = 5000)]
+        limit: usize,
+        /// Optional start bound (unix seconds).
+        #[arg(long)]
+        from: Option<i64>,
+        /// Optional end bound (unix seconds).
+        #[arg(long)]
+        to: Option<i64>,
+        /// Write the bars as CSV to this path.
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
 }
 
@@ -431,23 +476,46 @@ fn main() -> Result<()> {
             println!("  OOS max DD %      : {:.2}", report.oos_max_dd_pct);
             Ok(())
         }
-        Cmd::Serve { addr, data, data_dir, symbol, open } => {
+        Cmd::Serve { addr, data, data_dir, symbol, open, questdb, questdb_symbols, questdb_timeframe, questdb_limit } => {
             let mut store = DataStore::new();
-            if let Some(dir) = data_dir {
-                let loaded = store.import_dir(dir.to_str().unwrap(), Timeframe::M1).map_err(|e| anyhow!(e))?;
-                for (s, n) in &loaded {
-                    println!("Loaded {} bars for {}", n, s);
+            // With --questdb the client is handed to the dashboard, which lists
+            // symbols and loads them on demand from the Data Manager tab.
+            let questdb_client = if questdb {
+                let cfg = QuestdbConfig::from_env();
+                let client = QuestdbClient::new(&cfg);
+                if !questdb_symbols.trim().is_empty() {
+                    let tf = parse_timeframe(&questdb_timeframe)?;
+                    for sym in questdb_symbols.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                        match client.fetch_bars(sym, tf, None, None, Some(questdb_limit)) {
+                            Ok(bars) => {
+                                println!("Loaded {} bars for {} ({})", bars.len(), sym, tf);
+                                store.add(sym, tf, bars);
+                            }
+                            Err(e) => eprintln!("QuestDB {sym}: {e}"),
+                        }
+                    }
                 }
-            } else if let Some(file) = data {
-                let n = store.import_csv(file.to_str().unwrap(), &symbol, Timeframe::M1).map_err(|e| anyhow!(e))?;
-                println!("Loaded {} bars for {}", n, symbol);
+                Some(client)
             } else {
-                for sym in ["EURUSD", "GBPUSD"] {
-                    store.add(sym, Timeframe::M1, sqx_data::synthetic_bars(sym, 2000));
+                None
+            };
+            if questdb_client.is_none() {
+                if let Some(dir) = data_dir {
+                    let loaded = store.import_dir(dir.to_str().unwrap(), Timeframe::M1).map_err(|e| anyhow!(e))?;
+                    for (s, n) in &loaded {
+                        println!("Loaded {} bars for {}", n, s);
+                    }
+                } else if let Some(file) = data {
+                    let n = store.import_csv(file.to_str().unwrap(), &symbol, Timeframe::M1).map_err(|e| anyhow!(e))?;
+                    println!("Loaded {} bars for {}", n, symbol);
+                } else {
+                    for sym in ["EURUSD", "GBPUSD"] {
+                        store.add(sym, Timeframe::M1, sqx_data::synthetic_bars(sym, 2000));
+                    }
+                    println!("No --data/--data-dir given: loaded synthetic demo data for EURUSD and GBPUSD.");
                 }
-                println!("No --data/--data-dir given: loaded synthetic demo data for EURUSD and GBPUSD.");
             }
-            if store.is_empty() {
+            if store.is_empty() && questdb_client.is_none() {
                 return Err(anyhow!("no data loaded"));
             }
             if open {
@@ -462,8 +530,56 @@ fn main() -> Result<()> {
                     let _ = std::process::Command::new("cmd").args(["/C", "start", &url]).status();
                 });
             }
-            sqx_web::serve(&addr, store).map_err(|e| anyhow!(e))?;
+            sqx_web::serve(&addr, store, questdb_client).map_err(|e| anyhow!(e))?;
             Ok(())
+        }
+        Cmd::Questdb { sub } => {
+            let client = QuestdbClient::new(&QuestdbConfig::from_env());
+            match sub {
+                QuestdbCmd::Symbols => {
+                    let syms = client.list_symbols().map_err(|e| anyhow!(e))?;
+                    for s in &syms {
+                        println!("{s}");
+                    }
+                    if syms.is_empty() {
+                        println!("(no symbols)");
+                    }
+                    Ok(())
+                }
+                QuestdbCmd::Bars { symbol, timeframe, limit, from, to, out } => {
+                    let tf = parse_timeframe(&timeframe)?;
+                    let start_ms = from.map(|s| s * 1000);
+                    let end_ms = to.map(|s| s * 1000);
+                    let bars = client
+                        .fetch_bars(&symbol, tf, start_ms, end_ms, Some(limit))
+                        .map_err(|e| anyhow!(e))?;
+                    println!(
+                        "{} {}: {} bars ({} .. {})",
+                        symbol,
+                        tf,
+                        bars.len(),
+                        bars.first().map(|b| b.time).unwrap_or(0),
+                        bars.last().map(|b| b.time).unwrap_or(0)
+                    );
+                    if let Some(first) = bars.first() {
+                        println!(
+                            "  first: time={} o={:.5} h={:.5} l={:.5} c={:.5} v={:.0}",
+                            first.time, first.open, first.high, first.low, first.close, first.volume
+                        );
+                    }
+                    if let Some(last) = bars.last() {
+                        println!(
+                            "  last : time={} o={:.5} h={:.5} l={:.5} c={:.5} v={:.0}",
+                            last.time, last.open, last.high, last.low, last.close, last.volume
+                        );
+                    }
+                    if let Some(p) = out {
+                        write_bars_csv(&p, &bars).map_err(|e| anyhow!(e))?;
+                        println!("Wrote {} bars to {}", bars.len(), p.display());
+                    }
+                    Ok(())
+                }
+            }
         }
         Cmd::Doctor => {
             println!("SqxLabs doctor");
@@ -657,6 +773,55 @@ fn load_bars(path: &PathBuf) -> Result<Vec<Bar>> {
         return Err(anyhow!("no bars loaded from {}", path.display()));
     }
     Ok(bars)
+}
+
+/// Parse a timeframe label ("M5", "H1", "1h", "1d", ...) into the enum.
+fn parse_timeframe(s: &str) -> Result<Timeframe> {
+    use Timeframe::*;
+    let t = s.trim();
+    let up = t.to_ascii_uppercase();
+    let low = t.to_ascii_lowercase();
+    Ok(match (up.as_str(), low.as_str()) {
+        ("M1", _) | (_, "1m") => M1,
+        ("M2", _) | (_, "2m") => M2,
+        ("M3", _) | (_, "3m") => M3,
+        ("M5", _) | (_, "5m") => M5,
+        ("M10", _) | (_, "10m") => M10,
+        ("M15", _) | (_, "15m") => M15,
+        ("M30", _) | (_, "30m") => M30,
+        ("H1", _) | (_, "1h") => H1,
+        ("H2", _) | (_, "2h") => H2,
+        ("H4", _) | (_, "4h") => H4,
+        ("H6", _) | (_, "6h") => H6,
+        ("H8", _) | (_, "8h") => H8,
+        ("H12", _) | (_, "12h") => H12,
+        ("D1", _) | (_, "1d") => D1,
+        ("W1", _) | (_, "1w") | (_, "7d") => W1,
+        ("MN1", _) | (_, "1mn") | (_, "1mth") | (_, "1mon") => MN1,
+        _ => return Err(anyhow!("unknown timeframe '{t}' (use M1/M5/H1/H4/D1/W1/MN1 or 1m/5m/1h/1d)")),
+    })
+}
+
+/// Write bars as CSV (header timestamp,open,high,low,close,volume; unix seconds).
+fn write_bars_csv(path: &PathBuf, bars: &[Bar]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|e| anyhow!(e))?;
+        }
+    }
+    let mut out = String::from("timestamp,open,high,low,close,volume\n");
+    for b in bars {
+        out.push_str(&format!(
+            "{},{},{},{},{},{}\n",
+            b.time / 1000,
+            b.open,
+            b.high,
+            b.low,
+            b.close,
+            b.volume
+        ));
+    }
+    std::fs::write(path, out).map_err(|e| anyhow!(e))
 }
 
 /// Resolve bars-per-year: explicit override, else infer from the median bar interval.

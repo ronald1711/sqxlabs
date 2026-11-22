@@ -6,6 +6,10 @@
 
 use sqx_core::{Bar, Tick, Timeframe};
 
+mod questdb;
+
+pub use questdb::{QuestdbClient, QuestdbConfig};
+
 /// One symbol/timeframe bar series.
 #[derive(Debug, Clone)]
 pub struct SymbolSeries {

@@ -152,6 +152,36 @@ Export ticks with `--ticks` (writes `<symbol>_ticks.csv`). MT5 bar times are
 broker server time; the engine uses relative bar intervals, so backtests are
 unaffected. `data/mt5/` is gitignored (your broker data stays local).
 
+### QuestDB koersdata (192.168.10.33)
+
+Reads OHLCV candles straight from the AlgoTrader QuestDB `candles` table
+(`symbol, timeframe, ts, open, high, low, close, volume`, base timeframe
+`1m`). Higher timeframes are aggregated server-side with `SAMPLE BY`.
+
+Connection defaults: `http://192.168.10.33:9000` (HTTP REST), optional Basic
+auth `admin`/`quest`. Override with env vars `SQX_QUESTDB_HOST`,
+`SQX_QUESTDB_PORT`, `SQX_QUESTDB_USER`, `SQX_QUESTDB_PASS`.
+
+```bash
+# list symbols in the candles table
+cargo run -q -p sqx-cli -- questdb symbols
+
+# fetch the last 5000 M5 bars and print a summary
+cargo run -q -p sqx-cli -- questdb bars --symbol EURUSD --timeframe M5 --limit 5000
+
+# ... and write them to CSV, then feed any existing command
+cargo run -q -p sqx-cli -- questdb bars --symbol EURUSD --timeframe M5 --limit 20000 --out data/questdb/EURUSD_M5.csv
+cargo run -q -p sqx-cli -- generate --data data/questdb/EURUSD_M5.csv --count 300
+
+# serve the dashboard straight from QuestDB (no CSV needed)
+cargo run -q -p sqx-cli -- serve --questdb --questdb-symbols EURUSD,GBPUSD --questdb-timeframe M5
+```
+
+`serve --questdb` loads the most recent `--questdb-limit` (default 5000) bars
+per symbol into the dashboard. If the host is unreachable the command fails with
+a clear transport error rather than silently serving synthetic data.
+
+
 ## Web dashboard
 
 A fully self-contained web app (no frontend build step, no external runtime):

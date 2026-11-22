@@ -2,15 +2,16 @@
 //!
 //! A minimal Model Context Protocol (MCP) server over stdio (JSON-RPC 2.0),
 //! exposing the SqxLabs engine as MCP tools so an LLM client can backtest,
-//! generate, build portfolios and run robustness checks.
+//! generate, build portfolios and run robustness checks — from CSV files or
+//! directly from a QuestDB instance (the `candles` table).
 
 use std::io::{BufRead, Write};
 
 use serde_json::{json, Value};
 
 use sqx_backtest::{backtest, BacktestConfig};
-use sqx_core::{Bar, Instrument};
-use sqx_data::{read_csv_bars, DataStore};
+use sqx_core::{Bar, Instrument, Timeframe};
+use sqx_data::{read_csv_bars, DataStore, QuestdbClient, QuestdbConfig};
 use sqx_metrics::{compute as compute_metrics, Metrics};
 use sqx_optimizer::{backtest_batch, rank, random_strategy, walk_forward, Fitness, GeneratorConfig};
 use sqx_robustness::{monte_carlo_retest, monte_carlo_trade_manipulation, what_if};
@@ -92,24 +93,34 @@ fn tools_list() -> Vec<Value> {
             "inputSchema": { "type": "object", "properties": { "data_dir": { "type": "string" } }, "required": ["data_dir"] }
         }),
         json!({
+            "name": "questdb_symbols",
+            "description": "List the symbols available in QuestDB (the candles table).",
+            "inputSchema": { "type": "object", "properties": {} }
+        }),
+        json!({
+            "name": "questdb_bars",
+            "description": "Fetch OHLCV bars for a symbol/timeframe from QuestDB and return them as CSV text.",
+            "inputSchema": { "type": "object", "properties": { "symbol": { "type": "string" }, "timeframe": { "type": "string" }, "limit": { "type": "integer" } }, "required": ["symbol"] }
+        }),
+        json!({
             "name": "backtest",
-            "description": "Backtest a strategy JSON on a CSV data file and return metrics.",
-            "inputSchema": { "type": "object", "properties": { "data": { "type": "string" }, "strategy": { "type": "object" } }, "required": ["data", "strategy"] }
+            "description": "Backtest a strategy JSON on CSV ('data' path) or QuestDB ('symbol' + 'timeframe') data.",
+            "inputSchema": { "type": "object", "properties": { "data": { "type": "string" }, "symbol": { "type": "string" }, "timeframe": { "type": "string" }, "limit": { "type": "integer" }, "strategy": { "type": "object" } }, "required": ["strategy"] }
         }),
         json!({
             "name": "generate",
-            "description": "Generate random strategies, backtest and rank them.",
-            "inputSchema": { "type": "object", "properties": { "data": { "type": "string" }, "count": { "type": "integer" }, "seed": { "type": "integer" } }, "required": ["data"] }
+            "description": "Generate random strategies, backtest and rank them on CSV or QuestDB data.",
+            "inputSchema": { "type": "object", "properties": { "data": { "type": "string" }, "symbol": { "type": "string" }, "timeframe": { "type": "string" }, "limit": { "type": "integer" }, "count": { "type": "integer" }, "seed": { "type": "integer" } } }
         }),
         json!({
             "name": "portfolio",
-            "description": "Build a portfolio from generated strategies (best subset, correlation).",
-            "inputSchema": { "type": "object", "properties": { "data": { "type": "string" }, "count": { "type": "integer" }, "seed": { "type": "integer" } }, "required": ["data"] }
+            "description": "Build a portfolio from generated strategies (best subset, correlation) on CSV or QuestDB data.",
+            "inputSchema": { "type": "object", "properties": { "data": { "type": "string" }, "symbol": { "type": "string" }, "timeframe": { "type": "string" }, "limit": { "type": "integer" }, "count": { "type": "integer" }, "seed": { "type": "integer" } } }
         }),
         json!({
             "name": "robustness",
-            "description": "Run the robustness cross-check set (what-if, MC trade, MC retest, walk-forward).",
-            "inputSchema": { "type": "object", "properties": { "data": { "type": "string" }, "strategy": { "type": "object" } }, "required": ["data", "strategy"] }
+            "description": "Run the robustness cross-check set (what-if, MC trade, MC retest, walk-forward) on CSV or QuestDB data.",
+            "inputSchema": { "type": "object", "properties": { "data": { "type": "string" }, "symbol": { "type": "string" }, "timeframe": { "type": "string" }, "limit": { "type": "integer" }, "strategy": { "type": "object" } }, "required": ["strategy"] }
         }),
     ]
 }
@@ -131,6 +142,8 @@ fn call_tool(params: &Value) -> Value {
             text_result(names.join(", "))
         }
         "list_symbols" => tool_list_symbols(&args),
+        "questdb_symbols" => tool_questdb_symbols(),
+        "questdb_bars" => tool_questdb_bars(&args),
         "backtest" => tool_backtest(&args),
         "generate" => tool_generate(&args),
         "portfolio" => tool_portfolio(&args),
@@ -149,11 +162,70 @@ fn tool_list_symbols(args: &Value) -> Value {
         None => return err_result("missing data_dir".to_string()),
     };
     let mut store = DataStore::new();
-    if let Err(e) = store.import_dir(&dir, sqx_core::Timeframe::M1) {
+    if let Err(e) = store.import_dir(&dir, Timeframe::M1) {
         return err_result(e);
     }
     let list: Vec<String> = store.list().iter().map(|s| format!("{} ({} bars)", s.symbol, s.bars)).collect();
-    text_result(list.join("\n"))
+    text_result(list.join("
+"))
+}
+
+fn tool_questdb_symbols() -> Value {
+    let client = QuestdbClient::new(&QuestdbConfig::from_env());
+    match client.list_symbols() {
+        Ok(syms) => text_result(syms.join("
+")),
+        Err(e) => err_result(e),
+    }
+}
+
+fn tool_questdb_bars(args: &Value) -> Value {
+    let symbol = match str_arg(args, "symbol") {
+        Some(s) => s,
+        None => return err_result("missing symbol".to_string()),
+    };
+    let tf: Timeframe = match str_arg(args, "timeframe").unwrap_or_else(|| "M5".to_string()).parse() {
+        Ok(t) => t,
+        Err(e) => return err_result(format!("bad timeframe: {e}")),
+    };
+    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(5000).clamp(1, 200_000) as usize;
+    let client = QuestdbClient::new(&QuestdbConfig::from_env());
+    let bars = match client.fetch_bars(&symbol, tf, None, None, Some(limit)) {
+        Ok(b) => b,
+        Err(e) => return err_result(e),
+    };
+    let mut out = String::from("timestamp,open,high,low,close,volume
+");
+    for b in &bars {
+        out.push_str(&format!("{},{},{},{},{},{}
+", b.time / 1000, b.open, b.high, b.low, b.close, b.volume));
+    }
+    text_result(out)
+}
+
+/// Resolve the bar series from either a QuestDB symbol or a CSV path.
+/// Returns (bars, symbol) where symbol is used for instrument sizing.
+fn resolve_bars(args: &Value) -> Result<(Vec<Bar>, String), String> {
+    if let Some(symbol) = args.get("symbol").and_then(|v| v.as_str()) {
+        let symbol = symbol.trim();
+        if !symbol.is_empty() {
+            let tf: Timeframe = args
+                .get("timeframe")
+                .and_then(|v| v.as_str())
+                .unwrap_or("M5")
+                .parse()
+                .map_err(|e| format!("bad timeframe: {e}"))?;
+            let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(5000).clamp(1, 200_000) as usize;
+            let client = QuestdbClient::new(&QuestdbConfig::from_env());
+            let bars = client.fetch_bars(symbol, tf, None, None, Some(limit)).map_err(|e| e)?;
+            return Ok((bars, symbol.to_string()));
+        }
+    }
+    if let Some(data) = args.get("data").and_then(|v| v.as_str()) {
+        let bars = read_csv_bars(data).map_err(|e| e)?;
+        return Ok((bars, "EURUSD".to_string()));
+    }
+    Err("need either 'symbol' (QuestDB) or 'data' (CSV path)".to_string())
 }
 
 fn instrument_for(symbol: &str) -> Instrument {
@@ -182,10 +254,6 @@ fn metrics_summary(m: &Metrics) -> String {
 }
 
 fn tool_backtest(args: &Value) -> Value {
-    let data = match str_arg(args, "data") {
-        Some(d) => d,
-        None => return err_result("missing data".to_string()),
-    };
     let strat_val = match args.get("strategy") {
         Some(v) => v.clone(),
         None => return err_result("missing strategy".to_string()),
@@ -194,11 +262,11 @@ fn tool_backtest(args: &Value) -> Value {
         Ok(s) => s,
         Err(e) => return err_result(format!("bad strategy: {e}")),
     };
-    let bars = match read_csv_bars(&data) {
-        Ok(b) => b,
+    let (bars, symbol) = match resolve_bars(args) {
+        Ok(v) => v,
         Err(e) => return err_result(e),
     };
-    let inst = instrument_for("EURUSD");
+    let inst = instrument_for(&symbol);
     let pyp = pyp_for(&bars);
     let cfg = BacktestConfig::default();
     let r = backtest(&strategy, &bars, &inst, &cfg);
@@ -207,12 +275,8 @@ fn tool_backtest(args: &Value) -> Value {
 }
 
 fn tool_generate(args: &Value) -> Value {
-    let data = match str_arg(args, "data") {
-        Some(d) => d,
-        None => return err_result("missing data".to_string()),
-    };
-    let bars = match read_csv_bars(&data) {
-        Ok(b) => b,
+    let (bars, symbol) = match resolve_bars(args) {
+        Ok(v) => v,
         Err(e) => return err_result(e),
     };
     let count = args.get("count").and_then(|v| v.as_u64()).unwrap_or(200).clamp(1, 2000) as usize;
@@ -220,7 +284,7 @@ fn tool_generate(args: &Value) -> Value {
     let gen = GeneratorConfig::default();
     let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(seed);
     let strategies: Vec<Strategy> = (0..count).map(|i| random_strategy(&mut rng, &format!("s{i:04}"), &gen)).collect();
-    let inst = instrument_for("EURUSD");
+    let inst = instrument_for(&symbol);
     let pyp = pyp_for(&bars);
     let cfg = BacktestConfig::default();
     let scored = backtest_batch(&strategies, &bars, &inst, &cfg, pyp);
@@ -229,16 +293,13 @@ fn tool_generate(args: &Value) -> Value {
     for (i, (s, m)) in ranked.iter().take(10).enumerate() {
         lines.push(format!("{}. {} net={:.2} pf={:.2} trades={:.0}", i + 1, s.name, m.net_profit, m.profit_factor, m.number_of_trades));
     }
-    text_result(lines.join("\n"))
+    text_result(lines.join("
+"))
 }
 
 fn tool_portfolio(args: &Value) -> Value {
-    let data = match str_arg(args, "data") {
-        Some(d) => d,
-        None => return err_result("missing data".to_string()),
-    };
-    let bars = match read_csv_bars(&data) {
-        Ok(b) => b,
+    let (bars, symbol) = match resolve_bars(args) {
+        Ok(v) => v,
         Err(e) => return err_result(e),
     };
     let count = args.get("count").and_then(|v| v.as_u64()).unwrap_or(300).clamp(10, 2000) as usize;
@@ -247,7 +308,7 @@ fn tool_portfolio(args: &Value) -> Value {
     let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(seed);
     let strategies: Vec<Strategy> = (0..count).map(|i| random_strategy(&mut rng, &format!("p{i:04}"), &gen)).collect();
     let names: Vec<String> = strategies.iter().map(|s| s.name.clone()).collect();
-    let inst = instrument_for("EURUSD");
+    let inst = instrument_for(&symbol);
     let pyp = pyp_for(&bars);
     let cfg = BacktestConfig::default();
     let results = sqx_portfolio::backtest_all(&strategies, &bars, &inst, &cfg);
@@ -270,14 +331,11 @@ fn tool_portfolio(args: &Value) -> Value {
     for c in &pf.components {
         lines.push(format!("  {} w={:.2} net={:.2} dd={:.2}%", c.name, c.weight, c.net_profit, c.max_drawdown_pct));
     }
-    text_result(lines.join("\n"))
+    text_result(lines.join("
+"))
 }
 
 fn tool_robustness(args: &Value) -> Value {
-    let data = match str_arg(args, "data") {
-        Some(d) => d,
-        None => return err_result("missing data".to_string()),
-    };
     let strat_val = match args.get("strategy") {
         Some(v) => v.clone(),
         None => return err_result("missing strategy".to_string()),
@@ -286,11 +344,11 @@ fn tool_robustness(args: &Value) -> Value {
         Ok(s) => s,
         Err(e) => return err_result(format!("bad strategy: {e}")),
     };
-    let bars = match read_csv_bars(&data) {
-        Ok(b) => b,
+    let (bars, symbol) = match resolve_bars(args) {
+        Ok(v) => v,
         Err(e) => return err_result(e),
     };
-    let inst = instrument_for("EURUSD");
+    let inst = instrument_for(&symbol);
     let pyp = pyp_for(&bars);
     let cfg = BacktestConfig::default();
     let base = backtest(&strategy, &bars, &inst, &cfg);
@@ -307,5 +365,6 @@ fn tool_robustness(args: &Value) -> Value {
     let gen = GeneratorConfig::default();
     let wf = walk_forward(&bars, &inst, &cfg, pyp, &gen, 4, 0.25, 20, 42);
     lines.push(format!("walk_forward: windows={} oos_net={:.2} oos_pf={:.2}", wf.windows, wf.oos_net_profit, wf.oos_profit_factor));
-    text_result(lines.join("\n"))
+    text_result(lines.join("
+"))
 }
