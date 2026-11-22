@@ -1,6 +1,6 @@
 //! The bar-by-bar simulation loop.
 
-use sqx_core::{Bar, Direction, Instrument, Timestamp};
+use sqx_core::{Bar, Direction, Instrument, Tick, Timestamp};
 use sqx_strategy::{ExitType, MoneyManagement, ProfitTarget, StopLoss, Strategy};
 
 use crate::evaluate::compile;
@@ -60,6 +60,27 @@ pub fn backtest(
     instrument: &Instrument,
     config: &BacktestConfig,
 ) -> BacktestResult {
+    run(strategy, bars, None, instrument, config)
+}
+
+/// Tick-precision backtest: SL/PT are resolved against the ticks inside each bar.
+pub fn backtest_ticks(
+    strategy: &Strategy,
+    bars: &[Bar],
+    ticks: &[Tick],
+    instrument: &Instrument,
+    config: &BacktestConfig,
+) -> BacktestResult {
+    run(strategy, bars, Some(ticks), instrument, config)
+}
+
+fn run(
+    strategy: &Strategy,
+    bars: &[Bar],
+    ticks: Option<&[Tick]>,
+    instrument: &Instrument,
+    config: &BacktestConfig,
+) -> BacktestResult {
     if bars.len() < 2 {
         return BacktestResult {
             trades: Vec::new(),
@@ -69,6 +90,24 @@ pub fn backtest(
         };
     }
     let signals = compile(strategy, bars);
+    let tick_ranges: Option<Vec<(usize, usize)>> = ticks.map(|ts| {
+        let mut ranges = Vec::with_capacity(bars.len());
+        let mut j = 0usize;
+        for i in 0..bars.len() {
+            let t0 = bars[i].time;
+            let t1 = if i + 1 < bars.len() { bars[i + 1].time } else { t0 + 1 };
+            while j < ts.len() && ts[j].time < t0 {
+                j += 1;
+            }
+            let start = j;
+            let mut k = j;
+            while k < ts.len() && ts[k].time < t1 {
+                k += 1;
+            }
+            ranges.push((start, k));
+        }
+        ranges
+    });
     let point = instrument.point;
     let point_value = instrument.contract_size * point; // money per point per 1.0 lot
     let atr_series = if uses_atr(strategy) {
@@ -193,31 +232,39 @@ pub fn backtest(
             }
 
             let mut closed: Option<(f64, ExitReason)> = None;
-            if pos.direction == Direction::Long {
-                let pt_hit = pos.profit_target.is_finite() && bar.high >= pos.profit_target;
-                if pos.trailing && bar.low <= pos.trailing_stop {
-                    closed = Some((pos.trailing_stop.min(bar.open), ExitReason::TrailingStop));
-                } else if bar.low <= pos.stop_loss && pt_hit && config.intrabar_up_first {
-                    closed = Some((pos.profit_target, ExitReason::ProfitTarget));
-                } else if bar.low <= pos.stop_loss {
-                    let px = if bar.open < pos.stop_loss { bar.open } else { pos.stop_loss };
-                    closed = Some((px, ExitReason::StopLoss));
-                } else if pt_hit {
-                    let px = if bar.open > pos.profit_target { bar.open } else { pos.profit_target };
-                    closed = Some((px, ExitReason::ProfitTarget));
+            if let (Some(ticks), Some(ranges)) = (ticks, &tick_ranges) {
+                let (a, b) = ranges[i];
+                if a < b {
+                    closed = tick_exit(&ticks[a..b], pos.direction, pos.stop_loss, pos.profit_target);
                 }
-            } else {
-                let pt_hit = pos.profit_target.is_finite() && bar.low <= pos.profit_target;
-                if pos.trailing && bar.high >= pos.trailing_stop {
-                    closed = Some((pos.trailing_stop.max(bar.open), ExitReason::TrailingStop));
-                } else if bar.high >= pos.stop_loss && pt_hit && !config.intrabar_up_first {
-                    closed = Some((pos.profit_target, ExitReason::ProfitTarget));
-                } else if bar.high >= pos.stop_loss {
-                    let px = if bar.open > pos.stop_loss { bar.open } else { pos.stop_loss };
-                    closed = Some((px, ExitReason::StopLoss));
-                } else if pt_hit {
-                    let px = if bar.open < pos.profit_target { bar.open } else { pos.profit_target };
-                    closed = Some((px, ExitReason::ProfitTarget));
+            }
+            if closed.is_none() {
+                if pos.direction == Direction::Long {
+                    let pt_hit = pos.profit_target.is_finite() && bar.high >= pos.profit_target;
+                    if pos.trailing && bar.low <= pos.trailing_stop {
+                        closed = Some((pos.trailing_stop.min(bar.open), ExitReason::TrailingStop));
+                    } else if bar.low <= pos.stop_loss && pt_hit && config.intrabar_up_first {
+                        closed = Some((pos.profit_target, ExitReason::ProfitTarget));
+                    } else if bar.low <= pos.stop_loss {
+                        let px = if bar.open < pos.stop_loss { bar.open } else { pos.stop_loss };
+                        closed = Some((px, ExitReason::StopLoss));
+                    } else if pt_hit {
+                        let px = if bar.open > pos.profit_target { bar.open } else { pos.profit_target };
+                        closed = Some((px, ExitReason::ProfitTarget));
+                    }
+                } else {
+                    let pt_hit = pos.profit_target.is_finite() && bar.low <= pos.profit_target;
+                    if pos.trailing && bar.high >= pos.trailing_stop {
+                        closed = Some((pos.trailing_stop.max(bar.open), ExitReason::TrailingStop));
+                    } else if bar.high >= pos.stop_loss && pt_hit && !config.intrabar_up_first {
+                        closed = Some((pos.profit_target, ExitReason::ProfitTarget));
+                    } else if bar.high >= pos.stop_loss {
+                        let px = if bar.open > pos.stop_loss { bar.open } else { pos.stop_loss };
+                        closed = Some((px, ExitReason::StopLoss));
+                    } else if pt_hit {
+                        let px = if bar.open < pos.profit_target { bar.open } else { pos.profit_target };
+                        closed = Some((px, ExitReason::ProfitTarget));
+                    }
                 }
             }
 
@@ -382,6 +429,28 @@ fn atr_value(atr: &Option<Vec<f64>>, i: usize) -> f64 {
     atr.as_ref()
         .and_then(|a| if i < a.len() && !a[i].is_nan() { Some(a[i]) } else { None })
         .unwrap_or(0.0)
+}
+
+/// Resolve SL/PT against the ticks inside one bar (tick precision).
+fn tick_exit(ticks: &[Tick], dir: Direction, sl: f64, pt: f64) -> Option<(f64, ExitReason)> {
+    for t in ticks {
+        if dir == Direction::Long {
+            if t.bid <= sl {
+                return Some((sl, ExitReason::StopLoss));
+            }
+            if pt.is_finite() && t.bid >= pt {
+                return Some((pt, ExitReason::ProfitTarget));
+            }
+        } else {
+            if t.ask >= sl {
+                return Some((sl, ExitReason::StopLoss));
+            }
+            if pt.is_finite() && t.ask <= pt {
+                return Some((pt, ExitReason::ProfitTarget));
+            }
+        }
+    }
+    None
 }
 
 fn sl_distance_points(sl: f64, fill: f64, point: f64) -> f64 {

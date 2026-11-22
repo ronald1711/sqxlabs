@@ -4,7 +4,7 @@
 //! listing. This is the foundation for multi-symbol backtests and multi-market
 //! robustness checks.
 
-use sqx_core::{Bar, Timeframe};
+use sqx_core::{Bar, Tick, Timeframe};
 
 /// One symbol/timeframe bar series.
 #[derive(Debug, Clone)]
@@ -92,6 +92,32 @@ impl DataStore {
     pub fn len(&self) -> usize {
         self.series.len()
     }
+}
+
+/// Parse a tick CSV with header timestamp,bid,ask (time in unix seconds).
+pub fn read_ticks_csv(path: &str) -> Result<Vec<Tick>, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for (idx, line) in text.lines().enumerate() {
+        if idx == 0 && line.starts_with("timestamp") {
+            continue;
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        let cols: Vec<&str> = line.split(',').collect();
+        if cols.len() < 3 {
+            continue;
+        }
+        let time: i64 = cols[0].trim().parse().map_err(|e| format!("bad tick time line {}: {e}", idx + 1))?;
+        let bid: f64 = cols[1].trim().parse().map_err(|e| format!("bad bid line {}: {e}", idx + 1))?;
+        let ask: f64 = cols[2].trim().parse().map_err(|e| format!("bad ask line {}: {e}", idx + 1))?;
+        out.push(Tick { time: time * 1000, bid, ask });
+    }
+    if out.is_empty() {
+        return Err(format!("no ticks in {path}"));
+    }
+    Ok(out)
 }
 
 /// Parse a CSV with header timestamp,open,high,low,close,volume (time in unix seconds).

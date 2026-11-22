@@ -9,7 +9,7 @@ mod engine;
 mod evaluate;
 mod registry;
 
-pub use engine::{backtest, BacktestConfig};
+pub use engine::{backtest, backtest_ticks, BacktestConfig};
 pub use evaluate::CompiledSignals;
 
 use sqx_core::{Direction, Timestamp};

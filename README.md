@@ -54,6 +54,10 @@ cargo run -q -p sqx-cli -- export --strategy examples/rsi-mean-reversion.json --
 cargo run -q -p sqx-cli -- export --strategy examples/rsi-mean-reversion.json --engine ninjascript
 cargo run -q -p sqx-cli -- export --strategy examples/rsi-mean-reversion.json --engine easylanguage
 
+# Tick-precision backtest: SL/PT are resolved against the ticks inside each bar
+cargo run -q -p sqx-cli -- backtest --strategy examples/rsi-mean-reversion.json \
+  --data data/mt5/EURUSD_M5.csv --ticks data/mt5/EURUSD_ticks.csv
+
 # Monte Carlo robustness test
 cargo run -q -p sqx-cli -- montecarlo --strategy examples/rsi-mean-reversion.json --data data/eurusd_sample.csv --runs 2000
 
@@ -112,7 +116,7 @@ cargo run -q -p sqx-cli -- crosscheck --strategy examples/rsi-mean-reversion.jso
 cargo run -q -p sqx-cli -- serve --data-dir data/mt5
 ```
 
-MT5 bar times are broker server time; the engine uses relative bar intervals,
+Export ticks with `--ticks` (writes `<symbol>_ticks.csv`). MT5 bar times are broker server time; the engine uses relative bar intervals,
 so backtests are unaffected. `data/mt5/` is gitignored (your broker data stays
 local).
 

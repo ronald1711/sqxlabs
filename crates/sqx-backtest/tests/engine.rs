@@ -55,3 +55,27 @@ fn no_signal_produces_no_trades() {
 fn approx(a: f64, b: f64) -> bool {
     (a - b).abs() < 1e-9
 }
+
+#[test]
+fn tick_precision_resolves_sl_first() {
+    use sqx_backtest::backtest_ticks;
+    use sqx_core::Tick;
+    use sqx_strategy::{ProfitTarget, StopLoss};
+    let bars = vec![
+        Bar::new(0, 100.0, 100.0, 100.0, 100.0, 1.0),
+        Bar::new(60_000, 100.0, 100.0, 100.0, 100.0, 1.0),
+        Bar::new(120_000, 100.0, 120.0, 80.0, 100.0, 1.0),
+        Bar::new(180_000, 100.0, 100.0, 100.0, 100.0, 1.0),
+    ];
+    let mut s = always_long_strategy();
+    s.stop_loss = Some(StopLoss::Points(100.0));
+    s.profit_target = Some(ProfitTarget::Points(200.0));
+    let ticks = vec![
+        Tick { time: 120_001, bid: 99.90, ask: 99.91 },
+        Tick { time: 120_002, bid: 100.05, ask: 100.06 },
+    ];
+    let cfg = BacktestConfig { initial_deposit: 10_000.0, spread_points: 0.0, slippage_points: 0.0, commission_per_lot: 0.0, intrabar_up_first: false };
+    let r = backtest_ticks(&s, &bars, &ticks, &Instrument::fx("EURUSD"), &cfg);
+    assert!(!r.trades.is_empty(), "at least one trade expected");
+    assert_eq!(r.trades[0].exit_reason, sqx_backtest::ExitReason::StopLoss, "ticks hit SL first");
+}

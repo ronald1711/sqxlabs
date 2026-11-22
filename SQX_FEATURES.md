@@ -114,7 +114,7 @@ NinjaTrader8, AlgoCloud Stockpicker, AlgoCloud Single-asset.
 | Custom projects pipeline | done (Build -> Retest -> Optimize, GoToTask) |
 | AlgoWizard-style editor | done (signals/conditions + MM/trading-options sidebar) |
 | Export MQL4/MQL5/PineScript/NinjaScript/EasyLanguage | done |
-| Tick-precision backtests | partial (needs tick data) |
+| Tick-precision backtests | done (`backtest_ticks`, tick CSV export from MT5) |
 | Indicators | 76 base (228 building blocks with Rising/Falling variants) of ~250 |
 | MCP server (engine as tools) | done (sqx-mcp) |
 | Q AI Assistant / AlgoCloud / QuantAnalyzer | not ported |

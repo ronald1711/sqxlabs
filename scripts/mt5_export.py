@@ -22,6 +22,7 @@ def main() -> int:
     ap.add_argument("--timeframe", default="M5", choices=TFS)
     ap.add_argument("--count", type=int, default=5000)
     ap.add_argument("--out", default="data/mt5")
+    ap.add_argument("--ticks", action="store_true", help="export ticks instead of bars")
     ap.add_argument("--host", default="localhost")
     ap.add_argument("--port", type=int, default=8001)
     args = ap.parse_args()
@@ -33,6 +34,26 @@ def main() -> int:
     os.makedirs(args.out, exist_ok=True)
     tf = getattr(mt5, "TIMEFRAME_" + args.timeframe)
     total = 0
+    if args.ticks:
+        from datetime import datetime
+        for sym in [s.strip() for s in args.symbols.split(",") if s.strip()]:
+            if not mt5.symbol_select(sym, True):
+                print(f"{sym}: not selectable", file=sys.stderr)
+                continue
+            tk = mt5.copy_ticks_from(sym, datetime(2000, 1, 1), args.count, mt5.COPY_TICKS_ALL)
+            if tk is None or len(tk) == 0:
+                print(f"{sym}: no ticks ({mt5.last_error()})", file=sys.stderr)
+                continue
+            path = os.path.join(args.out, f"{sym}_ticks.csv")
+            with open(path, "w") as f:
+                f.write("timestamp,bid,ask\n")
+                for t in tk:
+                    f.write(f"{int(t[0])},{float(t[1]):.5f},{float(t[2]):.5f}\n")
+            print(f"{sym}: {len(tk)} ticks -> {path}")
+            total += len(tk)
+        mt5.shutdown()
+        print(f"done: {total} ticks")
+        return 0
     for sym in [s.strip() for s in args.symbols.split(",") if s.strip()]:
         if not mt5.symbol_select(sym, True):
             print(f"{sym}: not selectable ({mt5.last_error()})", file=sys.stderr)

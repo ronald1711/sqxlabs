@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
 use rand::SeedableRng;
 
-use sqx_backtest::{backtest, BacktestConfig, BacktestResult};
+use sqx_backtest::{backtest, backtest_ticks, BacktestConfig, BacktestResult};
 use sqx_core::{Bar, Instrument, Timeframe};
 use sqx_data::DataStore;
 use sqx_metrics::{compute as compute_metrics, render as render_metrics};
@@ -32,6 +32,9 @@ enum Cmd {
         /// Path to a CSV file (timestamp,open,high,low,close,volume).
         #[arg(long)]
         data: PathBuf,
+        /// Optional tick CSV (timestamp,bid,ask) for tick-precision exits.
+        #[arg(long)]
+        ticks: Option<PathBuf>,
         /// Symbol name (defaults to EURUSD).
         #[arg(long, default_value = "EURUSD")]
         symbol: String,
@@ -197,7 +200,7 @@ enum Cmd {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Backtest { strategy, data, symbol, deposit, spread, slippage, commission, periods_per_year } => {
+        Cmd::Backtest { strategy, data, ticks, symbol, deposit, spread, slippage, commission, periods_per_year } => {
             let s: Strategy = load_strategy(&strategy)?;
             let bars = load_bars(&data)?;
             let instrument = instrument(&symbol);
@@ -209,7 +212,14 @@ fn main() -> Result<()> {
                 commission_per_lot: commission,
                 intrabar_up_first: false,
             };
-            let result = backtest(&s, &bars, &instrument, &config);
+            let result = match &ticks {
+                Some(tp) => {
+                    let t = sqx_data::read_ticks_csv(tp.to_str().unwrap_or(""))
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                    backtest_ticks(&s, &bars, &t, &instrument, &config)
+                }
+                None => backtest(&s, &bars, &instrument, &config),
+            };
             let m = compute_metrics(&result, bars.len(), pyp);
             println!("{}", render_pseudocode(&s));
             println!();

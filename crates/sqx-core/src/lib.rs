@@ -4,6 +4,8 @@
 //! Holds the vocabulary every other crate talks in: market bars,
 //! timeframes, tradable symbols, and trading directions.
 
+use serde::{Deserialize, Serialize};
+
 mod bar;
 mod direction;
 mod instrument;
@@ -16,6 +18,14 @@ pub use timeframe::Timeframe;
 
 /// A unix timestamp in milliseconds (UTC).
 pub type Timestamp = i64;
+
+/// A single tick: bid and ask at a point in time.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Tick {
+    pub time: Timestamp,
+    pub bid: f64,
+    pub ask: f64,
+}
 
 /// Resample bars to a coarser timeframe by aggregating OHLCV per period.
 pub fn resample(bars: &[Bar], to: Timeframe) -> Vec<Bar> {
