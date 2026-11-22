@@ -117,6 +117,22 @@ pub fn compute(name: &str, params: &[sqx_strategy::Param], bars: &[Bar]) -> Opti
         }
         "VWAP" => ind::vwap(bars),
         "TrueRange" => ind::true_range(bars),
+        "IchimokuTenkan" => ind::ichimoku_tenkan(&h, &l),
+        "IchimokuKijun" => ind::ichimoku_kijun(&h, &l),
+        "IchimokuSenkouA" => ind::ichimoku_senkou_a(&h, &l),
+        "IchimokuSenkouB" => ind::ichimoku_senkou_b(&h, &l),
+        "VortexPlus" => { let (p, _) = ind::vortex(&h, &l, &c, period(params, 14)); p },
+        "VortexMinus" => { let (_, m) = ind::vortex(&h, &l, &c, period(params, 14)); m },
+        "KaufmanER" => ind::kaufman_er(&c, period(params, 14)),
+        "GannHiLo" => ind::gann_hilo(&h, &l, &c, period(params, 20)),
+        "GannHiLoTrend" => ind::gann_hilo_trend(&c, period(params, 20)),
+        "AroonOsc" => ind::aroon_osc(&h, &l, period(params, 25)),
+        "StochRSI" => ind::stoch_rsi(&c, 14, period(params, 14)),
+        "DonchianUpper" => ind::donchian_upper(&h, period(params, 20)),
+        "DonchianLower" => ind::donchian_lower(&l, period(params, 20)),
+        "DonchianMiddle" => ind::donchian_middle(&h, &l, period(params, 20)),
+        "OBV" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::obv(&c, &vol) },
+        "MFI" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::mfi(&h, &l, &c, &vol, period(params, 14)) },
         _ => return None,
     };
     Some(res)

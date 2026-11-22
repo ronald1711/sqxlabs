@@ -8,6 +8,7 @@
 //! The library is intentionally side-effect free and deterministic so that
 //! backtests reproduce byte-for-byte.
 
+mod extra;
 mod ma;
 mod osc;
 mod signal;
@@ -15,6 +16,7 @@ mod trend;
 mod util;
 mod volatility;
 
+pub use extra::*;
 pub use ma::*;
 pub use osc::*;
 pub use signal::*;

@@ -63,6 +63,22 @@ pub fn indicator_catalog() -> &'static [IndicatorSpec] {
         IndicatorSpec { name: "SuperTrend", label: "SuperTrend", params: &[("period", 10.0), ("mult", 3.0)], is_oscillator: false },
         IndicatorSpec { name: "VWAP", label: "VWAP", params: &[], is_oscillator: false },
         IndicatorSpec { name: "TrueRange", label: "True range", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "IchimokuTenkan", label: "Ichimoku Tenkan", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "IchimokuKijun", label: "Ichimoku Kijun", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "IchimokuSenkouA", label: "Ichimoku Senkou A", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "IchimokuSenkouB", label: "Ichimoku Senkou B", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "VortexPlus", label: "Vortex +VI", params: &[("period", 14.0)], is_oscillator: false },
+        IndicatorSpec { name: "VortexMinus", label: "Vortex -VI", params: &[("period", 14.0)], is_oscillator: false },
+        IndicatorSpec { name: "KaufmanER", label: "Kaufman efficiency", params: &[("period", 14.0)], is_oscillator: true },
+        IndicatorSpec { name: "GannHiLo", label: "Gann HiLo", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "GannHiLoTrend", label: "Gann HiLo trend", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "AroonOsc", label: "Aroon oscillator", params: &[("period", 25.0)], is_oscillator: true },
+        IndicatorSpec { name: "StochRSI", label: "Stochastic RSI", params: &[("period", 14.0)], is_oscillator: true },
+        IndicatorSpec { name: "DonchianUpper", label: "Donchian upper", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "DonchianLower", label: "Donchian lower", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "DonchianMiddle", label: "Donchian middle", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "OBV", label: "On-balance volume", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "MFI", label: "Money flow index", params: &[("period", 14.0)], is_oscillator: true },
     ]
 }
 
