@@ -20,6 +20,7 @@ sqx-web = { path = "../sqx-web" }
 sqx-portfolio = { path = "../sqx-portfolio" }
 sqx-pipeline = { path = "../sqx-pipeline" }
 sqx-analyzer = { path = "../sqx-analyzer" }
+sqx-cloud = { path = "../sqx-cloud" }
 clap.workspace = true
 anyhow.workspace = true
 serde_json.workspace = true

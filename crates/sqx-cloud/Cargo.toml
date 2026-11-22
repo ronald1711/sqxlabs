@@ -1,0 +1,11 @@
+[package]
+name = "sqx-cloud"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sqx-core = { path = "../sqx-core" }
+sqx-strategy = { path = "../sqx-strategy" }
+sqx-backtest = { path = "../sqx-backtest" }
+serde.workspace = true
+serde_json.workspace = true

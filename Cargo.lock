@@ -285,6 +285,7 @@ dependencies = [
  "serde_json",
  "sqx-analyzer",
  "sqx-backtest",
+ "sqx-cloud",
  "sqx-core",
  "sqx-data",
  "sqx-export",
@@ -297,6 +298,17 @@ dependencies = [
  "sqx-robustness",
  "sqx-strategy",
  "sqx-web",
+]
+
+[[package]]
+name = "sqx-cloud"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sqx-backtest",
+ "sqx-core",
+ "sqx-strategy",
 ]
 
 [[package]]

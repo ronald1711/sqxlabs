@@ -69,6 +69,18 @@ enum Cmd {
         #[arg(long, default_value_t = 0.0)]
         periods_per_year: f64,
     },
+    /// AlgoCloud-style daily signals: evaluate stored strategies on the last bar.
+    Cloud {
+        /// Directory with strategy JSON files.
+        #[arg(long)]
+        strategies: PathBuf,
+        /// Path to a CSV file (timestamp,open,high,low,close,volume).
+        #[arg(long)]
+        data: PathBuf,
+        /// Symbol name (defaults to EURUSD).
+        #[arg(long, default_value = "EURUSD")]
+        symbol: String,
+    },
     /// Generate random strategies, backtest and rank them.
     Generate {
         #[arg(long)]
@@ -251,6 +263,15 @@ fn main() -> Result<()> {
             let result = backtest(&s, &bars, &instrument, &BacktestConfig::default());
             let report = sqx_analyzer::analyze(&result, &bars, pyp);
             println!("{}", sqx_analyzer::render_markdown(&report));
+            Ok(())
+        }
+        Cmd::Cloud { strategies, data, symbol } => {
+            let mut svc = sqx_cloud::CloudService::new();
+            let n = svc.load_dir(&strategies).map_err(|e| anyhow::anyhow!(e))?;
+            let bars = load_bars(&data)?;
+            println!("Loaded {} strategies", n);
+            println!();
+            println!("{}", sqx_cloud::render_table(&svc.signals(&symbol, &bars)));
             Ok(())
         }
         Cmd::Generate { data, count, seed, top, min_trades, out } => {
