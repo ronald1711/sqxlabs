@@ -39,6 +39,10 @@ cargo test
 # List the indicator catalog
 cargo run -q -p sqx-cli -- indicators
 
+# QuantAnalyzer-style analysis report (monthly returns, drawdown periods,
+# trade statistics, rolling Sharpe)
+cargo run -q -p sqx-cli -- analyze --strategy examples/rsi-mean-reversion.json --data data/mt5/EURUSD_M5.csv
+
 # Generate 300 random strategies, backtest, rank, print top 10
 cargo run -q -p sqx-cli -- generate --data data/eurusd_sample.csv --count 300 --top 10
 

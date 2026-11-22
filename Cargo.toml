@@ -13,6 +13,7 @@ members = [
   "crates/sqx-robustness",
   "crates/sqx-portfolio",
   "crates/sqx-pipeline",
+  "crates/sqx-analyzer",
   "crates/sqx-web",
   "crates/sqx-mcp",
   "crates/sqx-cli",

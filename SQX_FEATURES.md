@@ -117,7 +117,8 @@ NinjaTrader8, AlgoCloud Stockpicker, AlgoCloud Single-asset.
 | Tick-precision backtests | done (`backtest_ticks`, tick CSV export from MT5) |
 | Indicators | 76 base (228 building blocks with Rising/Falling variants) of ~250 |
 | MCP server (engine as tools) | done (sqx-mcp) |
-| Q AI Assistant / AlgoCloud / QuantAnalyzer | not ported |
+| QuantAnalyzer-style analysis | done (sqx-analyzer: monthly returns, drawdown periods, trade stats, rolling Sharpe) |
+| Q AI Assistant / AlgoCloud | not ported (separate commercial products) |
 | Custom Java snippets / AlgoWizard custom blocks | missing (Rust blocks are compiled in) |
 
 ## How this inventory was produced

@@ -258,6 +258,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sqx-analyzer"
+version = "0.1.0"
+dependencies = [
+ "sqx-backtest",
+ "sqx-core",
+ "sqx-metrics",
+]
+
+[[package]]
 name = "sqx-backtest"
 version = "0.1.0"
 dependencies = [
@@ -274,6 +283,7 @@ dependencies = [
  "clap",
  "rand",
  "serde_json",
+ "sqx-analyzer",
  "sqx-backtest",
  "sqx-core",
  "sqx-data",

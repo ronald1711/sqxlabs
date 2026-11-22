@@ -54,6 +54,21 @@ enum Cmd {
         #[arg(long, default_value_t = 0.0)]
         periods_per_year: f64,
     },
+    /// QuantAnalyzer-style analysis report for one strategy.
+    Analyze {
+        /// Path to a strategy JSON file.
+        #[arg(long)]
+        strategy: PathBuf,
+        /// Path to a CSV file (timestamp,open,high,low,close,volume).
+        #[arg(long)]
+        data: PathBuf,
+        /// Symbol name (defaults to EURUSD).
+        #[arg(long, default_value = "EURUSD")]
+        symbol: String,
+        /// Bars per year for annualization (0 = infer from data).
+        #[arg(long, default_value_t = 0.0)]
+        periods_per_year: f64,
+    },
     /// Generate random strategies, backtest and rank them.
     Generate {
         #[arg(long)]
@@ -226,6 +241,16 @@ fn main() -> Result<()> {
             println!("{}", render_metrics(&m));
             println!("Final equity: {:.2}", result.final_equity);
             println!("Trades: {}", result.trades.len());
+            Ok(())
+        }
+        Cmd::Analyze { strategy, data, symbol, periods_per_year } => {
+            let s: Strategy = load_strategy(&strategy)?;
+            let bars = load_bars(&data)?;
+            let instrument = instrument(&symbol);
+            let pyp = resolve_periods_per_year(bars.len(), periods_per_year, &bars);
+            let result = backtest(&s, &bars, &instrument, &BacktestConfig::default());
+            let report = sqx_analyzer::analyze(&result, &bars, pyp);
+            println!("{}", sqx_analyzer::render_markdown(&report));
             Ok(())
         }
         Cmd::Generate { data, count, seed, top, min_trades, out } => {

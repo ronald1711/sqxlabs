@@ -1,0 +1,9 @@
+[package]
+name = "sqx-analyzer"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sqx-core = { path = "../sqx-core" }
+sqx-backtest = { path = "../sqx-backtest" }
+sqx-metrics = { path = "../sqx-metrics" }
