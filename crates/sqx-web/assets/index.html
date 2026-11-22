@@ -108,6 +108,19 @@
           <button id="btn-backtest">Backtest</button>
           <span id="bt-status" class="muted"></span>
         </div>
+        <div class="row" style="margin-top:8px">
+          <label class="muted">Export as</label>
+          <select id="exp-engine">
+            <option value="mql5">MQL5</option>
+            <option value="mql4">MQL4</option>
+            <option value="ninjascript">NinjaScript</option>
+            <option value="easylanguage">EasyLanguage</option>
+            <option value="pine">PineScript</option>
+          </select>
+          <button id="btn-export">Export code</button>
+          <span id="exp-status" class="muted"></span>
+        </div>
+        <pre id="exp-code" style="display:none; margin-top:12px; max-height:300px"></pre>
         <div id="bt-results"></div>
       </div>
       <div class="card" style="margin-top:18px">
@@ -604,6 +617,28 @@ document.getElementById("btn-generate").onclick = async function() {
 
 document.getElementById("btn-backtest").onclick = runBacktest;
 
+document.getElementById("btn-export").onclick = async function() {
+  const st = document.getElementById("exp-status");
+  const pre = document.getElementById("exp-code");
+  st.textContent = "Exporting...";
+  let obj;
+  try { obj = JSON.parse(document.getElementById("strategy").value); }
+  catch (e) { st.textContent = "Invalid strategy JSON"; return; }
+  const engine = document.getElementById("exp-engine").value;
+  const d = await postJSON("/api/export", JSON.stringify({ engine: engine, strategy: obj }));
+  if (d.error) { st.textContent = d.error; return; }
+  st.textContent = "";
+  pre.style.display = "block";
+  pre.textContent = d.code;
+  const blob = new Blob([d.code], { type: "text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "strategy." + (engine === "mql5" || engine === "mql4" ? "mq5" : engine === "ninjascript" ? "cs" : engine === "easylanguage" ? "els" : "txt");
+  a.textContent = " Download";
+  a.style.marginLeft = "10px";
+  st.appendChild(a);
+};
+
 async function refreshAiStatus() {
   try {
     const d = await getJSON("/api/assistant/config");
@@ -706,7 +741,9 @@ document.getElementById("opt-run").onclick = async function() {
   } else {
     let html = "<table><tr><th>Windows</th><th>OOS</th><th>Net</th><th>PF</th><th>Trades</th><th>DD %</th></tr>";
     (d.rows || []).forEach(function(r) {
-      html += "<tr><td>" + r.windows + "</td><td>" + fmt(r.oos, 2) + "</td><td>" + fmt(r.net, 2) + "</td><td>" + fmt(r.pf, 2) + "</td><td>" + r.trades + "</td><td>" + fmt(r.dd_pct, 2) + "</td></tr>";
+      var a = Math.min(0.55, Math.abs(r.net) / 4000 + 0.08).toFixed(2);
+      var bg = r.net > 0 ? "rgba(52,201,142," + a + ")" : "rgba(255,107,107," + a + ")";
+      html += "<tr style=\"background:" + bg + "\"><td>" + r.windows + "</td><td>" + fmt(r.oos, 2) + "</td><td>" + fmt(r.net, 2) + "</td><td>" + fmt(r.pf, 2) + "</td><td>" + r.trades + "</td><td>" + fmt(r.dd_pct, 2) + "</td></tr>";
     });
     html += "</table>";
     box.innerHTML = html;
@@ -730,18 +767,32 @@ function addResults(rows) {
   (rows || []).forEach(function(r) { RESULTS.push(r); });
   renderResults();
 }
+var RES_SORT = "profit_factor";
 function renderResults() {
   var box = document.getElementById("res-grid");
   var cnt = document.getElementById("res-count");
   if (cnt) cnt.textContent = RESULTS.length + " strategies";
   if (!box) return;
   if (!RESULTS.length) { box.innerHTML = "<p class=\"muted\">Run the Optimizer or Generate to fill the databank.</p>"; return; }
-  var html = "<table><tr><th>Name</th><th>PF</th><th>Net</th><th>Trades</th><th>DD %</th><th></th></tr>";
-  RESULTS.forEach(function(r, i) {
+  var cols = [["name","Name"],["profit_factor","PF"],["net_profit","Net"],["trades","Trades"],["dd_pct","DD %"]];
+  var order = RESULTS.map(function(r, i) { return i; });
+  order.sort(function(a, b) {
+    var av = RESULTS[a][RES_SORT], bv = RESULTS[b][RES_SORT];
+    if (typeof av === "string") return av < bv ? 1 : -1;
+    return (bv || 0) - (av || 0);
+  });
+  var html = "<table><tr>";
+  cols.forEach(function(c) { html += "<th data-sort=\"" + c[0] + "\" style=\"cursor:pointer\">" + c[1] + "</th>"; });
+  html += "<th></th></tr>";
+  order.forEach(function(i) {
+    var r = RESULTS[i];
     html += "<tr><td>" + r.name + "</td><td>" + fmt(r.profit_factor, 2) + "</td><td>" + fmt(r.net_profit, 2) + "</td><td>" + r.trades + "</td><td>" + fmt(r.dd_pct, 2) + "</td><td><button data-ri=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">Use</button></td></tr>";
   });
   html += "</table>";
   box.innerHTML = html;
+  box.querySelectorAll("th[data-sort]").forEach(function(th) {
+    th.onclick = function() { RES_SORT = th.dataset.sort; renderResults(); };
+  });
   box.querySelectorAll("button[data-ri]").forEach(function(b) {
     b.onclick = function() {
       var r = RESULTS[Number(b.dataset.ri)];

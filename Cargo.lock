@@ -451,6 +451,7 @@ dependencies = [
  "sqx-backtest",
  "sqx-core",
  "sqx-data",
+ "sqx-export",
  "sqx-metrics",
  "sqx-optimizer",
  "sqx-pipeline",

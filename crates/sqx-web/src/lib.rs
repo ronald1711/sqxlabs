@@ -114,6 +114,7 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("POST", "/api/robustness") => ("200 OK", "application/json", robustness_json(body, state)),
         ("POST", "/api/optimize") => ("200 OK", "application/json", optimize_json(body, state)),
         ("POST", "/api/pipeline") => ("200 OK", "application/json", pipeline_json(body, state)),
+        ("POST", "/api/export") => ("200 OK", "application/json", export_json(body)),
         ("POST", "/api/data/import") => ("200 OK", "application/json", import_json(body, state)),
         ("POST", "/api/data/delete") => ("200 OK", "application/json", delete_json(body, state)),
         ("POST", "/api/assistant") => ("200 OK", "application/json", assistant_json(body, state)),
@@ -197,6 +198,25 @@ fn datasources_json(state: &State) -> String {
         .collect();
     let default = st.series.first().map(|s| s.symbol.clone()).unwrap_or_default();
     json!({ "symbols": list, "default": default }).to_string()
+}
+
+fn export_json(body: &str) -> String {
+    let val: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let label = val.get("engine").and_then(|v| v.as_str()).unwrap_or("mql5");
+    let engine = sqx_export::Engine::from_label(label).unwrap_or(sqx_export::Engine::Mql5);
+    let strategy_val = match val.get("strategy") {
+        Some(v) => v.clone(),
+        None => return json!({ "error": "strategy required" }).to_string(),
+    };
+    let s: Strategy = match serde_json::from_value(strategy_val) {
+        Ok(s) => s,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let code = sqx_export::export(&s, engine);
+    json!({ "engine": engine.label(), "code": code }).to_string()
 }
 
 fn pipeline_json(body: &str, state: &State) -> String {
