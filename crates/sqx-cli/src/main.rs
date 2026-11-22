@@ -12,7 +12,7 @@ use sqx_optimizer::{backtest_batch, genetic_evolve, rank, random_strategy, walk_
 use sqx_project::{Databank, MetricSummary, Project, StrategyRecord};
 use sqx_export::{export as export_strategy, Engine};
 use sqx_portfolio::{backtest_all, best_subset, combine, equal_weights};
-use sqx_robustness::monte_carlo_trade_manipulation;
+use sqx_robustness::{monte_carlo_retest, monte_carlo_trade_manipulation, what_if};
 use sqx_strategy::{render as render_pseudocode, Strategy};
 
 #[derive(Parser)]
@@ -178,6 +178,19 @@ enum Cmd {
         count: usize,
         #[arg(long, default_value_t = 20)]
         keep: usize,
+    },
+    /// Full robustness cross-check set for one strategy.
+    Robustness {
+        #[arg(long)]
+        strategy: PathBuf,
+        #[arg(long)]
+        data: PathBuf,
+        #[arg(long, default_value_t = 1000)]
+        mc_runs: usize,
+        #[arg(long, default_value_t = 300)]
+        retest_runs: usize,
+        #[arg(long, default_value_t = 6)]
+        windows: usize,
     },
 }
 
@@ -396,6 +409,30 @@ fn main() -> Result<()> {
             for line in &report.log {
                 println!("  {}", line);
             }
+            Ok(())
+        }
+        Cmd::Robustness { strategy, data, mc_runs, retest_runs, windows } => {
+            let s: Strategy = load_strategy(&strategy)?;
+            let bars = load_bars(&data)?;
+            let inst = instrument("EURUSD");
+            let pyp = resolve_periods_per_year(bars.len(), 0.0, &bars);
+            let cfg = BacktestConfig::default();
+            let base = backtest(&s, &bars, &inst, &cfg);
+            let base_m = compute_metrics(&base, bars.len(), pyp);
+            println!("Base: net {:.2} PF {:.2} DD {:.2}% trades {:.0}", base_m.net_profit, base_m.profit_factor, base_m.max_drawdown_pct, base_m.number_of_trades);
+            let scenarios = [(1.0, 0.0, 0.0), (2.0, 0.0, 0.0), (2.0, 1.0, 0.0), (3.0, 1.0, 5.0), (5.0, 2.0, 10.0)];
+            let rows = what_if(&s, &bars, &inst, &cfg, &scenarios);
+            println!("What-if:");
+            for r in &rows {
+                println!("  spread={:.0} slip={:.0} comm={:.0} -> net {:.2} PF {:.2}", r.spread, r.slippage, r.commission, r.net_profit, r.profit_factor);
+            }
+            let mc = monte_carlo_trade_manipulation(&base.trades, mc_runs, 0.1, 42);
+            println!("MC trade manipulation: losing runs {:.1}%", mc.losing_runs_pct);
+            let rt = monte_carlo_retest(&s, &bars, &inst, &cfg, retest_runs, 7);
+            println!("MC retest: runs {} net5% {:.2} net50% {:.2} net95% {:.2} losing {:.1}%", rt.runs, rt.net_profit_5pct, rt.net_profit_50pct, rt.net_profit_95pct, rt.losing_runs_pct);
+            let gen = GeneratorConfig::default();
+            let wf = walk_forward(&bars, &inst, &cfg, pyp, &gen, windows, 0.25, 20, 42);
+            println!("Walk-forward: {} windows, OOS net {:.2} PF {:.2}", wf.windows, wf.oos_net_profit, wf.oos_profit_factor);
             Ok(())
         }
     }

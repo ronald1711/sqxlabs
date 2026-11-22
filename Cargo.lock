@@ -377,6 +377,7 @@ dependencies = [
  "rand",
  "sqx-backtest",
  "sqx-core",
+ "sqx-strategy",
 ]
 
 [[package]]

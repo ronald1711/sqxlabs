@@ -68,6 +68,9 @@ cargo run -q -p sqx-cli -- serve --data-dir data
 # Run a custom-project pipeline (Build -> Retest -> Optimize)
 cargo run -q -p sqx-cli -- pipeline --data data/eurusd_sample.csv --count 200 --keep 20
 
+# Full robustness cross-check set (what-if, MC trade, MC retest, walk-forward)
+cargo run -q -p sqx-cli -- robustness --strategy examples/rsi-mean-reversion.json --data data/eurusd_sample.csv
+
 # Start the web dashboard, then open http://127.0.0.1:8080
 cargo run -q -p sqx-cli -- serve --data data/eurusd_sample.csv
 ```
