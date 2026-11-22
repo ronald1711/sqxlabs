@@ -258,6 +258,105 @@ pub fn skewness(src: &[f64], n: usize) -> Series {
     out
 }
 
+pub fn bop(o: &[f64], h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    (0..h.len())
+        .map(|i| {
+            let r = h[i] - l[i];
+            if r != 0.0 { (c[i] - o[i]) / r } else { 0.0 }
+        })
+        .collect()
+}
+
+pub fn bias(c: &[f64], n: usize) -> Series {
+    let m = sma(c, n);
+    (0..c.len())
+        .map(|i| if m[i].is_nan() || m[i] == 0.0 { f64::NAN } else { (c[i] - m[i]) / m[i] * 100.0 })
+        .collect()
+}
+
+pub fn disparity(c: &[f64], n: usize) -> Series {
+    let m = sma(c, n);
+    (0..c.len())
+        .map(|i| if m[i].is_nan() || m[i] == 0.0 { f64::NAN } else { c[i] / m[i] * 100.0 })
+        .collect()
+}
+
+pub fn ppo(c: &[f64], fast: usize, slow: usize) -> Series {
+    let f = ema(c, fast);
+    let s = ema(c, slow);
+    (0..c.len())
+        .map(|i| if s[i].is_nan() || s[i] == 0.0 { f64::NAN } else { (f[i] - s[i]) / s[i] * 100.0 })
+        .collect()
+}
+
+pub fn bb_percent_b(c: &[f64], n: usize, mult: f64) -> Series {
+    let (u, _m, l) = crate::bollinger(c, n, mult);
+    (0..c.len())
+        .map(|i| {
+            let d = u[i] - l[i];
+            if d.is_nan() || d == 0.0 { f64::NAN } else { (c[i] - l[i]) / d }
+        })
+        .collect()
+}
+
+pub fn bb_bandwidth(c: &[f64], n: usize, mult: f64) -> Series {
+    let (u, m, l) = crate::bollinger(c, n, mult);
+    (0..c.len())
+        .map(|i| if m[i].is_nan() || m[i] == 0.0 { f64::NAN } else { (u[i] - l[i]) / m[i] * 100.0 })
+        .collect()
+}
+
+pub fn zscore(c: &[f64], n: usize) -> Series {
+    let m = sma(c, n);
+    let sd = crate::stddev(c, n);
+    (0..c.len())
+        .map(|i| if sd[i].is_nan() || sd[i] == 0.0 { f64::NAN } else { (c[i] - m[i]) / sd[i] })
+        .collect()
+}
+
+pub fn chaikin_volatility(h: &[f64], l: &[f64], n: usize) -> Series {
+    let range: Vec<f64> = (0..h.len()).map(|i| h[i] - l[i]).collect();
+    let e = ema(&range, n);
+    let mut out = vec![f64::NAN; h.len()];
+    for i in n..h.len() {
+        if !e[i - n].is_nan() && e[i - n] != 0.0 {
+            out[i] = (e[i] - e[i - n]) / e[i - n] * 100.0;
+        }
+    }
+    out
+}
+
+pub fn psychological_line(c: &[f64], n: usize) -> Series {
+    let len = c.len();
+    let mut out = vec![f64::NAN; len];
+    for i in n..len {
+        let mut up = 0;
+        for j in (i - n + 1)..=i {
+            if c[j] > c[j - 1] {
+                up += 1;
+            }
+        }
+        out[i] = up as f64 / n as f64 * 100.0;
+    }
+    out
+}
+
+pub fn center_of_gravity(c: &[f64], n: usize) -> Series {
+    let len = c.len();
+    let mut out = vec![f64::NAN; len];
+    for i in n.saturating_sub(1)..len {
+        let start = i + 1 - n;
+        let mut num = 0.0;
+        let mut den = 0.0;
+        for (k, j) in (start..=i).enumerate() {
+            num += (k as f64 + 1.0) * c[j];
+            den += c[j];
+        }
+        out[i] = if den != 0.0 { -num / den } else { f64::NAN };
+    }
+    out
+}
+
 pub fn fisher(h: &[f64], l: &[f64], n: usize) -> Series {
     let len = h.len();
     let hh = highest(h, n);

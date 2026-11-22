@@ -170,6 +170,16 @@ pub fn compute(name: &str, params: &[sqx_strategy::Param], bars: &[Bar]) -> Opti
         "ChandelierShort" => ind::chandelier_short(&h, &l, &c, period(params, 22), 3.0),
         "TwiggsMF" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::twiggs_money_flow(&h, &l, &c, &vol, period(params, 20)) },
         "VolumeOsc" => { let vol: Vec<f64> = bars.iter().map(|b| b.volume).collect(); ind::volume_osc(&vol, 5, 20) },
+        "BOP" => ind::bop(&o, &h, &l, &c),
+        "Bias" => ind::bias(&c, period(params, 20)),
+        "Disparity" => ind::disparity(&c, period(params, 14)),
+        "PPO" => ind::ppo(&c, 12, 26),
+        "BBPercentB" => ind::bb_percent_b(&c, period(params, 20), 2.0),
+        "BBBandwidth" => ind::bb_bandwidth(&c, period(params, 20), 2.0),
+        "ZScore" => ind::zscore(&c, period(params, 20)),
+        "ChaikinVolatility" => ind::chaikin_volatility(&h, &l, period(params, 10)),
+        "PsychologicalLine" => ind::psychological_line(&c, period(params, 12)),
+        "CenterOfGravity" => ind::center_of_gravity(&c, period(params, 10)),
         _ => return None,
     };
     Some(res)

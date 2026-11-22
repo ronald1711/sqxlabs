@@ -115,6 +115,16 @@ pub fn indicator_catalog() -> &'static [IndicatorSpec] {
         IndicatorSpec { name: "ChandelierShort", label: "Chandelier exit (short)", params: &[("period", 22.0)], is_oscillator: false },
         IndicatorSpec { name: "TwiggsMF", label: "Twiggs money flow", params: &[("period", 20.0)], is_oscillator: true },
         IndicatorSpec { name: "VolumeOsc", label: "Volume oscillator", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "BOP", label: "Balance of power", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "Bias", label: "Bias", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "Disparity", label: "Disparity index", params: &[("period", 14.0)], is_oscillator: false },
+        IndicatorSpec { name: "PPO", label: "Percentage price oscillator", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "BBPercentB", label: "Bollinger %B", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "BBBandwidth", label: "Bollinger bandwidth", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "ZScore", label: "Z-score", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "ChaikinVolatility", label: "Chaikin volatility", params: &[("period", 10.0)], is_oscillator: true },
+        IndicatorSpec { name: "PsychologicalLine", label: "Psychological line", params: &[("period", 12.0)], is_oscillator: true },
+        IndicatorSpec { name: "CenterOfGravity", label: "Center of gravity", params: &[("period", 10.0)], is_oscillator: true },
     ]
 }
 
