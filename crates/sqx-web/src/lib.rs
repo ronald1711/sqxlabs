@@ -113,6 +113,7 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("POST", "/api/pseudocode") => ("200 OK", "application/json", pseudocode_json(body)),
         ("POST", "/api/robustness") => ("200 OK", "application/json", robustness_json(body, state)),
         ("POST", "/api/optimize") => ("200 OK", "application/json", optimize_json(body, state)),
+        ("POST", "/api/pipeline") => ("200 OK", "application/json", pipeline_json(body, state)),
         ("POST", "/api/data/import") => ("200 OK", "application/json", import_json(body, state)),
         ("POST", "/api/data/delete") => ("200 OK", "application/json", delete_json(body, state)),
         ("POST", "/api/assistant") => ("200 OK", "application/json", assistant_json(body, state)),
@@ -196,6 +197,34 @@ fn datasources_json(state: &State) -> String {
         .collect();
     let default = st.series.first().map(|s| s.symbol.clone()).unwrap_or_default();
     json!({ "symbols": list, "default": default }).to_string()
+}
+
+fn pipeline_json(body: &str, state: &State) -> String {
+    let val: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let symbol = val.get("symbol").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let series = match find_series(state, &symbol) {
+        Some(s) => s,
+        None => return json!({ "error": "no data" }).to_string(),
+    };
+    let inst = instrument_for(&series.symbol);
+    let pyp = pyp_for(&series.bars);
+    let cfg = config_from(&val);
+    let count = val.get("count").and_then(|v| v.as_u64()).unwrap_or(300).clamp(50, 2000) as usize;
+    let keep = val.get("keep").and_then(|v| v.as_u64()).unwrap_or(20).clamp(1, 200) as usize;
+    let pipeline = sqx_pipeline::default_pipeline(count, keep);
+    let report = sqx_pipeline::run(
+        &pipeline,
+        &series.bars,
+        &inst,
+        &cfg,
+        pyp,
+        &GeneratorConfig::default(),
+        42,
+    );
+    json!({ "log": report.log, "databank": report.databank.len() }).to_string()
 }
 
 fn optimize_json(body: &str, state: &State) -> String {

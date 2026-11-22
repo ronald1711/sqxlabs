@@ -67,6 +67,7 @@
     <button class="nav-btn" data-tab="optimizer">Optimizer</button>
     <button class="nav-btn" data-tab="retester">Retester</button>
     <button class="nav-btn" data-tab="data">Data Manager</button>
+    <button class="nav-btn" data-tab="projects">Projects</button>
     <button class="nav-btn" data-tab="settings">Settings</button>
     <button class="nav-btn" data-tab="assistant">AI assistant</button>
   </aside>
@@ -181,6 +182,20 @@
           <span id="dm-status" class="muted"></span>
         </div>
         <textarea id="dm-csv" placeholder="timestamp,open,high,low,close,volume&#10;1700000000,1.10,1.11,1.09,1.105,100"></textarea>
+      </div>
+    </section>
+    <section id="tab-projects" class="tab">
+      <div class="card">
+        <h2>Projects — build pipeline</h2>
+        <p class="muted" style="margin-top:0;">Build → retest → optimize on the selected symbol. The log shows what each task did.</p>
+        <div class="row">
+          <label class="muted">Count</label>
+          <input type="number" id="proj-count" value="300" min="50" max="2000">
+          <label class="muted">Keep</label>
+          <input type="number" id="proj-keep" value="20" min="1" max="200">
+          <button id="proj-run">Run pipeline</button>
+        </div>
+        <pre id="proj-log" class="muted" style="white-space:pre-wrap; margin-top:12px;"></pre>
       </div>
     </section>
     <section id="tab-settings" class="tab">
@@ -617,6 +632,19 @@ async function loadCatalog() {
   renderEditor();
   renderMmList();
 }
+
+document.getElementById("proj-run").onclick = async function() {
+  const box = document.getElementById("proj-log");
+  box.textContent = "Running pipeline (build → retest → optimize)...";
+  const body = Object.assign({
+    count: Number(document.getElementById("proj-count").value),
+    keep: Number(document.getElementById("proj-keep").value),
+    symbol: selectedSymbol()
+  }, settings());
+  const d = await postJSON("/api/pipeline", JSON.stringify(body));
+  if (d.error) { box.textContent = d.error; return; }
+  box.textContent = "Databank: " + (d.databank || 0) + " strategies\n\n" + (d.log || []).join("\n");
+};
 
 document.getElementById("opt-run").onclick = async function() {
   const box = document.getElementById("opt-results");
