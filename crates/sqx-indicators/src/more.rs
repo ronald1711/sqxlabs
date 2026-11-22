@@ -1029,6 +1029,73 @@ pub fn price_velocity(c: &[f64], n: usize) -> Series {
     out
 }
 
+fn qqe_series(c: &[f64], n: usize) -> (Series, Series, Series) {
+    let len = c.len();
+    let rsi = crate::rsi(c, n);
+    let rsi_ma = ema(&ema(&rsi, 5), 5);
+    let diff: Vec<f64> = (0..len).map(|i| (rsi[i] - rsi_ma[i]).abs()).collect();
+    let d = ema(&ema(&diff, 5), 5);
+    let dar: Vec<f64> = d.iter().map(|v| v * 4.236).collect();
+    let upper: Vec<f64> = (0..len).map(|i| rsi_ma[i] + dar[i]).collect();
+    let lower: Vec<f64> = (0..len).map(|i| rsi_ma[i] - dar[i]).collect();
+    (rsi_ma, upper, lower)
+}
+
+pub fn qqe_rsi(c: &[f64], n: usize) -> Series {
+    qqe_series(c, n).0
+}
+
+pub fn qqe_upper(c: &[f64], n: usize) -> Series {
+    qqe_series(c, n).1
+}
+
+pub fn qqe_lower(c: &[f64], n: usize) -> Series {
+    qqe_series(c, n).2
+}
+
+pub fn connors_rsi(c: &[f64]) -> Series {
+    let len = c.len();
+    let rsi3 = crate::rsi(c, 3);
+    let mut streak = vec![0.0; len];
+    for i in 1..len {
+        if c[i] > c[i - 1] {
+            streak[i] = if streak[i - 1] > 0.0 { streak[i - 1] + 1.0 } else { 1.0 };
+        } else if c[i] < c[i - 1] {
+            streak[i] = if streak[i - 1] < 0.0 { streak[i - 1] - 1.0 } else { -1.0 };
+        }
+    }
+    let rsi_streak = crate::rsi(&streak, 2);
+    let roc1 = roc(c, 1);
+    let pr = percent_rank(&roc1, 100);
+    (0..len)
+        .map(|i| (rsi3[i] + rsi_streak[i] + pr[i]) / 3.0)
+        .collect()
+}
+
+pub fn fib_1272(h: &[f64], l: &[f64], n: usize) -> Series {
+    fib_level(h, l, n, 1.272)
+}
+
+pub fn fib_1618(h: &[f64], l: &[f64], n: usize) -> Series {
+    fib_level(h, l, n, 1.618)
+}
+
+pub fn camarilla_h3(h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    (0..h.len()).map(|i| c[i] + (h[i] - l[i]) * 1.1 / 12.0).collect()
+}
+
+pub fn camarilla_h4(h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    (0..h.len()).map(|i| c[i] + (h[i] - l[i]) * 1.1 / 2.0).collect()
+}
+
+pub fn camarilla_l3(h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    (0..h.len()).map(|i| c[i] - (h[i] - l[i]) * 1.1 / 12.0).collect()
+}
+
+pub fn camarilla_l4(h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    (0..h.len()).map(|i| c[i] - (h[i] - l[i]) * 1.1 / 2.0).collect()
+}
+
 pub fn fisher(h: &[f64], l: &[f64], n: usize) -> Series {
     let len = h.len();
     let hh = highest(h, n);

@@ -194,6 +194,16 @@ pub fn indicator_catalog() -> &'static [IndicatorSpec] {
         IndicatorSpec { name: "Acceleration", label: "Acceleration", params: &[("period", 10.0)], is_oscillator: true },
         IndicatorSpec { name: "Jerk", label: "Jerk", params: &[("period", 10.0)], is_oscillator: true },
         IndicatorSpec { name: "PriceVelocity", label: "Price velocity", params: &[("period", 10.0)], is_oscillator: true },
+        IndicatorSpec { name: "QQE", label: "QQE (smoothed RSI)", params: &[("period", 14.0)], is_oscillator: true },
+        IndicatorSpec { name: "QQEUpper", label: "QQE upper band", params: &[("period", 14.0)], is_oscillator: true },
+        IndicatorSpec { name: "QQELower", label: "QQE lower band", params: &[("period", 14.0)], is_oscillator: true },
+        IndicatorSpec { name: "ConnorsRSI", label: "Connors RSI", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "Fib1272", label: "Fib extension 127.2%", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "Fib1618", label: "Fib extension 161.8%", params: &[("period", 20.0)], is_oscillator: false },
+        IndicatorSpec { name: "CamarillaH3", label: "Camarilla H3", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "CamarillaH4", label: "Camarilla H4", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "CamarillaL3", label: "Camarilla L3", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "CamarillaL4", label: "Camarilla L4", params: &[], is_oscillator: false },
     ]
 }
 

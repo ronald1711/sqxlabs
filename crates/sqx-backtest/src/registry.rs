@@ -254,6 +254,16 @@ pub fn compute(name: &str, params: &[sqx_strategy::Param], bars: &[Bar]) -> Opti
         "Acceleration" => ind::acceleration(&c, period(params, 10)),
         "Jerk" => ind::jerk(&c, period(params, 10)),
         "PriceVelocity" => ind::price_velocity(&c, period(params, 10)),
+        "QQE" => ind::qqe_rsi(&c, period(params, 14)),
+        "QQEUpper" => ind::qqe_upper(&c, period(params, 14)),
+        "QQELower" => ind::qqe_lower(&c, period(params, 14)),
+        "ConnorsRSI" => ind::connors_rsi(&c),
+        "Fib1272" => ind::fib_1272(&h, &l, period(params, 20)),
+        "Fib1618" => ind::fib_1618(&h, &l, period(params, 20)),
+        "CamarillaH3" => ind::camarilla_h3(&h, &l, &c),
+        "CamarillaH4" => ind::camarilla_h4(&h, &l, &c),
+        "CamarillaL3" => ind::camarilla_l3(&h, &l, &c),
+        "CamarillaL4" => ind::camarilla_l4(&h, &l, &c),
         _ => return None,
     };
     Some(res)
