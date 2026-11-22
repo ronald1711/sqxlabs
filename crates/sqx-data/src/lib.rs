@@ -103,13 +103,14 @@ pub fn synthetic_bars(symbol: &str, n: usize) -> Vec<Bar> {
             .bytes()
             .fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64));
     let mut t = 1_700_000_000_000i64;
-    for _ in 0..n {
+    for i in 0..n {
         state = state
             .wrapping_mul(6_364_136_223_846_793_005)
             .wrapping_add(1_442_695_040_888_963_407);
         let r = ((state >> 33) as f64 / (1u64 << 31) as f64) - 1.0;
+        let cycle = (i as f64 * 0.02).sin();
         let open = price;
-        price = (price + r * 0.0004).max(0.01);
+        price = (price + cycle * 0.0005 + r * 0.0002).max(0.01);
         let close = price;
         let hi = open.max(close) + r.abs() * 0.0002;
         let lo = open.min(close) - r.abs() * 0.0002;

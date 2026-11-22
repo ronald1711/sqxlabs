@@ -454,6 +454,7 @@ dependencies = [
  "sqx-metrics",
  "sqx-optimizer",
  "sqx-portfolio",
+ "sqx-robustness",
  "sqx-strategy",
 ]
 

@@ -14,6 +14,7 @@ sqx-metrics = { path = "../sqx-metrics" }
 sqx-optimizer = { path = "../sqx-optimizer" }
 sqx-portfolio = { path = "../sqx-portfolio" }
 sqx-assistant = { path = "../sqx-assistant" }
+sqx-robustness = { path = "../sqx-robustness" }
 serde.workspace = true
 serde_json.workspace = true
 rand.workspace = true

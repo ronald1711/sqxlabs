@@ -11,8 +11,15 @@
   header { padding:18px 24px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:14px; }
   header h1 { font-size:18px; margin:0; font-weight:600; }
   header .badge { font-size:12px; color:var(--dim); }
-  main { display:grid; grid-template-columns:380px 1fr; gap:18px; padding:18px 24px; }
-  @media (max-width:900px) { main { grid-template-columns:1fr; } }
+  main { display:flex; align-items:stretch; min-height:calc(100vh - 64px); }
+  .nav { width:190px; flex-shrink:0; padding:18px 12px; border-right:1px solid var(--line); display:flex; flex-direction:column; gap:4px; }
+  .nav-btn { text-align:left; background:transparent; color:var(--dim); border:0; border-radius:8px; padding:10px 14px; font-size:14px; cursor:pointer; }
+  .nav-btn.active { background:var(--panel); color:var(--fg); font-weight:600; }
+  .nav-btn:hover { color:var(--fg); }
+  .content { flex:1; min-width:0; padding:18px 24px; }
+  .tab { display:none; }
+  .tab.active { display:block; }
+  @media (max-width:900px) { main { flex-direction:column; } .nav { width:auto; flex-direction:row; flex-wrap:wrap; } }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
   .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); margin:0 0 12px; }
   #data-info { display:flex; gap:18px; font-size:13px; color:var(--dim); flex-wrap:wrap; }
@@ -55,80 +62,120 @@
   </span>
 </header>
 <main>
-  <div>
-    <div class="card">
-      <h2>Generate &amp; rank</h2>
-      <div class="row">
-        <label class="muted">Count</label>
-        <input type="number" id="count" value="200" min="1" max="2000">
-        <label class="muted">Seed</label>
-        <input type="number" id="seed" value="42">
-        <button id="btn-generate">Generate</button>
-      </div>
-      <div id="gen-results" class="muted">Click generate to backtest random strategies and rank them.</div>
-    </div>
-    <div class="card" style="margin-top:18px">
-      <h2>Indicator catalog</h2>
-      <div id="catalog"></div>
-    </div>
-    <div class="card" style="margin-top:18px">
-      <h2>Portfolio composer</h2>
-      <div class="row">
-        <label class="muted">Count</label>
-        <input type="number" id="pf-count" value="300" min="20">
-        <label class="muted">Seed</label>
-        <input type="number" id="pf-seed" value="42">
-        <button id="pf-build">Build portfolio</button>
-      </div>
-      <div id="pf-results" class="muted">Generate strategies, pick the best subset and show the combined portfolio.</div>
-    </div>
-  </div>
-  <div>
-    <div class="card">
-      <h2>AlgoWizard — visual strategy editor</h2>
-      <div class="row">
-        <label><input type="checkbox" id="aw-long" checked> Long</label>
-        <label><input type="checkbox" id="aw-short"> Short</label>
-        <label class="muted">Name</label>
-        <input type="text" id="aw-name" value="My strategy">
-        <label class="muted">SL pts</label>
-        <input type="number" id="aw-sl" value="100" min="0">
-        <label class="muted">TP pts</label>
-        <input type="number" id="aw-pt" value="200" min="0">
-        <button id="aw-backtest">Build &amp; Backtest</button>
-      </div>
-      <div style="display:flex; gap:16px; align-items:flex-start;">
-        <div style="flex:1; min-width:0;" id="aw-signals"></div>
-        <div style="width:290px; flex-shrink:0;">
-          <h3 style="margin:0 0 10px; font-size:14px;">Money management</h3>
-          <select id="aw-mm-type" style="width:100%;"></select>
-          <div id="aw-mm-params" style="margin-top:8px;"></div>
-          <h3 style="margin:16px 0 10px; font-size:14px;">Trading options</h3>
-          <label class="muted" style="display:block; font-size:12px;"><input type="checkbox" id="aw-eod"> Exit at end of day</label>
-          <label class="muted" style="display:block; font-size:12px; margin-top:4px;"><input type="checkbox" id="aw-friday"> Exit on Friday</label>
-          <label class="muted" style="display:block; font-size:12px; margin-top:8px;">Max trades/day (0 = no limit)</label>
-          <input type="number" id="aw-maxtrades" value="0" min="0" style="width:100%;">
+  <aside class="nav">
+    <button class="nav-btn active" data-tab="builder">Builder</button>
+    <button class="nav-btn" data-tab="optimizer">Optimizer</button>
+    <button class="nav-btn" data-tab="retester">Retester</button>
+    <button class="nav-btn" data-tab="settings">Settings</button>
+    <button class="nav-btn" data-tab="assistant">AI assistant</button>
+  </aside>
+  <div class="content">
+    <section id="tab-builder" class="tab active">
+      <div class="card">
+        <h2>AlgoWizard — visual strategy editor</h2>
+        <div class="row">
+          <label><input type="checkbox" id="aw-long" checked> Long</label>
+          <label><input type="checkbox" id="aw-short"> Short</label>
+          <label class="muted">Name</label>
+          <input type="text" id="aw-name" value="My strategy">
+          <label class="muted">SL pts</label>
+          <input type="number" id="aw-sl" value="100" min="0">
+          <label class="muted">TP pts</label>
+          <input type="number" id="aw-pt" value="200" min="0">
+          <button id="aw-backtest">Build &amp; Backtest</button>
+        </div>
+        <div style="display:flex; gap:16px; align-items:flex-start;">
+          <div style="flex:1; min-width:0;" id="aw-signals"></div>
+          <div style="width:290px; flex-shrink:0;">
+            <h3 style="margin:0 0 10px; font-size:14px;">Money management</h3>
+            <select id="aw-mm-type" style="width:100%;"></select>
+            <div id="aw-mm-params" style="margin-top:8px;"></div>
+            <h3 style="margin:16px 0 10px; font-size:14px;">Trading options</h3>
+            <label class="muted" style="display:block; font-size:12px;"><input type="checkbox" id="aw-eod"> Exit at end of day</label>
+            <label class="muted" style="display:block; font-size:12px; margin-top:4px;"><input type="checkbox" id="aw-friday"> Exit on Friday</label>
+            <label class="muted" style="display:block; font-size:12px; margin-top:8px;">Max trades/day (0 = no limit)</label>
+            <input type="number" id="aw-maxtrades" value="0" min="0" style="width:100%;">
+          </div>
         </div>
       </div>
-    </div>
-    <div class="card" style="margin-top:18px">
-      <h2>Backtest a strategy</h2>
-      <textarea id="strategy"></textarea>
-      <div class="row" style="margin-top:12px">
-        <button id="btn-backtest">Backtest</button>
-        <span id="bt-status" class="muted"></span>
+      <div class="card" style="margin-top:18px">
+        <h2>Backtest a strategy</h2>
+        <textarea id="strategy"></textarea>
+        <div class="row" style="margin-top:12px">
+          <button id="btn-backtest">Backtest</button>
+          <span id="bt-status" class="muted"></span>
+        </div>
+        <div id="bt-results"></div>
       </div>
-      <div id="bt-results"></div>
-    </div>
-    <div class="card" style="margin-top:18px">
-      <h2>AI assistant</h2>
-      <div id="ai-status" class="muted" style="font-size:12px; margin-bottom:8px;"></div>
-      <div class="row">
-        <input id="ai-q" type="text" placeholder="e.g. generate 50 strategies and analyse the best" style="flex:1">
-        <button id="btn-ai">Ask</button>
+      <div class="card" style="margin-top:18px">
+        <h2>Indicator catalog</h2>
+        <div id="catalog"></div>
       </div>
-      <pre id="ai-answer" class="muted" style="white-space:pre-wrap; margin-top:10px; font-size:13px"></pre>
-    </div>
+    </section>
+    <section id="tab-optimizer" class="tab">
+      <div class="card">
+        <h2>Generate &amp; rank</h2>
+        <div class="row">
+          <label class="muted">Count</label>
+          <input type="number" id="count" value="200" min="1" max="2000">
+          <label class="muted">Seed</label>
+          <input type="number" id="seed" value="42">
+          <button id="btn-generate">Generate</button>
+        </div>
+        <div id="gen-results" class="muted">Click generate to backtest random strategies and rank them.</div>
+      </div>
+      <div class="card" style="margin-top:18px">
+        <h2>Portfolio composer</h2>
+        <div class="row">
+          <label class="muted">Count</label>
+          <input type="number" id="pf-count" value="300" min="20">
+          <label class="muted">Seed</label>
+          <input type="number" id="pf-seed" value="42">
+          <button id="pf-build">Build portfolio</button>
+        </div>
+        <div id="pf-results" class="muted">Generate strategies, pick the best subset and show the combined portfolio.</div>
+      </div>
+    </section>
+    <section id="tab-retester" class="tab">
+      <div class="card">
+        <h2>Retester — robustness</h2>
+        <p class="muted" style="margin-top:0;">Uses the strategy in the Builder tab. Runs what-if cost scenarios and Monte Carlo trade manipulation.</p>
+        <div class="row">
+          <button id="btn-robust">Run what-if + Monte Carlo</button>
+          <span id="rob-status" class="muted"></span>
+        </div>
+        <div id="rob-results"></div>
+      </div>
+    </section>
+    <section id="tab-settings" class="tab">
+      <div class="card">
+        <h2>Settings</h2>
+        <div class="row">
+          <label class="muted">Initial deposit</label>
+          <input type="number" id="set-deposit" value="10000">
+          <label class="muted">Spread (pts)</label>
+          <input type="number" id="set-spread" value="0">
+          <label class="muted">Slippage (pts)</label>
+          <input type="number" id="set-slippage" value="0">
+          <label class="muted">Commission/lot</label>
+          <input type="number" id="set-commission" value="0">
+        </div>
+        <p class="muted">Applied to Builder backtests and Optimizer runs.</p>
+        <h2 style="margin-top:18px">AI model</h2>
+        <div id="set-ai" class="muted" style="font-size:12px;"></div>
+      </div>
+    </section>
+    <section id="tab-assistant" class="tab">
+      <div class="card">
+        <h2>AI assistant</h2>
+        <div id="ai-status" class="muted" style="font-size:12px; margin-bottom:8px;"></div>
+        <div class="row">
+          <input id="ai-q" type="text" placeholder="e.g. generate 50 strategies and analyse the best" style="flex:1">
+          <button id="btn-ai">Ask</button>
+        </div>
+        <pre id="ai-answer" class="muted" style="white-space:pre-wrap; margin-top:10px; font-size:13px"></pre>
+      </div>
+    </section>
   </div>
 </main>
 <script id="default-strategy" type="application/json">
@@ -407,6 +454,7 @@ async function runBacktest() {
   try {
     var obj = JSON.parse(document.getElementById("strategy").value);
     obj.symbol = selectedSymbol();
+    Object.assign(obj, settings());
     body = JSON.stringify(obj);
   } catch (e) { status.textContent = "Invalid JSON"; return; }
   let d;
@@ -443,7 +491,8 @@ document.getElementById("btn-generate").onclick = async function() {
   const seed = Number(document.getElementById("seed").value);
   const box = document.getElementById("gen-results");
   box.textContent = "Generating...";
-  const d = await postJSON("/api/generate", JSON.stringify({ count: count, seed: seed, symbol: selectedSymbol() }));
+  const body = Object.assign({ count: count, seed: seed, symbol: selectedSymbol() }, settings());
+  const d = await postJSON("/api/generate", JSON.stringify(body));
   if (d.error) { box.innerHTML = "<span class=\"neg\">" + d.error + "</span>"; return; }
   let rows = "<table><tr><th>Name</th><th>Profit factor</th><th>Net profit</th><th>Trades</th><th>DD %</th></tr>";
   d.results.forEach(function(r) {
@@ -459,10 +508,12 @@ async function refreshAiStatus() {
   try {
     const d = await getJSON("/api/assistant/config");
     const key = d.api_key_set ? "" : " · no key";
-    document.getElementById("ai-status").textContent = "model: " + d.model + " · " + d.base_url + key;
-  } catch (e) {
-    document.getElementById("ai-status").textContent = "";
-  }
+    const txt = "model: " + d.model + " · " + d.base_url + key;
+    const a = document.getElementById("ai-status");
+    if (a) a.textContent = txt;
+    const s = document.getElementById("set-ai");
+    if (s) s.textContent = txt;
+  } catch (e) {}
 }
 
 async function askAssistant() {
@@ -514,6 +565,46 @@ async function loadCatalog() {
   renderEditor();
   renderMmList();
 }
+
+function settings() {
+  var g = function(id, d) { var el = document.getElementById(id); var v = el ? parseFloat(el.value) : NaN; return isNaN(v) ? d : v; };
+  return { deposit: g("set-deposit", 10000), spread: g("set-spread", 0), slippage: g("set-slippage", 0), commission: g("set-commission", 0) };
+}
+
+async function runRobustness() {
+  var out = document.getElementById("rob-results");
+  var st = document.getElementById("rob-status");
+  out.innerHTML = "";
+  st.textContent = "Running...";
+  var obj;
+  try { obj = JSON.parse(document.getElementById("strategy").value); }
+  catch (e) { st.textContent = "Invalid strategy JSON"; return; }
+  obj.symbol = selectedSymbol();
+  Object.assign(obj, settings());
+  var d = await postJSON("/api/robustness", JSON.stringify(obj));
+  st.textContent = "";
+  if (d.error) { out.innerHTML = "<p class=\"neg\">" + d.error + "</p>"; return; }
+  var html = "<h2 style=\"margin-top:16px\">What-if (spread / slippage / commission)</h2><table><tr><th>Spread</th><th>Slippage</th><th>Commission</th><th>Net</th><th>PF</th></tr>";
+  (d.what_if || []).forEach(function(w) {
+    html += "<tr><td>" + w.spread + "</td><td>" + w.slippage + "</td><td>" + w.commission + "</td><td class=\"" + cls(w.net_profit) + "\">" + fmt(w.net_profit, 2) + "</td><td>" + fmt(w.profit_factor, 2) + "</td></tr>";
+  });
+  html += "</table>";
+  var m = d.mc || {};
+  html += "<h2 style=\"margin-top:16px\">Monte Carlo trade manipulation (" + (d.trades || 0) + " trades)</h2><table><tr><th>Runs</th><th>Net p5</th><th>Net p50</th><th>Net p95</th><th>Losing %</th><th>Max DD 95%</th></tr>";
+  html += "<tr><td>" + (m.runs || 0) + "</td><td class=\"" + cls(m.net_p5) + "\">" + fmt(m.net_p5, 2) + "</td><td class=\"" + cls(m.net_p50) + "\">" + fmt(m.net_p50, 2) + "</td><td class=\"" + cls(m.net_p95) + "\">" + fmt(m.net_p95, 2) + "</td><td>" + fmt(m.losing_pct, 1) + "</td><td>" + fmt(m.max_dd_95, 2) + "</td></tr></table>";
+  out.innerHTML = html;
+}
+document.getElementById("btn-robust").onclick = runRobustness;
+
+document.querySelectorAll(".nav-btn").forEach(function(b) {
+  b.onclick = function() {
+    document.querySelectorAll(".nav-btn").forEach(function(x) { x.classList.remove("active"); });
+    document.querySelectorAll(".tab").forEach(function(x) { x.classList.remove("active"); });
+    b.classList.add("active");
+    var t = document.getElementById("tab-" + b.dataset.tab);
+    if (t) t.classList.add("active");
+  };
+});
 
 loadInfo();
 loadCatalog();

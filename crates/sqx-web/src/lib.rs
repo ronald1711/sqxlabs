@@ -15,6 +15,7 @@ use sqx_core::{Bar, Instrument};
 use sqx_data::{DataStore, SymbolSeries};
 use sqx_metrics::{compute as compute_metrics, Metrics};
 use sqx_optimizer::{backtest_batch, rank, random_strategy, Fitness, GeneratorConfig};
+use sqx_robustness::{monte_carlo_trade_manipulation, what_if};
 use sqx_strategy::{render as render_pseudocode, Strategy};
 
 const INDEX: &str = include_str!("../assets/index.html");
@@ -110,6 +111,7 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("POST", "/api/generate") => ("200 OK", "application/json", generate_json(body, state)),
         ("POST", "/api/portfolio") => ("200 OK", "application/json", portfolio_json(body, state)),
         ("POST", "/api/pseudocode") => ("200 OK", "application/json", pseudocode_json(body)),
+        ("POST", "/api/robustness") => ("200 OK", "application/json", robustness_json(body, state)),
         ("POST", "/api/assistant") => ("200 OK", "application/json", assistant_json(body, state)),
         ("GET", "/api/assistant/config") => ("200 OK", "application/json", assistant_config_json()),
         _ => ("404 Not Found", "text/plain", "not found".to_string()),
@@ -226,6 +228,61 @@ fn metrics_json(m: &Metrics) -> serde_json::Value {
     })
 }
 
+fn config_from(val: &serde_json::Value) -> BacktestConfig {
+    BacktestConfig {
+        initial_deposit: val.get("deposit").and_then(|v| v.as_f64()).unwrap_or(10_000.0),
+        spread_points: val.get("spread").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        slippage_points: val.get("slippage").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        commission_per_lot: val.get("commission").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        intrabar_up_first: false,
+    }
+}
+
+fn robustness_json(body: &str, state: &State) -> String {
+    let val: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let symbol = val.get("symbol").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let series = match find_series(state, &symbol) {
+        Some(s) => s,
+        None => return json!({ "error": "no data" }).to_string(),
+    };
+    let s: Strategy = match serde_json::from_str(body) {
+        Ok(s) => s,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let inst = instrument_for(&series.symbol);
+    let base = config_from(&val);
+    let scenarios = [
+        (0.0, 0.0, 0.0),
+        (10.0, 0.0, 0.0),
+        (0.0, 5.0, 0.0),
+        (10.0, 5.0, 0.0),
+        (10.0, 5.0, 7.0),
+        (20.0, 10.0, 10.0),
+    ];
+    let rows = what_if(&s, &series.bars, &inst, &base, &scenarios);
+    let r = backtest(&s, &series.bars, &inst, &base);
+    let mc = monte_carlo_trade_manipulation(&r.trades, 1000, 0.1, 42);
+    json!({
+        "what_if": rows.iter().map(|w| json!({
+            "spread": w.spread, "slippage": w.slippage, "commission": w.commission,
+            "net_profit": w.net_profit, "profit_factor": w.profit_factor
+        })).collect::<Vec<_>>(),
+        "mc": {
+            "runs": mc.runs,
+            "net_p5": mc.net_profit_5pct,
+            "net_p50": mc.net_profit_50pct,
+            "net_p95": mc.net_profit_95pct,
+            "losing_pct": mc.losing_runs_pct,
+            "max_dd_95": mc.max_drawdown_95pct
+        },
+        "trades": r.trades.len()
+    })
+    .to_string()
+}
+
 fn llm_config() -> sqx_assistant::LlmConfig {
     let base_url = std::env::var("SQX_LLM_BASE_URL").unwrap_or_else(|_| {
         let addr = "127.0.0.1:11434".parse().unwrap();
@@ -296,7 +353,7 @@ fn backtest_json(body: &str, state: &State) -> String {
     };
     let inst = instrument_for(&series.symbol);
     let pyp = pyp_for(&series.bars);
-    let cfg = BacktestConfig::default();
+    let cfg = config_from(&val);
     let result = backtest(&s, &series.bars, &inst, &cfg);
     let m = compute_metrics(&result, series.bars.len(), pyp);
     let equity = result.equity.clone();
@@ -318,6 +375,14 @@ fn generate_json(body: &str, state: &State) -> String {
         seed: u64,
         #[serde(default)]
         symbol: String,
+        #[serde(default)]
+        deposit: Option<f64>,
+        #[serde(default)]
+        spread: Option<f64>,
+        #[serde(default)]
+        slippage: Option<f64>,
+        #[serde(default)]
+        commission: Option<f64>,
     }
     let req: Req = match serde_json::from_str(body) {
         Ok(r) => r,
@@ -335,7 +400,13 @@ fn generate_json(body: &str, state: &State) -> String {
     let strategies: Vec<Strategy> = (0..count)
         .map(|i| random_strategy(&mut rng, &format!("s{i:04}"), &gen))
         .collect();
-    let cfg = BacktestConfig::default();
+    let cfg = BacktestConfig {
+        initial_deposit: req.deposit.unwrap_or(10_000.0),
+        spread_points: req.spread.unwrap_or(0.0),
+        slippage_points: req.slippage.unwrap_or(0.0),
+        commission_per_lot: req.commission.unwrap_or(0.0),
+        intrabar_up_first: false,
+    };
     let scored = backtest_batch(&strategies, &series.bars, &inst, &cfg, pyp);
     let ranked = rank(scored, Fitness::ProfitFactor, 5);
     let rows: Vec<_> = ranked
