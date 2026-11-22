@@ -15,6 +15,7 @@ members = [
   "crates/sqx-pipeline",
   "crates/sqx-analyzer",
   "crates/sqx-cloud",
+  "crates/sqx-assistant",
   "crates/sqx-web",
   "crates/sqx-mcp",
   "crates/sqx-cli",

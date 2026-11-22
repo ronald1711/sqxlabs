@@ -81,6 +81,27 @@ enum Cmd {
         #[arg(long, default_value = "EURUSD")]
         symbol: String,
     },
+    /// LLM assistant: drive the engine from an OpenAI-compatible endpoint.
+    Assistant {
+        /// Path to a CSV file.
+        #[arg(long)]
+        data: PathBuf,
+        /// Symbol name (defaults to EURUSD).
+        #[arg(long, default_value = "EURUSD")]
+        symbol: String,
+        /// Base URL (default: env SQX_LLM_BASE_URL or Groq).
+        #[arg(long, default_value = "")]
+        base_url: String,
+        /// Model id (default: env SQX_LLM_MODEL or llama-3.3-70b-versatile).
+        #[arg(long, default_value = "")]
+        model: String,
+        /// API key (default: env SQX_LLM_API_KEY).
+        #[arg(long, default_value = "")]
+        api_key: String,
+        /// The question / instruction for the assistant.
+        #[arg(long)]
+        ask: String,
+    },
     /// Generate random strategies, backtest and rank them.
     Generate {
         #[arg(long)]
@@ -273,6 +294,38 @@ fn main() -> Result<()> {
             println!();
             println!("{}", sqx_cloud::render_table(&svc.signals(&symbol, &bars)));
             Ok(())
+        }
+        Cmd::Assistant { data, symbol, base_url, model, api_key, ask } => {
+            let bars = load_bars(&data)?;
+            let instrument = instrument(&symbol);
+            let pyp = resolve_periods_per_year(bars.len(), 0.0, &bars);
+            let base_url = if base_url.is_empty() {
+                std::env::var("SQX_LLM_BASE_URL").unwrap_or_else(|_| "https://api.groq.com/openai/v1".to_string())
+            } else {
+                base_url
+            };
+            let model = if model.is_empty() {
+                std::env::var("SQX_LLM_MODEL").unwrap_or_else(|_| "llama-3.3-70b-versatile".to_string())
+            } else {
+                model
+            };
+            let api_key = if api_key.is_empty() {
+                std::env::var("SQX_LLM_API_KEY").unwrap_or_default()
+            } else {
+                api_key
+            };
+            if api_key.is_empty() && !base_url.contains("127.0.0.1") && !base_url.contains("localhost") {
+                eprintln!("warning: no API key (pass --api-key or set SQX_LLM_API_KEY)");
+            }
+            let cfg = sqx_assistant::LlmConfig { base_url, model, api_key, max_rounds: 6 };
+            let mut a = sqx_assistant::Assistant::new(cfg, &symbol, bars, instrument, pyp);
+            match a.run(&ask) {
+                Ok(answer) => {
+                    println!("{answer}");
+                    Ok(())
+                }
+                Err(e) => Err(anyhow::anyhow!(e)),
+            }
         }
         Cmd::Generate { data, count, seed, top, min_trades, out } => {
             let bars = load_bars(&data)?;

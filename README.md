@@ -23,6 +23,7 @@ independently from the documented behaviour and public domain knowledge.
 | Discovery | sqx-optimizer | Random generation + genetic evolution + ranking |
 | Persistence | sqx-project | Project -> databanks -> ranked strategies (JSON) |
 | Export | sqx-export | MQL4 / MQL5 / PineScript / NinjaScript / EasyLanguage / PseudoCode |
+| Assistant | sqx-assistant | LLM client (OpenAI-compatible) that drives the engine via tools |
 | Robustness | sqx-robustness | Monte Carlo trade-manipulation |
 | Portfolio | sqx-portfolio | Combine strategies, weights, correlation, best subset |
 | Custom Projects | sqx-pipeline | Build -> Retest -> Optimize pipeline with GoToTask |
@@ -42,6 +43,17 @@ cargo run -q -p sqx-cli -- indicators
 # QuantAnalyzer-style analysis report (monthly returns, drawdown periods,
 # trade statistics, rolling Sharpe)
 cargo run -q -p sqx-cli -- analyze --strategy examples/rsi-mean-reversion.json --data data/mt5/EURUSD_M5.csv
+
+# AlgoCloud-style daily signals for a folder of strategies
+cargo run -q -p sqx-cli -- cloud --strategies /tmp/sqx_strats --data data/mt5/EURUSD_M5.csv
+
+# LLM assistant: any OpenAI-compatible endpoint (e.g. a free provider from
+# https://github.com/open-free-llm-api/awesome-freellm-apis)
+export SQX_LLM_API_KEY=...                       # e.g. from console.groq.com/keys
+export SQX_LLM_BASE_URL=https://api.groq.com/openai/v1
+export SQX_LLM_MODEL=llama-3.3-70b-versatile
+cargo run -q -p sqx-cli -- assistant --data data/mt5/EURUSD_M5.csv \
+  --ask "genereer 50 strategieen en analyseer de beste"
 
 # Generate 300 random strategies, backtest, rank, print top 10
 cargo run -q -p sqx-cli -- generate --data data/eurusd_sample.csv --count 300 --top 10
