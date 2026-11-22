@@ -172,6 +172,7 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("POST", "/api/assistant") => ("200 OK", "application/json", assistant_json(body, state)),
         ("GET", "/api/assistant/config") => ("200 OK", "application/json", assistant_config_json()),
         ("GET", "/api/databank") => ("200 OK", "application/json", databank_json(state)),
+        ("GET", "/api/databank.csv") => ("200 OK", "text/csv; charset=utf-8", databank_csv(state)),
         ("POST", "/api/databank/clear") => ("200 OK", "application/json", databank_clear(state)),
         ("GET", "/api/project/list") => ("200 OK", "application/json", project_list_json()),
         ("GET", "/api/project/load") => ("200 OK", "application/json", project_load_json(&query_param(full_path, "name"))),
@@ -402,6 +403,22 @@ fn profile_delete_json(body: &str) -> String {
     }
     profiles_store(&store);
     json!({ "ok": true }).to_string()
+}
+
+fn databank_csv(state: &State) -> String {
+    let rows = state.databank.read().unwrap();
+    let mut out = String::from("name,profit_factor,net_profit,trades,dd_pct\n");
+    for r in rows.iter() {
+        out.push_str(&format!(
+            "{},{},{},{},{}\n",
+            r.get("name").and_then(|v| v.as_str()).unwrap_or(""),
+            r.get("profit_factor").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            r.get("net_profit").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            r.get("trades").and_then(|v| v.as_u64()).unwrap_or(0),
+            r.get("dd_pct").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        ));
+    }
+    out
 }
 
 fn databank_json(state: &State) -> String {

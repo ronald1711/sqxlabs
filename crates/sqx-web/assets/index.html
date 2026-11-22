@@ -63,7 +63,8 @@
 </header>
 <main>
   <aside class="nav">
-    <button class="nav-btn active" data-tab="builder">Builder</button>
+    <button class="nav-btn active" data-tab="home">Home</button>
+    <button class="nav-btn" data-tab="builder">Builder</button>
     <button class="nav-btn" data-tab="optimizer">Optimizer</button>
     <button class="nav-btn" data-tab="retester">Retester</button>
     <button class="nav-btn" data-tab="results">Results</button>
@@ -73,7 +74,25 @@
     <button class="nav-btn" data-tab="assistant">AI assistant</button>
   </aside>
   <div class="content">
-    <section id="tab-builder" class="tab active">
+    <section id="tab-home" class="tab active">
+      <div class="card">
+        <h2>Overview</h2>
+        <div id="home-stats" class="row" style="gap:28px"></div>
+      </div>
+      <div class="card" style="margin-top:18px">
+        <h2>Getting started</h2>
+        <ol class="muted" style="line-height:1.9; margin:0; padding-left:20px;">
+          <li><b>Builder</b> — edit the strategy, backtest it, export to MQL5 / NinjaScript / EasyLanguage.</li>
+          <li><b>Optimizer</b> — generate candidates, or run walk-forward / walk-forward matrix with parameter ranges.</li>
+          <li><b>Retester</b> — what-if cost scenarios and Monte Carlo trade manipulation.</li>
+          <li><b>Results</b> — persistent databank, filter, combine top strategies into a portfolio, download CSV.</li>
+          <li><b>Data Manager</b> — import CSV, broker profiles, sessions.</li>
+          <li><b>Projects</b> — build → retest → optimize pipeline.</li>
+          <li><b>AI assistant</b> — ask the engine in natural language.</li>
+        </ol>
+      </div>
+    </section>
+    <section id="tab-builder" class="tab">
       <div class="card">
         <h2>AlgoWizard — visual strategy editor</h2>
         <div class="row">
@@ -225,6 +244,7 @@
           <span class="muted" id="res-overview"></span>
           <button id="res-portfolio">Combine top 5 → portfolio</button>
           <button id="res-clear" style="background:#3a2430">Clear</button>
+          <a id="res-csv" href="/api/databank.csv" download="databank.csv" class="muted" style="text-decoration:underline">Download CSV</a>
         </div>
         <div class="row">
           <input type="text" id="res-filter" placeholder="filter name" style="width:140px">
@@ -1036,11 +1056,30 @@ document.querySelectorAll(".nav-btn").forEach(function(b) {
     if (t) t.classList.add("active");
     if (b.dataset.tab === "data") { refreshDataManager(); refreshProfiles(); }
     if (b.dataset.tab === "results") refreshDatabank();
+    if (b.dataset.tab === "home") refreshHome();
   };
 });
 
+async function refreshHome() {
+  const ds = await getJSON("/api/datasources");
+  const db = await getJSON("/api/databank");
+  const pf = await getJSON("/api/profiles");
+  const ai = await getJSON("/api/assistant/config");
+  const bars = (ds.symbols || []).reduce(function(a, s) { return a + (s.bars || 0); }, 0);
+  const rows = db.rows || [];
+  const avgPf = rows.reduce(function(a, r) { return a + (r.profit_factor || 0); }, 0) / (rows.length || 1);
+  const box = document.getElementById("home-stats");
+  if (!box) return;
+  box.innerHTML =
+    "<div><b>" + (ds.symbols || []).length + "</b><div class=\"muted\">symbols · " + bars + " bars</div></div>" +
+    "<div><b>" + rows.length + "</b><div class=\"muted\">databank · avg PF " + fmt(avgPf, 2) + "</div></div>" +
+    "<div><b>" + ((pf.brokers || []).length) + "</b><div class=\"muted\">broker profiles</div></div>" +
+    "<div><b>" + (ai.model || "-") + "</b><div class=\"muted\">AI model</div></div>";
+}
+
 loadInfo();
 loadCatalog();
+refreshHome();
 </script>
 </body>
 </html>
