@@ -110,6 +110,7 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("POST", "/api/generate") => ("200 OK", "application/json", generate_json(body, state)),
         ("POST", "/api/portfolio") => ("200 OK", "application/json", portfolio_json(body, state)),
         ("POST", "/api/pseudocode") => ("200 OK", "application/json", pseudocode_json(body)),
+        ("POST", "/api/assistant") => ("200 OK", "application/json", assistant_json(body, state)),
         _ => ("404 Not Found", "text/plain", "not found".to_string()),
     }
 }
@@ -222,6 +223,50 @@ fn metrics_json(m: &Metrics) -> serde_json::Value {
         "stability": m.stability,
         "exposure_pct": m.exposure_pct
     })
+}
+
+fn llm_config() -> sqx_assistant::LlmConfig {
+    let base_url = std::env::var("SQX_LLM_BASE_URL").unwrap_or_else(|_| {
+        let addr = "127.0.0.1:11434".parse().unwrap();
+        if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(250)).is_ok() {
+            "http://127.0.0.1:11434/v1".to_string()
+        } else {
+            "https://api.groq.com/openai/v1".to_string()
+        }
+    });
+    let model = std::env::var("SQX_LLM_MODEL").unwrap_or_else(|_| {
+        if base_url.contains("11434") {
+            "llama3.1".to_string()
+        } else {
+            "llama-3.3-70b-versatile".to_string()
+        }
+    });
+    let api_key = std::env::var("SQX_LLM_API_KEY").unwrap_or_default();
+    sqx_assistant::LlmConfig { base_url, model, api_key, max_rounds: 6 }
+}
+
+fn assistant_json(body: &str, state: &State) -> String {
+    let val: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let question = val.get("question").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if question.is_empty() {
+        return json!({ "error": "missing question" }).to_string();
+    }
+    let symbol = val.get("symbol").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let series = match find_series(state, &symbol) {
+        Some(s) => s,
+        None => return json!({ "error": "no data" }).to_string(),
+    };
+    let inst = instrument_for(&series.symbol);
+    let pyp = pyp_for(&series.bars);
+    let cfg = llm_config();
+    let mut a = sqx_assistant::Assistant::new(cfg, &series.symbol, series.bars.clone(), inst, pyp);
+    match a.run(&question) {
+        Ok(answer) => json!({ "answer": answer }).to_string(),
+        Err(e) => json!({ "error": e }).to_string(),
+    }
 }
 
 fn backtest_json(body: &str, state: &State) -> String {

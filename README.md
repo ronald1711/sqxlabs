@@ -55,6 +55,10 @@ export SQX_LLM_MODEL=llama-3.3-70b-versatile
 cargo run -q -p sqx-cli -- assistant --data data/mt5/EURUSD_M5.csv \
   --ask "genereer 50 strategieen en analyseer de beste"
 
+# zero-key local option: if Ollama runs on 127.0.0.1:11434, the assistant uses it
+# automatically (model llama3.1); otherwise it falls back to Groq. The same
+# applies to the web dashboard's AI assistant panel.
+
 # Generate 300 random strategies, backtest, rank, print top 10
 cargo run -q -p sqx-cli -- generate --data data/eurusd_sample.csv --count 300 --top 10
 
@@ -148,7 +152,8 @@ cargo run -q -p sqx-cli -- serve --data data/eurusd_sample.csv
 The dashboard shows the data summary, the indicator catalog, a generate-and-rank
 panel, and a backtest panel with a metrics table, an SVG equity curve and the
 pseudo-code of the tested strategy. All endpoints are plain JSON
-(/api/data, /api/indicators, /api/backtest, /api/generate).
+(/api/data, /api/indicators, /api/backtest, /api/generate, /api/assistant).
+The dashboard also has an **AI assistant** panel that posts to `/api/assistant`.
 
 ## Design notes
 

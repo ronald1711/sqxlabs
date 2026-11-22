@@ -300,12 +300,25 @@ fn main() -> Result<()> {
             let instrument = instrument(&symbol);
             let pyp = resolve_periods_per_year(bars.len(), 0.0, &bars);
             let base_url = if base_url.is_empty() {
-                std::env::var("SQX_LLM_BASE_URL").unwrap_or_else(|_| "https://api.groq.com/openai/v1".to_string())
+                std::env::var("SQX_LLM_BASE_URL").ok().unwrap_or_else(|| {
+                    let addr = "127.0.0.1:11434".parse().unwrap();
+                    if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(250)).is_ok() {
+                        "http://127.0.0.1:11434/v1".to_string()
+                    } else {
+                        "https://api.groq.com/openai/v1".to_string()
+                    }
+                })
             } else {
                 base_url
             };
             let model = if model.is_empty() {
-                std::env::var("SQX_LLM_MODEL").unwrap_or_else(|_| "llama-3.3-70b-versatile".to_string())
+                std::env::var("SQX_LLM_MODEL").ok().unwrap_or_else(|| {
+                    if base_url.contains("11434") {
+                        "llama3.1".to_string()
+                    } else {
+                        "llama-3.3-70b-versatile".to_string()
+                    }
+                })
             } else {
                 model
             };

@@ -120,6 +120,14 @@
       </div>
       <div id="bt-results"></div>
     </div>
+    <div class="card" style="margin-top:18px">
+      <h2>AI assistant</h2>
+      <div class="row">
+        <input id="ai-q" type="text" placeholder="e.g. generate 50 strategies and analyse the best" style="flex:1">
+        <button id="btn-ai">Ask</button>
+      </div>
+      <pre id="ai-answer" class="muted" style="white-space:pre-wrap; margin-top:10px; font-size:13px"></pre>
+    </div>
   </div>
 </main>
 <script id="default-strategy" type="application/json">
@@ -445,6 +453,21 @@ document.getElementById("btn-generate").onclick = async function() {
 };
 
 document.getElementById("btn-backtest").onclick = runBacktest;
+
+async function askAssistant() {
+  const q = document.getElementById("ai-q").value.trim();
+  if (!q) return;
+  const out = document.getElementById("ai-answer");
+  out.textContent = "Thinking…";
+  const sym = document.getElementById("symbol-select").value;
+  try {
+    const d = await postJSON("/api/assistant", JSON.stringify({ question: q, symbol: sym }));
+    out.textContent = d.answer || d.error || JSON.stringify(d);
+  } catch (e) {
+    out.textContent = "Error: " + e;
+  }
+}
+document.getElementById("btn-ai").onclick = askAssistant;
 document.getElementById("aw-backtest").onclick = function() {
   document.getElementById("strategy").value = buildStrategyJSON();
   runBacktest();
