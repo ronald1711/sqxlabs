@@ -10,7 +10,7 @@ use std::sync::{Arc, RwLock};
 use rand::SeedableRng;
 use serde_json::json;
 
-use sqx_backtest::{backtest, BacktestConfig};
+use sqx_backtest::{backtest, BacktestConfig, BacktestResult};
 use sqx_core::{Bar, Instrument};
 use sqx_data::{DataStore, SymbolSeries};
 use sqx_metrics::{compute as compute_metrics, Metrics};
@@ -115,6 +115,24 @@ fn query_param(path: &str, key: &str) -> String {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_name_strips_separators() {
+        assert_eq!(safe_name("my strategy/v1"), "my_strategy_v1");
+        assert_eq!(safe_name("ok-name_1"), "ok-name_1");
+    }
+
+    #[test]
+    fn query_param_reads_values() {
+        assert_eq!(query_param("/x?name=foo&a=1", "name"), "foo");
+        assert_eq!(query_param("/x", "name"), "");
+        assert_eq!(query_param("/x?name=", "name"), "");
+    }
+}
+
 fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static str, &'static str, String) {
     let (path, qsym) = query_symbol(full_path);
     match (method, path) {
@@ -140,6 +158,7 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("GET", "/api/project/list") => ("200 OK", "application/json", project_list_json()),
         ("GET", "/api/project/load") => ("200 OK", "application/json", project_load_json(&query_param(full_path, "name"))),
         ("POST", "/api/project/save") => ("200 OK", "application/json", project_save_json(body)),
+        ("POST", "/api/portfolio/databank") => ("200 OK", "application/json", portfolio_databank_json(body, state)),
         ("GET", "/api/profiles") => ("200 OK", "application/json", profiles_json()),
         ("POST", "/api/profiles/save") => ("200 OK", "application/json", profile_save_json(body)),
         ("POST", "/api/profiles/delete") => ("200 OK", "application/json", profile_delete_json(body)),
@@ -231,6 +250,52 @@ fn persist_databank(state: &State) {
         "data/databank.json",
         serde_json::to_string_pretty(&*rows).unwrap_or_default(),
     );
+}
+
+fn portfolio_databank_json(body: &str, state: &State) -> String {
+    let val: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return json!({ "error": format!("{e}") }).to_string(),
+    };
+    let symbol = val.get("symbol").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let series = match find_series(state, &symbol) {
+        Some(s) => s,
+        None => return json!({ "error": "no data" }).to_string(),
+    };
+    let inst = instrument_for(&series.symbol);
+    let pyp = pyp_for(&series.bars);
+    let cfg = config_from(&val);
+    let top = val.get("top").and_then(|v| v.as_u64()).unwrap_or(5).clamp(2, 20) as usize;
+    let rows = state.databank.read().unwrap().clone();
+    let mut strategies: Vec<(String, Strategy)> = Vec::new();
+    for r in rows.iter() {
+        let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if let Ok(s) = serde_json::from_value::<Strategy>(r.get("strategy").cloned().unwrap_or(json!({}))) {
+            strategies.push((name, s));
+        }
+        if strategies.len() >= top {
+            break;
+        }
+    }
+    if strategies.len() < 2 {
+        return json!({ "error": "need at least 2 databank strategies" }).to_string();
+    }
+    let names: Vec<String> = strategies.iter().map(|(n, _)| n.clone()).collect();
+    let results: Vec<BacktestResult> = strategies
+        .iter()
+        .map(|(_, s)| backtest(s, &series.bars, &inst, &cfg))
+        .collect();
+    let k = strategies.len();
+    let weights = vec![1.0 / k as f64; k];
+    let pf = sqx_portfolio::combine(&names, &results, &weights, cfg.initial_deposit, series.bars.len(), pyp);
+    json!({
+        "symbol": series.symbol,
+        "components": names,
+        "metrics": metrics_json(&pf.metrics),
+        "correlation": pf.correlation,
+        "equity": pf.equity
+    })
+    .to_string()
 }
 
 fn profiles_load() -> serde_json::Value {

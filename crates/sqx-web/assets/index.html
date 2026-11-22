@@ -222,9 +222,12 @@
         <h2>Results — databank</h2>
         <div class="row">
           <span class="muted" id="res-count">0 strategies</span>
+          <span class="muted" id="res-overview"></span>
+          <button id="res-portfolio">Combine top 5 → portfolio</button>
           <button id="res-clear" style="background:#3a2430">Clear</button>
         </div>
         <div id="res-grid" class="muted">Run the Optimizer or Generate to fill the databank.</div>
+        <div id="res-portfolio-out" class="muted" style="margin-top:12px"></div>
       </div>
     </section>
     <section id="tab-data" class="tab">
@@ -848,6 +851,12 @@ function renderResults() {
   var box = document.getElementById("res-grid");
   var cnt = document.getElementById("res-count");
   if (cnt) cnt.textContent = RESULTS.length + " strategies";
+  var ov = document.getElementById("res-overview");
+  if (ov) {
+    var totalNet = RESULTS.reduce(function(a, r) { return a + (r.net_profit || 0); }, 0);
+    var avgPf = RESULTS.reduce(function(a, r) { return a + (r.profit_factor || 0); }, 0) / (RESULTS.length || 1);
+    ov.textContent = "total net " + fmt(totalNet, 2) + " · avg PF " + fmt(avgPf, 2);
+  }
   if (!box) return;
   if (!RESULTS.length) { box.innerHTML = "<p class=\"muted\">Run the Optimizer or Generate to fill the databank.</p>"; return; }
   var cols = [["name","Name"],["profit_factor","PF"],["net_profit","Net"],["trades","Trades"],["dd_pct","DD %"]];
@@ -880,6 +889,15 @@ function renderResults() {
 }
 var resClear = document.getElementById("res-clear");
 if (resClear) resClear.onclick = async function() { await postJSON("/api/databank/clear", "{}"); await refreshDatabank(); };
+var resPortfolio = document.getElementById("res-portfolio");
+if (resPortfolio) resPortfolio.onclick = async function() {
+  var out = document.getElementById("res-portfolio-out");
+  out.textContent = "Combining...";
+  var d = await postJSON("/api/portfolio/databank", JSON.stringify({ symbol: selectedSymbol(), top: 5 }));
+  if (d.error) { out.textContent = d.error; return; }
+  var m = d.metrics || {};
+  out.innerHTML = "<b>Portfolio</b> (" + (d.components || []).join(", ") + "): net " + fmt(m.net_profit, 2) + ", PF " + fmt(m.profit_factor, 2) + ", DD% " + fmt(m.max_drawdown_pct, 2) + ", trades " + fmt(m.number_of_trades, 0);
+};
 
 function settings() {
   var g = function(id, d) { var el = document.getElementById(id); var v = el ? parseFloat(el.value) : NaN; return isNaN(v) ? d : v; };
