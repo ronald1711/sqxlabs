@@ -58,6 +58,23 @@ cargo run -q -p sqx-cli -- assistant --data data/mt5/EURUSD_M5.csv \
 # zero-key local option: if Ollama runs on 127.0.0.1:11434, the assistant uses it
 # automatically (model llama3.1); otherwise it falls back to Groq. The same
 # applies to the web dashboard's AI assistant panel.
+```
+
+### Full tour (one script)
+
+`examples/run_everything.sh` runs the whole flow end to end — indicator count,
+backtest, generate + rank, robustness (what-if + Monte Carlo), the build →
+retest → optimize pipeline, the analysis report, a portfolio and an MQL5 export:
+
+```bash
+./examples/run_everything.sh data/mt5/EURUSD_M5.csv EURUSD
+```
+
+Then start the web app for the same data:
+
+```bash
+cargo run -q -p sqx-cli -- serve --data data/mt5/EURUSD_M5.csv --symbol EURUSD
+```
 
 # Generate 300 random strategies, backtest, rank, print top 10
 cargo run -q -p sqx-cli -- generate --data data/eurusd_sample.csv --count 300 --top 10
