@@ -8,3 +8,6 @@ description = "Strategy AST: building blocks, conditions, signals, rules, money 
 [dependencies]
 sqx-core = { path = "../sqx-core" }
 serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
