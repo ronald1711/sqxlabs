@@ -22,7 +22,7 @@ independently from the documented behaviour and public domain knowledge.
 | Statistics | sqx-metrics | ~30 metrics mirroring the databank column catalog |
 | Discovery | sqx-optimizer | Random generation + genetic evolution + ranking |
 | Persistence | sqx-project | Project -> databanks -> ranked strategies (JSON) |
-| Export | sqx-export | MQL4 / MQL5 / PineScript / PseudoCode code generators |
+| Export | sqx-export | MQL4 / MQL5 / PineScript / NinjaScript / EasyLanguage / PseudoCode |
 | Robustness | sqx-robustness | Monte Carlo trade-manipulation |
 | Portfolio | sqx-portfolio | Combine strategies, weights, correlation, best subset |
 | Custom Projects | sqx-pipeline | Build -> Retest -> Optimize pipeline with GoToTask |
@@ -48,8 +48,11 @@ cargo run -q -p sqx-cli -- evolve --data data/eurusd_sample.csv --generations 20
 # Backtest a strategy defined as JSON
 cargo run -q -p sqx-cli -- backtest --strategy examples/rsi-mean-reversion.json --data data/eurusd_sample.csv
 
-# Export a strategy to platform source code (mql4 | mql5 | pine | pseudocode)
+# Export a strategy to platform source code
+# (mql4 | mql5 | pine | ninjascript | easylanguage | pseudocode)
 cargo run -q -p sqx-cli -- export --strategy examples/rsi-mean-reversion.json --engine mql5
+cargo run -q -p sqx-cli -- export --strategy examples/rsi-mean-reversion.json --engine ninjascript
+cargo run -q -p sqx-cli -- export --strategy examples/rsi-mean-reversion.json --engine easylanguage
 
 # Monte Carlo robustness test
 cargo run -q -p sqx-cli -- montecarlo --strategy examples/rsi-mean-reversion.json --data data/eurusd_sample.csv --runs 2000
