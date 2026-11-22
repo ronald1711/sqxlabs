@@ -234,6 +234,17 @@ pub fn compute(name: &str, params: &[sqx_strategy::Param], bars: &[Bar]) -> Opti
         "ADR" => ind::adr(&h, &l, period(params, 14)),
         "RangeRatio" => ind::range_ratio(&h, &l, &c),
         "TrueRangePct" => ind::true_range_pct(&h, &l, &c),
+        "ChandeKrollLong" => ind::chande_kroll_long(&h, &l, &c, period(params, 22), 3.0),
+        "ChandeKrollShort" => ind::chande_kroll_short(&h, &l, &c, period(params, 22), 3.0),
+        "Hurst" => ind::hurst(&c, period(params, 64)),
+        "FractalDimension" => ind::fractal_dimension(&c, period(params, 64)),
+        "ShannonEntropy" => ind::shannon_entropy(&c, period(params, 20)),
+        "ElderImpulse" => ind::elder_impulse(&c),
+        "MeanDeviation" => ind::mean_deviation(&c, period(params, 20)),
+        "MomentumSmooth" => ind::momentum_smoothed(&c, period(params, 10)),
+        "ROCSmooth" => ind::roc_smoothed(&c, period(params, 10)),
+        "MedianPrice" => ind::median_price(&h, &l),
+        "WeightedClose" => ind::weighted_close(&h, &l, &c),
         _ => return None,
     };
     Some(res)

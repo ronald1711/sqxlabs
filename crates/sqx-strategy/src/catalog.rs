@@ -174,6 +174,17 @@ pub fn indicator_catalog() -> &'static [IndicatorSpec] {
         IndicatorSpec { name: "ADR", label: "Average daily range", params: &[("period", 14.0)], is_oscillator: false },
         IndicatorSpec { name: "RangeRatio", label: "Range ratio", params: &[], is_oscillator: true },
         IndicatorSpec { name: "TrueRangePct", label: "True range %", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "ChandeKrollLong", label: "Chande Kroll stop (long)", params: &[("period", 22.0)], is_oscillator: false },
+        IndicatorSpec { name: "ChandeKrollShort", label: "Chande Kroll stop (short)", params: &[("period", 22.0)], is_oscillator: false },
+        IndicatorSpec { name: "Hurst", label: "Hurst exponent", params: &[("period", 64.0)], is_oscillator: true },
+        IndicatorSpec { name: "FractalDimension", label: "Fractal dimension", params: &[("period", 64.0)], is_oscillator: true },
+        IndicatorSpec { name: "ShannonEntropy", label: "Shannon entropy", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "ElderImpulse", label: "Elder impulse system", params: &[], is_oscillator: true },
+        IndicatorSpec { name: "MeanDeviation", label: "Mean deviation", params: &[("period", 20.0)], is_oscillator: true },
+        IndicatorSpec { name: "MomentumSmooth", label: "Smoothed momentum", params: &[("period", 10.0)], is_oscillator: true },
+        IndicatorSpec { name: "ROCSmooth", label: "Smoothed ROC", params: &[("period", 10.0)], is_oscillator: true },
+        IndicatorSpec { name: "MedianPrice", label: "Median price (HL2)", params: &[], is_oscillator: false },
+        IndicatorSpec { name: "WeightedClose", label: "Weighted close", params: &[], is_oscillator: false },
     ]
 }
 

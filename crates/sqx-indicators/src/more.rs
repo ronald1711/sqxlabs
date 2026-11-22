@@ -825,6 +825,129 @@ pub fn true_range_pct(h: &[f64], l: &[f64], c: &[f64]) -> Series {
         .collect()
 }
 
+fn atr_series(h: &[f64], l: &[f64], c: &[f64], n: usize) -> Series {
+    rma(&tr_of(h, l, c), n)
+}
+
+pub fn chande_kroll_long(h: &[f64], l: &[f64], c: &[f64], n: usize, mult: f64) -> Series {
+    let hh = highest(h, n);
+    let a = atr_series(h, l, c, n);
+    (0..c.len()).map(|i| hh[i] - mult * a[i]).collect()
+}
+
+pub fn chande_kroll_short(h: &[f64], l: &[f64], c: &[f64], n: usize, mult: f64) -> Series {
+    let ll = lowest(l, n);
+    let a = atr_series(h, l, c, n);
+    (0..c.len()).map(|i| ll[i] + mult * a[i]).collect()
+}
+
+pub fn hurst(c: &[f64], n: usize) -> Series {
+    let len = c.len();
+    let mut out = vec![f64::NAN; len];
+    for i in 0..len {
+        if i + 1 >= n && n > 2 {
+            let w = &c[i + 1 - n..=i];
+            let m = w.iter().sum::<f64>() / n as f64;
+            let mut cum = 0.0;
+            let mut lo = f64::INFINITY;
+            let mut hi = f64::NEG_INFINITY;
+            for v in w {
+                cum += v - m;
+                lo = lo.min(cum);
+                hi = hi.max(cum);
+            }
+            let r = hi - lo;
+            let sd = (w.iter().map(|v| (v - m).powi(2)).sum::<f64>() / n as f64).sqrt();
+            out[i] = if sd > 0.0 && r > 0.0 { (r / sd).ln() / (n as f64).ln() } else { f64::NAN };
+        }
+    }
+    out
+}
+
+pub fn fractal_dimension(c: &[f64], n: usize) -> Series {
+    let h = hurst(c, n);
+    h.iter().map(|v| 2.0 - v).collect()
+}
+
+pub fn shannon_entropy(c: &[f64], n: usize) -> Series {
+    let len = c.len();
+    let mut out = vec![f64::NAN; len];
+    for i in 0..len {
+        if i + 1 >= n && i >= 1 {
+            let start = i + 1 - n;
+            let mut counts = [0usize; 8];
+            let mut total = 0usize;
+            for j in (start + 1)..=i {
+                if c[j - 1] != 0.0 {
+                    let r = (c[j] - c[j - 1]) / c[j - 1];
+                    let b = (((r + 0.01) / 0.02).floor() as isize).clamp(0, 7) as usize;
+                    counts[b] += 1;
+                    total += 1;
+                }
+            }
+            if total > 0 {
+                let mut h = 0.0;
+                for &cnt in counts.iter() {
+                    if cnt > 0 {
+                        let p = cnt as f64 / total as f64;
+                        h -= p * p.ln();
+                    }
+                }
+                out[i] = h;
+            }
+        }
+    }
+    out
+}
+
+pub fn elder_impulse(c: &[f64]) -> Series {
+    let e = ema(c, 13);
+    let f = ema(c, 12);
+    let s = ema(c, 26);
+    let line: Vec<f64> = (0..c.len()).map(|i| f[i] - s[i]).collect();
+    let sig = ema(&line, 9);
+    let mut out = vec![f64::NAN; c.len()];
+    for i in 1..c.len() {
+        let slope = if e[i] > e[i - 1] { 1.0 } else if e[i] < e[i - 1] { -1.0 } else { 0.0 };
+        let hist = line[i] - sig[i];
+        let h = if hist > 0.0 { 1.0 } else if hist < 0.0 { -1.0 } else { 0.0 };
+        out[i] = slope + h;
+    }
+    out
+}
+
+pub fn mean_deviation(c: &[f64], n: usize) -> Series {
+    let m = sma(c, n);
+    let mut out = vec![f64::NAN; c.len()];
+    for i in n.saturating_sub(1)..c.len() {
+        let start = i + 1 - n;
+        let mut sum = 0.0;
+        for j in start..=i {
+            sum += (c[j] - m[i]).abs();
+        }
+        out[i] = if m[i] != 0.0 && !m[i].is_nan() { sum / n as f64 / m[i] * 100.0 } else { f64::NAN };
+    }
+    out
+}
+
+pub fn momentum_smoothed(c: &[f64], n: usize) -> Series {
+    let mom = crate::momentum(c, n);
+    sma(&mom, n)
+}
+
+pub fn roc_smoothed(c: &[f64], n: usize) -> Series {
+    let r = roc(c, n);
+    sma(&r, n)
+}
+
+pub fn median_price(h: &[f64], l: &[f64]) -> Series {
+    (0..h.len()).map(|i| (h[i] + l[i]) / 2.0).collect()
+}
+
+pub fn weighted_close(h: &[f64], l: &[f64], c: &[f64]) -> Series {
+    (0..h.len()).map(|i| (h[i] + l[i] + 2.0 * c[i]) / 4.0).collect()
+}
+
 pub fn fisher(h: &[f64], l: &[f64], n: usize) -> Series {
     let len = h.len();
     let hh = highest(h, n);
