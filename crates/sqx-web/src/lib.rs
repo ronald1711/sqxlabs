@@ -243,7 +243,7 @@ fn optimize_json(body: &str, state: &State) -> String {
     let cfg = config_from(&val);
     let count = val.get("count").and_then(|v| v.as_u64()).unwrap_or(200).clamp(10, 2000) as usize;
     let seed = val.get("seed").and_then(|v| v.as_u64()).unwrap_or(42);
-    let gen = GeneratorConfig::default();
+    let gen = gen_config_from(&val);
     match kind.as_str() {
         "walk-forward" => {
             let windows = val.get("windows").and_then(|v| v.as_u64()).unwrap_or(5).clamp(2, 12) as usize;
@@ -355,6 +355,20 @@ fn metrics_json(m: &Metrics) -> serde_json::Value {
         "stability": m.stability,
         "exposure_pct": m.exposure_pct
     })
+}
+
+fn gen_config_from(val: &serde_json::Value) -> GeneratorConfig {
+    let f = |k: &str, d: f64| val.get(k).and_then(|v| v.as_f64()).unwrap_or(d);
+    let u = |k: &str, d: usize| val.get(k).and_then(|v| v.as_u64()).unwrap_or(d as u64) as usize;
+    GeneratorConfig {
+        min_conditions: u("min_conditions", 1).clamp(1, 6),
+        max_conditions: u("max_conditions", 3).clamp(1, 6),
+        sl_points: (f("sl_min", 0.0), f("sl_max", 200.0)),
+        pt_points: (f("pt_min", 0.0), f("pt_max", 400.0)),
+        fixed_size: f("size", 0.1),
+        long: val.get("long").and_then(|v| v.as_bool()).unwrap_or(true),
+        short: val.get("short").and_then(|v| v.as_bool()).unwrap_or(true),
+    }
 }
 
 fn config_from(val: &serde_json::Value) -> BacktestConfig {
@@ -512,6 +526,24 @@ fn generate_json(body: &str, state: &State) -> String {
         slippage: Option<f64>,
         #[serde(default)]
         commission: Option<f64>,
+        #[serde(default)]
+        min_conditions: Option<usize>,
+        #[serde(default)]
+        max_conditions: Option<usize>,
+        #[serde(default)]
+        sl_min: Option<f64>,
+        #[serde(default)]
+        sl_max: Option<f64>,
+        #[serde(default)]
+        pt_min: Option<f64>,
+        #[serde(default)]
+        pt_max: Option<f64>,
+        #[serde(default)]
+        size: Option<f64>,
+        #[serde(default)]
+        long: Option<bool>,
+        #[serde(default)]
+        short: Option<bool>,
     }
     let req: Req = match serde_json::from_str(body) {
         Ok(r) => r,
@@ -524,7 +556,15 @@ fn generate_json(body: &str, state: &State) -> String {
     let inst = instrument_for(&series.symbol);
     let pyp = pyp_for(&series.bars);
     let count = req.count.clamp(1, 2000);
-    let gen = GeneratorConfig::default();
+    let gen = GeneratorConfig {
+        min_conditions: req.min_conditions.unwrap_or(1).clamp(1, 6),
+        max_conditions: req.max_conditions.unwrap_or(3).clamp(1, 6),
+        sl_points: (req.sl_min.unwrap_or(0.0), req.sl_max.unwrap_or(200.0)),
+        pt_points: (req.pt_min.unwrap_or(0.0), req.pt_max.unwrap_or(400.0)),
+        fixed_size: req.size.unwrap_or(0.1),
+        long: req.long.unwrap_or(true),
+        short: req.short.unwrap_or(true),
+    };
     let mut rng = rand::rngs::StdRng::seed_from_u64(req.seed);
     let strategies: Vec<Strategy> = (0..count)
         .map(|i| random_strategy(&mut rng, &format!("s{i:04}"), &gen))

@@ -66,6 +66,7 @@
     <button class="nav-btn active" data-tab="builder">Builder</button>
     <button class="nav-btn" data-tab="optimizer">Optimizer</button>
     <button class="nav-btn" data-tab="retester">Retester</button>
+    <button class="nav-btn" data-tab="results">Results</button>
     <button class="nav-btn" data-tab="data">Data Manager</button>
     <button class="nav-btn" data-tab="projects">Projects</button>
     <button class="nav-btn" data-tab="settings">Settings</button>
@@ -116,6 +117,27 @@
     </section>
     <section id="tab-optimizer" class="tab">
       <div class="card">
+        <h2>Generator settings</h2>
+        <div class="row">
+          <label class="muted">Min cond.</label>
+          <input type="number" id="gen-minc" value="1" min="1" max="6">
+          <label class="muted">Max cond.</label>
+          <input type="number" id="gen-maxc" value="3" min="1" max="6">
+          <label class="muted">SL min</label>
+          <input type="number" id="gen-slmin" value="0">
+          <label class="muted">SL max</label>
+          <input type="number" id="gen-slmax" value="200">
+          <label class="muted">PT min</label>
+          <input type="number" id="gen-ptmin" value="0">
+          <label class="muted">PT max</label>
+          <input type="number" id="gen-ptmax" value="400">
+          <label class="muted">Size</label>
+          <input type="number" id="gen-size" value="0.1" step="0.1">
+          <label><input type="checkbox" id="gen-long" checked> Long</label>
+          <label><input type="checkbox" id="gen-short" checked> Short</label>
+        </div>
+      </div>
+      <div class="card" style="margin-top:18px">
         <h2>Optimizer</h2>
         <div class="row">
           <label class="muted">Type</label>
@@ -166,6 +188,16 @@
           <span id="rob-status" class="muted"></span>
         </div>
         <div id="rob-results"></div>
+      </div>
+    </section>
+    <section id="tab-results" class="tab">
+      <div class="card">
+        <h2>Results — databank</h2>
+        <div class="row">
+          <span class="muted" id="res-count">0 strategies</span>
+          <button id="res-clear" style="background:#3a2430">Clear</button>
+        </div>
+        <div id="res-grid" class="muted">Run the Optimizer or Generate to fill the databank.</div>
       </div>
     </section>
     <section id="tab-data" class="tab">
@@ -542,7 +574,7 @@ document.getElementById("btn-generate").onclick = async function() {
   const seed = Number(document.getElementById("seed").value);
   const box = document.getElementById("gen-results");
   box.textContent = "Generating...";
-  const body = Object.assign({ count: count, seed: seed, symbol: selectedSymbol() }, settings());
+  const body = Object.assign({ count: count, seed: seed, symbol: selectedSymbol() }, settings(), genSettings());
   const d = await postJSON("/api/generate", JSON.stringify(body));
   if (d.error) { box.innerHTML = "<span class=\"neg\">" + d.error + "</span>"; return; }
   let rows = "<table><tr><th>Name</th><th>Profit factor</th><th>Net profit</th><th>Trades</th><th>DD %</th></tr>";
@@ -551,6 +583,7 @@ document.getElementById("btn-generate").onclick = async function() {
   });
   rows += "</table>";
   box.innerHTML = rows;
+  addResults(d.results);
   box.querySelectorAll("tr").forEach(function(tr, i) {
     if (i === 0) return;
     const td = document.createElement("td");
@@ -640,7 +673,7 @@ document.getElementById("proj-run").onclick = async function() {
     count: Number(document.getElementById("proj-count").value),
     keep: Number(document.getElementById("proj-keep").value),
     symbol: selectedSymbol()
-  }, settings());
+  }, settings(), genSettings());
   const d = await postJSON("/api/pipeline", JSON.stringify(body));
   if (d.error) { box.textContent = d.error; return; }
   box.textContent = "Databank: " + (d.databank || 0) + " strategies\n\n" + (d.log || []).join("\n");
@@ -655,7 +688,7 @@ document.getElementById("opt-run").onclick = async function() {
     windows: Number(document.getElementById("opt-windows").value),
     oos: Number(document.getElementById("opt-oos").value),
     symbol: selectedSymbol()
-  }, settings());
+  }, settings(), genSettings());
   const d = await postJSON("/api/optimize", JSON.stringify(body));
   if (d.error) { box.innerHTML = "<span class=\"neg\">" + d.error + "</span>"; return; }
   if (d.kind === "simple") {
@@ -665,6 +698,7 @@ document.getElementById("opt-run").onclick = async function() {
     });
     html += "</table>";
     box.innerHTML = html;
+    addResults(d.results);
   } else if (d.kind === "walk-forward") {
     let html = "<table><tr><th>Windows</th><th>OOS trades</th><th>OOS net</th><th>OOS PF</th><th>OOS win %</th><th>OOS DD %</th></tr>";
     html += "<tr><td>" + d.windows + "</td><td>" + d.oos_trades + "</td><td>" + fmt(d.oos_net_profit, 2) + "</td><td>" + fmt(d.oos_profit_factor, 2) + "</td><td>" + fmt(d.oos_winning_pct, 1) + "</td><td>" + fmt(d.oos_max_dd_pct, 2) + "</td></tr></table>";
@@ -678,6 +712,47 @@ document.getElementById("opt-run").onclick = async function() {
     box.innerHTML = html;
   }
 };
+
+function genSettings() {
+  var g = function(id, d) { var el = document.getElementById(id); var v = el ? parseFloat(el.value) : NaN; return isNaN(v) ? d : v; };
+  return {
+    min_conditions: g("gen-minc", 1), max_conditions: g("gen-maxc", 3),
+    sl_min: g("gen-slmin", 0), sl_max: g("gen-slmax", 200),
+    pt_min: g("gen-ptmin", 0), pt_max: g("gen-ptmax", 400),
+    size: g("gen-size", 0.1),
+    long: document.getElementById("gen-long").checked,
+    short: document.getElementById("gen-short").checked
+  };
+}
+
+var RESULTS = [];
+function addResults(rows) {
+  (rows || []).forEach(function(r) { RESULTS.push(r); });
+  renderResults();
+}
+function renderResults() {
+  var box = document.getElementById("res-grid");
+  var cnt = document.getElementById("res-count");
+  if (cnt) cnt.textContent = RESULTS.length + " strategies";
+  if (!box) return;
+  if (!RESULTS.length) { box.innerHTML = "<p class=\"muted\">Run the Optimizer or Generate to fill the databank.</p>"; return; }
+  var html = "<table><tr><th>Name</th><th>PF</th><th>Net</th><th>Trades</th><th>DD %</th><th></th></tr>";
+  RESULTS.forEach(function(r, i) {
+    html += "<tr><td>" + r.name + "</td><td>" + fmt(r.profit_factor, 2) + "</td><td>" + fmt(r.net_profit, 2) + "</td><td>" + r.trades + "</td><td>" + fmt(r.dd_pct, 2) + "</td><td><button data-ri=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">Use</button></td></tr>";
+  });
+  html += "</table>";
+  box.innerHTML = html;
+  box.querySelectorAll("button[data-ri]").forEach(function(b) {
+    b.onclick = function() {
+      var r = RESULTS[Number(b.dataset.ri)];
+      if (!r || !r.strategy) return;
+      document.getElementById("strategy").value = JSON.stringify(r.strategy, null, 2);
+      document.querySelector('.nav-btn[data-tab="builder"]').click();
+    };
+  });
+}
+var resClear = document.getElementById("res-clear");
+if (resClear) resClear.onclick = function() { RESULTS = []; renderResults(); };
 
 function settings() {
   var g = function(id, d) { var el = document.getElementById(id); var v = el ? parseFloat(el.value) : NaN; return isNaN(v) ? d : v; };
