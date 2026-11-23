@@ -50,10 +50,27 @@ impl Assistant {
             });
             let resp = post_json(&self.cfg.base_url, &self.cfg.api_key, &body.to_string())?;
             let v: Value = serde_json::from_str(&resp).map_err(|e| format!("invalid JSON from LLM: {e}: {resp}"))?;
+            // Some providers answer HTTP 200 with an error object; surface it
+            // instead of silently returning an empty answer.
+            if let Some(err) = v.get("error") {
+                let msg = err
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| err.to_string());
+                return Err(format!("LLM error: {msg}"));
+            }
+            if v["choices"].as_array().map(|a| a.is_empty()).unwrap_or(true) {
+                return Err(format!("LLM returned no choices: {resp}"));
+            }
             let msg = v["choices"][0]["message"].clone();
             let tool_calls = msg["tool_calls"].as_array().cloned().unwrap_or_default();
             if tool_calls.is_empty() {
-                return Ok(msg["content"].as_str().unwrap_or("").to_string());
+                let content = msg["content"].as_str().unwrap_or("").to_string();
+                if content.trim().is_empty() {
+                    return Err("LLM returned an empty answer (check the model name, base URL and key)".to_string());
+                }
+                return Ok(content);
             }
             messages.push(msg);
             for tc in tool_calls {
@@ -167,7 +184,14 @@ fn post_json(base_url: &str, api_key: &str, body: &str) -> Result<String, String
         .output()
         .map_err(|e| format!("curl failed: {e} (is curl installed?)"))?;
     if !out.status.success() {
-        return Err(format!("curl error: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        // curl exits non-zero on HTTP 4xx/5xx; the useful message is in the
+        // response body (e.g. {"error":{"message":"Invalid API Key"}}), which
+        // curl still writes to stdout. Fall back to stderr for real transport
+        // failures (DNS, timeout, connection refused).
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let detail = if !stdout.trim().is_empty() { stdout.trim().to_string() } else { stderr.trim().to_string() };
+        return Err(format!("LLM request failed (HTTP 4xx/5xx): {detail}"));
     }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }

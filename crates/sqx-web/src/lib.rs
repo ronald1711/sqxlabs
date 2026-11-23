@@ -842,13 +842,58 @@ fn assistant_config_load() -> serde_json::Value {
         .unwrap_or_else(|| json!({}))
 }
 
-/// Resolve the LLM config: UI-saved values take precedence over env vars,
-/// which take precedence over the auto-detect (Ollama on 11434, else Groq).
+/// Normalize the persisted assistant file into `(active_provider, profiles)`.
+/// Accepts the older flat `{base_url, model, api_key}` format and migrates it
+/// in memory into a single `Default` profile, so nothing is lost on upgrade.
+fn assistant_profiles(saved: &serde_json::Value) -> (String, serde_json::Map<String, serde_json::Value>) {
+    let mut profiles: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+    if let Some(p) = saved.get("profiles").and_then(|v| v.as_object()) {
+        for (k, v) in p {
+            profiles.insert(k.clone(), v.clone());
+        }
+    }
+    if profiles.is_empty() {
+        let base = saved.get("base_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let model = saved.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let key = saved.get("api_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if !base.is_empty() || !model.is_empty() || !key.is_empty() {
+            let name = saved
+                .get("provider")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| {
+                    // Best-effort friendly name so the dropdown can select it.
+                    let b = base.to_lowercase();
+                    if b.contains("deepseek") { "DeepSeek".to_string() }
+                    else if b.contains("groq") { "Groq".to_string() }
+                    else if b.contains("openai") { "OpenAI".to_string() }
+                    else if b.contains("openrouter") { "OpenRouter".to_string() }
+                    else if b.contains("mistral") { "Mistral".to_string() }
+                    else if b.contains("x.ai") { "xAI".to_string() }
+                    else { "Default".to_string() }
+                });
+            profiles.insert(name, json!({ "base_url": base, "model": model, "api_key": key }));
+        }
+    }
+    let active = saved.get("active").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let active = if profiles.contains_key(&active) {
+        active
+    } else {
+        profiles.keys().next().cloned().unwrap_or_default()
+    };
+    (active, profiles)
+}
+
+/// Resolve the LLM config for the active profile: saved values take precedence
+/// over env vars, which take precedence over auto-detect (Ollama, else Groq).
 fn llm_config() -> sqx_assistant::LlmConfig {
     let saved = assistant_config_load();
-    let saved_base = saved.get("base_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let saved_model = saved.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let saved_key = saved.get("api_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let (active, profiles) = assistant_profiles(&saved);
+    let profile = profiles.get(&active).cloned().unwrap_or_else(|| json!({}));
+    let saved_base = profile.get("base_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let saved_model = profile.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let saved_key = profile.get("api_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
     let base_url = if !saved_base.is_empty() {
         saved_base
@@ -879,29 +924,66 @@ fn llm_config() -> sqx_assistant::LlmConfig {
     sqx_assistant::LlmConfig { base_url, model, api_key, max_rounds: 6 }
 }
 
+/// Save one provider's profile and make it the active one. An empty `api_key`
+/// means "keep the key already stored for this provider" — the field is never
+/// pre-filled, so leaving it blank must not wipe a working secret.
 fn assistant_config_save_json(body: &str) -> String {
     let val: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(e) => return json!({ "error": format!("{e}") }).to_string(),
     };
+    let mut provider = val.get("provider").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     let base_url = val.get("base_url").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     let model = val.get("model").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     let api_key = val.get("api_key").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let mut saved = assistant_config_load();
-    saved["base_url"] = json!(base_url);
-    saved["model"] = json!(model);
-    saved["api_key"] = json!(api_key);
+    if provider.is_empty() {
+        provider = "Default".to_string();
+    }
+
+    let saved = assistant_config_load();
+    let (_, mut profiles) = assistant_profiles(&saved);
+    let existing_key = profiles
+        .get(&provider)
+        .and_then(|p| p.get("api_key"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let stored_key = if api_key.is_empty() { existing_key } else { api_key };
+    let api_key_set = !stored_key.is_empty();
+    profiles.insert(provider.clone(), json!({ "base_url": base_url, "model": model, "api_key": stored_key }));
+
+    let mut out = serde_json::Map::new();
+    out.insert("active".to_string(), json!(provider.clone()));
+    out.insert("profiles".to_string(), serde_json::Value::Object(profiles));
+    let out = serde_json::Value::Object(out);
     let _ = std::fs::create_dir_all("data");
-    let _ = std::fs::write(assistant_config_file(), serde_json::to_string_pretty(&saved).unwrap_or_default());
-    json!({ "ok": true, "api_key_set": !api_key.is_empty() }).to_string()
+    let _ = std::fs::write(assistant_config_file(), serde_json::to_string_pretty(&out).unwrap_or_default());
+    json!({ "ok": true, "provider": provider, "api_key_set": api_key_set }).to_string()
 }
 
 fn assistant_config_json() -> String {
+    let saved = assistant_config_load();
+    let (active, profiles) = assistant_profiles(&saved);
+    let mut list = serde_json::Map::new();
+    for (name, p) in &profiles {
+        let key = p.get("api_key").and_then(|v| v.as_str()).unwrap_or("");
+        list.insert(
+            name.clone(),
+            json!({
+                "base_url": p.get("base_url").and_then(|v| v.as_str()).unwrap_or(""),
+                "model": p.get("model").and_then(|v| v.as_str()).unwrap_or(""),
+                "api_key_set": !key.is_empty(),
+            }),
+        );
+    }
+    // The effective config (with env/auto fallback) is what actually runs.
     let cfg = llm_config();
     json!({
+        "provider": active,
         "base_url": cfg.base_url,
         "model": cfg.model,
         "api_key_set": !cfg.api_key.is_empty(),
+        "profiles": serde_json::Value::Object(list),
     })
     .to_string()
 }
