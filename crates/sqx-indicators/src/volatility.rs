@@ -17,7 +17,9 @@ pub fn true_range(bars: &[Bar]) -> Series {
 
 /// Average true range (Wilder smoothing).
 pub fn atr(bars: &[Bar], n: usize) -> Series {
-    rma(&true_range(bars), n)
+    // Wilder/TA-Lib seed the ATR over TR[1..=n], skipping the partial TR[0]
+    // (high-low with no previous close).
+    rma_skip_first(&true_range(bars), n)
 }
 
 /// Bollinger Bands (population stddev). Returns (upper, middle, lower).

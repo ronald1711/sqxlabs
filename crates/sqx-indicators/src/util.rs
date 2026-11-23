@@ -8,8 +8,15 @@ pub fn highest(src: &[f64], n: usize) -> Vec<f64> {
     for i in 0..src.len() {
         if i + 1 >= n {
             let start = i + 1 - n;
+            let window = &src[start..=i];
+            // Poison on NaN so an upstream indicator's warm-up passes through
+            // instead of being skipped (NaN compares less than everything, which
+            // made highest() return a garbage value from a mostly-NaN window).
+            if window.iter().any(|v| v.is_nan()) {
+                continue;
+            }
             let mut m = f64::NEG_INFINITY;
-            for v in &src[start..=i] {
+            for v in window {
                 if *v > m { m = *v; }
             }
             out[i] = m;
@@ -27,8 +34,12 @@ pub fn lowest(src: &[f64], n: usize) -> Vec<f64> {
     for i in 0..src.len() {
         if i + 1 >= n {
             let start = i + 1 - n;
+            let window = &src[start..=i];
+            if window.iter().any(|v| v.is_nan()) {
+                continue;
+            }
             let mut m = f64::INFINITY;
-            for v in &src[start..=i] {
+            for v in window {
                 if *v < m { m = *v; }
             }
             out[i] = m;
@@ -48,8 +59,12 @@ pub fn highest_prior(src: &[f64], n: usize) -> Vec<f64> {
     for i in 0..src.len() {
         if i >= n {
             let start = i - n;
+            let window = &src[start..i];
+            if window.iter().any(|v| v.is_nan()) {
+                continue;
+            }
             let mut m = f64::NEG_INFINITY;
-            for v in &src[start..i] {
+            for v in window {
                 if *v > m { m = *v; }
             }
             out[i] = m;
@@ -68,8 +83,12 @@ pub fn lowest_prior(src: &[f64], n: usize) -> Vec<f64> {
     for i in 0..src.len() {
         if i >= n {
             let start = i - n;
+            let window = &src[start..i];
+            if window.iter().any(|v| v.is_nan()) {
+                continue;
+            }
             let mut m = f64::INFINITY;
-            for v in &src[start..i] {
+            for v in window {
                 if *v < m { m = *v; }
             }
             out[i] = m;

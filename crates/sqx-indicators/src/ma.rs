@@ -97,6 +97,31 @@ pub fn smma(src: &[f64], n: usize) -> Series {
     rma(src, n)
 }
 
+/// Wilder smoothing seeded with the simple average of `src[1..=n]`, skipping
+/// the degenerate index-0 value.
+///
+/// The True Range and directional-movement series both carry an index-0 value
+/// with no previous bar behind it (TR[0] is just high-low; +DM[0]/-DM[0] are 0).
+/// Wilder's original ATR/ADX seed the smoothed series over the first `n` *real*
+/// values, i.e. `1..=n`, and emit the first output at index `n` - which is
+/// exactly what TA-Lib does. Using the generic [`rma`] here instead would shift
+/// every subsequent value by one bar's worth of seed.
+pub fn rma_skip_first(src: &[f64], n: usize) -> Series {
+    let mut out = vec![f64::NAN; src.len()];
+    if n == 0 || src.len() <= n {
+        return out;
+    }
+    let k = 1.0 / n as f64;
+    let seed: f64 = src[1..=n].iter().sum::<f64>() / n as f64;
+    out[n] = seed;
+    let mut prev = seed;
+    for i in (n + 1)..src.len() {
+        prev = src[i] * k + prev * (1.0 - k);
+        out[i] = prev;
+    }
+    out
+}
+
 /// Linear-weighted moving average.
 ///
 /// Like [`sma`], a window that still contains a NaN keeps the output NaN, so a

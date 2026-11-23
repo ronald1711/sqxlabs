@@ -13,13 +13,13 @@ pub fn rsi(src: &[f64], n: usize) -> Series {
     }
     let mut avg_gain = gain_sum / n as f64;
     let mut avg_loss = loss_sum / n as f64;
-    out[n] = if avg_loss == 0.0 { 100.0 } else { 100.0 - 100.0 / (1.0 + avg_gain / avg_loss) };
+    out[n] = if avg_loss == 0.0 { if avg_gain == 0.0 { 50.0 } else { 100.0 } } else { 100.0 - 100.0 / (1.0 + avg_gain / avg_loss) };
     for i in (n + 1)..len {
         let d = src[i] - src[i - 1];
         let (g, l) = if d >= 0.0 { (d, 0.0) } else { (0.0, -d) };
         avg_gain = (avg_gain * (n as f64 - 1.0) + g) / n as f64;
         avg_loss = (avg_loss * (n as f64 - 1.0) + l) / n as f64;
-        out[i] = if avg_loss == 0.0 { 100.0 } else { 100.0 - 100.0 / (1.0 + avg_gain / avg_loss) };
+        out[i] = if avg_loss == 0.0 { if avg_gain == 0.0 { 50.0 } else { 100.0 } } else { 100.0 - 100.0 / (1.0 + avg_gain / avg_loss) };
     }
     out
 }

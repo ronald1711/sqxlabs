@@ -65,8 +65,14 @@ fn eval_condition(cache: &mut SeriesCache, cond: &Condition) -> Vec<bool> {
                 Comparator::Gte => (0..n).map(|i| !a[i].is_nan() && !b[i].is_nan() && a[i] >= b[i]).collect(),
                 Comparator::Lt => (0..n).map(|i| !a[i].is_nan() && !b[i].is_nan() && a[i] < b[i]).collect(),
                 Comparator::Lte => (0..n).map(|i| !a[i].is_nan() && !b[i].is_nan() && a[i] <= b[i]).collect(),
-                Comparator::Eq => (0..n).map(|i| a[i] == b[i]).collect(),
-                Comparator::Neq => (0..n).map(|i| a[i] != b[i]).collect(),
+                // Equality compares raw f64, so an unguarded NaN would make
+                // `Neq` true for every warm-up bar and fabricate entries.
+                Comparator::Eq => (0..n)
+                    .map(|i| !a[i].is_nan() && !b[i].is_nan() && a[i] == b[i])
+                    .collect(),
+                Comparator::Neq => (0..n)
+                    .map(|i| !a[i].is_nan() && !b[i].is_nan() && a[i] != b[i])
+                    .collect(),
                 Comparator::CrossAbove => sqx_indicators::crosses_above(&a, &b),
                 Comparator::CrossBelow => sqx_indicators::crosses_below(&a, &b),
                 Comparator::Rising | Comparator::Falling => unreachable!(),

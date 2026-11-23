@@ -7,3 +7,7 @@ description = "Technical indicator library (Series = Vec<f64>, NaN = undefined).
 
 [dependencies]
 sqx-core = { path = "../sqx-core" }
+
+[dev-dependencies]
+ta = "0.5.0"
+ta-lib = "0.8.3"

@@ -102,3 +102,159 @@ fn donchian_breakout_is_possible() {
         "close should exceed the (prior-bar) Donchian upper at least once"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Degenerate inputs.
+//
+// Real market data contains flat bars (halted sessions, limit-locked days,
+// illiquid minutes) and zero-volume bars. These used to be untested, which is
+// how a divide-by-zero in ADX survived a test file written specifically to
+// catch NaN poisoning.
+// ---------------------------------------------------------------------------
+
+/// Indicators that are *legitimately* undefined on each degenerate input: each
+/// one reduces to a 0/0 form with no meaningful neutral value (a Hurst exponent
+/// of a constant series, a percent-B of a zero-width band, a volume-weighted
+/// average of zero volume). Returning NaN there is correct.
+///
+/// Anything NOT in this list must stay finite. If a new indicator starts
+/// returning NaN on degenerate data it will appear as a failure here, which is
+/// the signal to decide deliberately whether that is correct.
+const FLAT_UNDEFINED: &[&str] = &[
+    "Acceleration",      // ROC of an all-zero series: percent change from 0
+    "BBPercentB",        // upper == lower, zero-width band
+    "ChaikinVolatility", // EMA of a zero range
+    "Choppiness",        // sum(TR) == 0
+    "FractalDimension",  // 2 - Hurst, undefined for a constant series
+    "Hurst",             // standard deviation == 0
+    "Jerk",              // ROC of an all-zero series
+    "KeltnerPosition",   // ATR == 0
+    "MassIndex",         // ratio of two zero EMAs
+    "RVI",               // SMA(H-L) == 0
+    "RangeExpansion",    // SMA(H-L) == 0
+    "TSI",               // EMA(|momentum|) == 0
+    "UltimateOsc",       // sum(TR) == 0
+    "VortexMinus",       // sum(TR) == 0
+    "VortexPlus",        // sum(TR) == 0
+    "ZScore",            // standard deviation == 0
+];
+
+const ZERO_VOLUME_UNDEFINED: &[&str] = &[
+    "CMF",          // divides by sum(volume)
+    "TwiggsMF",     // divides by sum(volume)
+    "UpDownVolume", // divides by sum(volume)
+    "VWAP",         // divides by cumulative volume
+    "VWMA",         // divides by sum(volume)
+    "VolumeOsc",    // SMA(volume) == 0
+    "VolumeRatio",  // SMA(volume) == 0
+];
+
+const ZERO_RANGE_UNDEFINED: &[&str] = &[
+    "ChaikinVolatility",
+    "MassIndex",
+    "RVI",
+    "RangeExpansion",
+];
+
+fn flat_bars(n: usize) -> Vec<Bar> {
+    (0..n)
+        .map(|i| Bar::new(i as i64 * 3600, 100.0, 100.0, 100.0, 100.0, 100.0))
+        .collect()
+}
+
+/// Price moves, every bar has zero range.
+fn zero_range_bars(n: usize) -> Vec<Bar> {
+    (0..n)
+        .map(|i| {
+            let c = 100.0 + ((i * 37) % 23) as f64;
+            Bar::new(i as i64 * 3600, c, c, c, c, 1000.0)
+        })
+        .collect()
+}
+
+/// Price moves, volume is zero.
+fn zero_volume_bars(n: usize) -> Vec<Bar> {
+    (0..n)
+        .map(|i| {
+            let c = 100.0 + ((i * 37) % 23) as f64;
+            Bar::new(i as i64 * 3600, c, c + 2.0, c - 2.0, c, 0.0)
+        })
+        .collect()
+}
+
+fn unexpected_nan(bars: &[Bar], allowed: &[&str]) -> Vec<String> {
+    let tail_start = bars.len() - bars.len() / 4;
+    let mut failures = Vec::new();
+    for spec in sqx_strategy::indicator_catalog() {
+        if allowed.contains(&spec.name) {
+            continue;
+        }
+        let Some(s) = sqx_backtest::compute(spec.name, &spec.default_params(), bars) else {
+            failures.push(format!("{}: not registered", spec.name));
+            continue;
+        };
+        if let Some(bad) = s[tail_start..].iter().position(|v| !v.is_finite()) {
+            failures.push(format!("{}: non-finite at index {}", spec.name, tail_start + bad));
+        }
+    }
+    failures.sort();
+    failures
+}
+
+#[test]
+fn indicators_stay_finite_on_flat_bars() {
+    let failures = unexpected_nan(&flat_bars(200), FLAT_UNDEFINED);
+    assert!(
+        failures.is_empty(),
+        "{} indicator(s) went non-finite on flat bars (add to FLAT_UNDEFINED only if 0/0 is genuinely undefined):
+{}",
+        failures.len(),
+        failures.join("
+")
+    );
+}
+
+#[test]
+fn indicators_stay_finite_on_zero_volume() {
+    let failures = unexpected_nan(&zero_volume_bars(200), ZERO_VOLUME_UNDEFINED);
+    assert!(
+        failures.is_empty(),
+        "{} indicator(s) went non-finite on zero-volume bars:
+{}",
+        failures.len(),
+        failures.join("
+")
+    );
+}
+
+#[test]
+fn indicators_stay_finite_on_zero_range_bars() {
+    let failures = unexpected_nan(&zero_range_bars(200), ZERO_RANGE_UNDEFINED);
+    assert!(
+        failures.is_empty(),
+        "{} indicator(s) went non-finite on zero-range bars:
+{}",
+        failures.len(),
+        failures.join("
+")
+    );
+}
+
+/// The specific regression behind the ADX fix: a flat market used to produce
+/// NaN for DI+/DI-/ADX because every DI was a 0/0 form.
+#[test]
+fn adx_is_finite_and_zero_on_flat_bars() {
+    let bars = flat_bars(200);
+    for name in ["DIPlus", "DIMinus", "ADX"] {
+        let s = sqx_backtest::compute(name, &[], &bars).expect("registered");
+        assert!(
+            s[150..].iter().all(|v| v.is_finite()),
+            "{name} went non-finite on flat bars"
+        );
+        assert!(
+            s[150..].iter().all(|v| *v == 0.0),
+            "{name} should be 0 when nothing moved, got {:?}",
+            &s[150..160]
+        );
+    }
+}

@@ -163,7 +163,7 @@ pub fn mfi(h: &[f64], l: &[f64], c: &[f64], v: &[f64], n: usize) -> Series {
             if sp[i].is_nan() {
                 f64::NAN
             } else if sn[i] == 0.0 {
-                100.0
+                if sp[i] == 0.0 { 50.0 } else { 100.0 }
             } else {
                 100.0 - 100.0 / (1.0 + sp[i] / sn[i])
             }
