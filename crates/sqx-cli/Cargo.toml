@@ -25,4 +25,5 @@ sqx-assistant = { path = "../sqx-assistant" }
 clap.workspace = true
 anyhow.workspace = true
 serde_json.workspace = true
+serde.workspace = true
 rand.workspace = true

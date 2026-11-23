@@ -28,20 +28,24 @@ pub struct Tick {
 }
 
 /// Resample bars to a coarser timeframe by aggregating OHLCV per period.
-pub fn resample(bars: &[Bar], to: Timeframe) -> Vec<Bar> {
-    let to_min = match to.minutes() {
-        Some(m) => m,
-        None => return bars.to_vec(),
-    };
-    let bucket_ms = to_min * 60_000;
+pub fn resample(bars: &[Bar], to: Timeframe) -> Result<Vec<Bar>,String> {
+    if to==Timeframe::Tick{return Err("Cannot resample OHLC candles into ticks".into());}
+    for (index,bar) in bars.iter().enumerate(){
+        if index>0 && bar.time<=bars[index-1].time{return Err(format!("Unordered or duplicate candle at row {}",index+1));}
+        if [bar.open,bar.high,bar.low,bar.close,bar.volume].iter().any(|v|!v.is_finite())
+            || bar.volume<0.0 || bar.low>bar.open.min(bar.close) || bar.high<bar.open.max(bar.close) || bar.low>bar.high {
+            return Err(format!("Invalid OHLCV at row {}",index+1));
+        }
+    }
     let mut out = Vec::new();
     let mut cur: Option<Bar> = None;
     let mut cur_bucket = i64::MIN;
     for b in bars {
-        let bucket = b.time.div_euclid(bucket_ms);
+        let (bucket,_)=to.bucket_bounds(b.time).ok_or("Timestamp outside resampling calendar range")?;
+        let mut b=*b;b.time=bucket;
         match cur {
             None => {
-                cur = Some(*b);
+                cur = Some(b);
                 cur_bucket = bucket;
             }
             Some(mut c) => {
@@ -50,10 +54,11 @@ pub fn resample(bars: &[Bar], to: Timeframe) -> Vec<Bar> {
                     c.low = c.low.min(b.low);
                     c.close = b.close;
                     c.volume += b.volume;
+                    if !c.volume.is_finite(){return Err("Resampled volume overflow".into());}
                     cur = Some(c);
                 } else {
                     out.push(c);
-                    cur = Some(*b);
+                    cur = Some(b);
                     cur_bucket = bucket;
                 }
             }
@@ -62,5 +67,5 @@ pub fn resample(bars: &[Bar], to: Timeframe) -> Vec<Bar> {
     if let Some(c) = cur {
         out.push(c);
     }
-    out
+    Ok(out)
 }

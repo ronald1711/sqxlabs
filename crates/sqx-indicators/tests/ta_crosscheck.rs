@@ -1,10 +1,10 @@
-//! Cross-checks this crate against the battle-tested ta crate on identical
-//! synthetic data. ta is the de-facto standard Rust TA library, so agreement
-//! here is strong evidence of correctness.
+//! Cross-checks against the `ta` Rust package pinned by Cargo.lock on identical
+//! synthetic data. Agreement covers these exercised formulas and conventions;
+//! it does not establish correctness of every registered indicator.
 //!
 //! Only indicators whose conventions genuinely match are asserted equal.
-//! Every known divergence is a DELIBERATE convention choice and is documented
-//! below rather than asserted:
+//! Differences identified for the compared package version are documented below
+//! rather than asserted equal:
 //!
 //! * EMA       - ta seeds with the first value; we seed with an SMA (the
 //!               TradingView / Wilder warm-up). MACD/PPO/TSI inherit this.
@@ -147,7 +147,11 @@ fn mfi_matches_after_warmup() {
     let mut t = ta::indicators::MoneyFlowIndex::new(14).unwrap();
     let theirs: Vec<f64> = items.iter().map(|it| t.next(it)).collect();
     let mine = ind::mfi(&h, &l, &c, &v, 14);
-    cmp("MFI(14)", &mine, &theirs, 13, 1e-9);
+    // ta 0.5 emits partial-window values from its streaming initializer. Only
+    // index 14 has fourteen classified flows; earlier Sqx values must be NaN.
+    // The hand-calculated fixture and ta-lib comparison independently check this.
+    assert!(mine[..14].iter().all(|v|v.is_nan()));
+    cmp("MFI(14)", &mine, &theirs, 14, 1e-9);
 }
 
 #[test]

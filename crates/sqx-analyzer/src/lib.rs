@@ -38,6 +38,7 @@ pub struct TradeStats {
 
 #[derive(Debug, Clone)]
 pub struct AnalysisReport {
+    pub errors: Vec<String>,
     pub summary: Metrics,
     pub monthly: Vec<MonthRow>,
     pub drawdowns: Vec<DrawdownPeriod>,
@@ -62,7 +63,7 @@ fn ymd(ms: i64) -> (i32, u32, u32) {
     (y as i32, m as u32, d as u32)
 }
 
-fn monthly(equity: &[(i64, f64)]) -> Vec<MonthRow> {
+fn monthly(equity: &[(i64, f64)], initial:f64) -> Vec<MonthRow> {
     let mut ends: Vec<(i32, u32, f64)> = Vec::new();
     let mut cur: Option<(i32, u32, f64)> = None;
     for (t, e) in equity {
@@ -84,26 +85,26 @@ fn monthly(equity: &[(i64, f64)]) -> Vec<MonthRow> {
         ends.push((y, m, e));
     }
     let mut out = Vec::new();
-    let mut prev = equity.first().map(|(_, e)| *e).unwrap_or(0.0);
+    let mut prev = initial;
     for (y, m, e) in ends {
-        let ret = if prev != 0.0 && prev.is_finite() { (e - prev) / prev * 100.0 } else { 0.0 };
+        let ret = if prev > 0.0 && prev.is_finite() && e.is_finite() { (e - prev) / prev * 100.0 } else { f64::NAN };
         out.push(MonthRow { year: y, month: m, end_equity: e, return_pct: ret });
         prev = e;
     }
     out
 }
 
-fn drawdowns(equity: &[(i64, f64)]) -> Vec<DrawdownPeriod> {
+fn drawdowns(equity: &[(i64, f64)], initial:f64) -> Vec<DrawdownPeriod> {
     let mut out = Vec::new();
     if equity.is_empty() {
         return out;
     }
-    let mut peak = equity[0].1;
+    let mut peak = initial;
     let mut peak_i = 0usize;
     let mut in_dd = false;
     let mut trough = peak;
     let mut trough_i = 0usize;
-    for i in 1..equity.len() {
+    for i in 0..equity.len() {
         let e = equity[i].1;
         if e >= peak {
             if in_dd {
@@ -147,7 +148,7 @@ fn mean(xs: impl Iterator<Item = f64>) -> f64 {
 
 fn trade_stats(trades: &[Trade]) -> TradeStats {
     let wins: Vec<f64> = trades.iter().filter(|t| t.pnl > 0.0).map(|t| t.pnl).collect();
-    let losses: Vec<f64> = trades.iter().filter(|t| t.pnl <= 0.0).map(|t| t.pnl).collect();
+    let losses: Vec<f64> = trades.iter().filter(|t| t.pnl < 0.0).map(|t| t.pnl).collect();
     let avg_win = mean(wins.iter().copied());
     let avg_loss = mean(losses.iter().copied());
     let payoff = if avg_loss.is_finite() && avg_loss != 0.0 { avg_win / -avg_loss } else { f64::NAN };
@@ -160,10 +161,12 @@ fn trade_stats(trades: &[Trade]) -> TradeStats {
             cur_win += 1;
             cur_loss = 0;
             max_win_streak = max_win_streak.max(cur_win);
-        } else {
+        } else if t.pnl < 0.0 {
             cur_loss += 1;
             cur_win = 0;
             max_loss_streak = max_loss_streak.max(cur_loss);
+        } else {
+            cur_win=0;cur_loss=0;
         }
     }
     TradeStats {
@@ -180,31 +183,38 @@ fn trade_stats(trades: &[Trade]) -> TradeStats {
     }
 }
 
-fn rolling_sharpe(equity: &[(i64, f64)], periods_per_year: f64) -> Vec<f64> {
-    if equity.len() < 3 {
-        return Vec::new();
-    }
-    let vals: Vec<f64> = equity.iter().map(|(_, e)| *e).collect();
-    let rets: Vec<f64> = vals.windows(2).map(|w| if w[0] != 0.0 { (w[1] - w[0]) / w[0] } else { 0.0 }).collect();
-    let window = (periods_per_year.max(2.0) / 4.0).round() as usize;
-    let window = window.max(2).min(rets.len());
-    let mut out = Vec::new();
-    for w in rets.windows(window) {
-        let m = w.iter().sum::<f64>() / w.len() as f64;
-        let var = w.iter().map(|x| (x - m) * (x - m)).sum::<f64>() / (w.len() as f64 - 1.0);
-        let sd = var.sqrt();
-        out.push(if sd > 0.0 { m / sd * periods_per_year.sqrt() } else { 0.0 });
-    }
-    out
+fn rolling_sharpe(equity: &[(i64, f64)], initial:f64, periods_per_year: f64) -> Vec<f64> {
+    if !periods_per_year.is_finite() || periods_per_year<=0.0 {return Vec::new();}
+    let window=((periods_per_year/4.0).round() as usize).max(2);
+    // Never label a shortened history as a complete quarterly window.
+    if equity.len()<window {return Vec::new();}
+    equity.windows(window).enumerate().map(|(start,observations)| {
+        let preceding=if start==0 {initial}else{equity[start-1].1};
+        sqx_metrics::sharpe_from_equity(observations,preceding,periods_per_year)
+    }).collect()
 }
 
 pub fn analyze(result: &BacktestResult, bars: &[Bar], periods_per_year: f64) -> AnalysisReport {
+    let mut errors=result.errors.clone();
+    if let Err(error)=sqx_metrics::validate_observations(result){errors.push(error);}
+    if !periods_per_year.is_finite() || periods_per_year<=0.0 {errors.push("Annualization must be finite and positive".into());}
+    if !result.initial_deposit.is_finite() || result.initial_deposit<=0.0 || !result.final_equity.is_finite() {
+        errors.push("Invalid initial or final equity".into());
+    }
+    if result.equity.iter().any(|(_,e)|!e.is_finite()) || result.equity.windows(2).any(|w|w[1].0<=w[0].0) {
+        errors.push("Equity observations must be finite and strictly chronological".into());
+    }
+    if !errors.is_empty(){
+        let mut invalid=result.clone();invalid.errors=errors.clone();
+        return AnalysisReport{errors,summary:compute(&invalid,bars.len(),periods_per_year),monthly:Vec::new(),drawdowns:Vec::new(),trade_stats:trade_stats(&[]),rolling_sharpe:Vec::new(),bars:bars.len(),periods_per_year};
+    }
     AnalysisReport {
+        errors,
         summary: compute(result, bars.len(), periods_per_year),
-        monthly: monthly(&result.equity),
-        drawdowns: drawdowns(&result.equity),
+        monthly: monthly(&result.equity,result.initial_deposit),
+        drawdowns: drawdowns(&result.equity,result.initial_deposit),
         trade_stats: trade_stats(&result.trades),
-        rolling_sharpe: rolling_sharpe(&result.equity, periods_per_year),
+        rolling_sharpe: rolling_sharpe(&result.equity, result.initial_deposit, periods_per_year),
         bars: bars.len(),
         periods_per_year,
     }
@@ -226,6 +236,7 @@ mod tests {
 }
 
 pub fn render_markdown(r: &AnalysisReport) -> String {
+    if !r.errors.is_empty(){return format!("# Analysis unavailable\n\n{}\n",r.errors.iter().map(|e|format!("- {e}")).collect::<Vec<_>>().join("\n"));}
     let mut out = String::new();
     out.push_str("# Strategy analysis report\n\n");
     out.push_str(&format!("Bars: {} | Periods/year: {:.0}\n\n", r.bars, r.periods_per_year));
@@ -251,11 +262,96 @@ pub fn render_markdown(r: &AnalysisReport) -> String {
     out.push_str(&format!("- Average MAE: {:.1} pts\n- Average MFE: {:.1} pts\n", t.avg_mae, t.avg_mfe));
     out.push('\n');
     if !r.rolling_sharpe.is_empty() {
-        let min = r.rolling_sharpe.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max = r.rolling_sharpe.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        let avg = r.rolling_sharpe.iter().sum::<f64>() / r.rolling_sharpe.len() as f64;
+        let valid:Vec<f64>=r.rolling_sharpe.iter().copied().filter(|v|v.is_finite()).collect();
         out.push_str("## Rolling Sharpe\n\n");
-        out.push_str(&format!("- windows: {}\n- min: {:.2}\n- mean: {:.2}\n- max: {:.2}\n", r.rolling_sharpe.len(), min, avg, max));
+        out.push_str(&format!("- Complete quarterly windows: {}\n- Undefined windows: {}\n",r.rolling_sharpe.len(),r.rolling_sharpe.len()-valid.len()));
+        if valid.is_empty(){out.push_str("- No defined Sharpe values\n");}
+        else {
+            let min=valid.iter().copied().fold(f64::INFINITY,f64::min);
+            let max=valid.iter().copied().fold(f64::NEG_INFINITY,f64::max);
+            let avg=valid.iter().sum::<f64>()/valid.len() as f64;
+            out.push_str(&format!("- Defined windows only — min: {min:.2}; mean: {avg:.2}; max: {max:.2}\n"));
+        }
     }
     out
+}
+
+#[cfg(test)]
+mod flat_trade_tests {
+    use super::*;
+    #[test]
+    fn break_even_trades_match_core_statistics() {
+        let trades:Vec<Trade>=[10.0,0.0,20.0,-5.0,-0.0,-15.0].into_iter().enumerate().map(|(id,pnl)|Trade{
+            id,direction:sqx_core::Direction::Long,open_time:id as i64,close_time:id as i64+1,
+            open_price:1.0,close_price:1.0,size:1.0,pnl,pnl_points:pnl,commission:0.0,financing:0.0,
+            bars:1,mae_points:0.0,mfe_points:0.0,exit_reason:sqx_backtest::ExitReason::ExitSignal,
+        }).collect();
+        let stats=trade_stats(&trades);
+        assert_eq!((stats.trades,stats.wins,stats.losses),(6,2,2));
+        assert_eq!(stats.avg_win,15.0);assert_eq!(stats.avg_loss,-10.0);
+        assert_eq!(stats.max_win_streak,1);assert_eq!(stats.max_loss_streak,1);
+    }
+}
+
+#[cfg(test)]
+mod rolling_sharpe_tests {
+    use super::*;
+    #[test]
+    fn full_windows_share_core_definition_without_fabricated_zeros(){
+        let equity=[(0,110.0),(1,99.0),(2,118.8),(3,118.8)];
+        let values=rolling_sharpe(&equity,100.0,12.0);
+        assert_eq!(values.len(),2);
+        let expected=(1.0/15.0)/(7.0_f64/300.0).sqrt()*12.0_f64.sqrt();
+        assert!((values[0]-expected).abs()<1e-12);
+        assert_eq!(values[1],sqx_metrics::sharpe_from_equity(&equity[1..],110.0,12.0));
+        assert!(rolling_sharpe(&equity[..2],100.0,12.0).is_empty());
+        let flat=rolling_sharpe(&[(0,100.0),(1,100.0),(2,100.0)],100.0,12.0);
+        assert_eq!(flat.len(),1);assert!(flat[0].is_nan());
+        let insolvent=rolling_sharpe(&[(0,110.0),(1,0.0),(2,10.0)],100.0,12.0);
+        assert!(insolvent[0].is_nan());
+    }
+}
+
+#[cfg(test)]
+mod initial_equity_tests {
+    use super::*;
+    #[test]
+    fn monthly_returns_include_first_bar_and_compound_from_prior_month_end(){
+        let jan=0;let feb=31*86_400_000;
+        let rows=monthly(&[(jan,80.0),(feb,88.0)],100.0);
+        assert_eq!(rows.len(),2);assert_eq!(rows[0].return_pct,-20.0);
+        assert!((rows[1].return_pct-10.0).abs()<1e-12);
+        assert!(((1.0+rows[0].return_pct/100.0)*(1.0+rows[1].return_pct/100.0)-0.88).abs()<1e-12);
+        let exhausted=monthly(&[(jan,0.0),(feb,10.0)],100.0);
+        assert_eq!(exhausted[0].return_pct,-100.0);assert!(exhausted[1].return_pct.is_nan());
+    }
+    #[test]
+    fn first_bar_loss_is_a_drawdown_even_with_only_one_observation(){
+        let periods=drawdowns(&[(0,80.0)],100.0);
+        assert_eq!(periods.len(),1);assert_eq!(periods[0].depth_pct,20.0);
+        assert_eq!(periods[0].end,None);
+        let recovered=drawdowns(&[(0,80.0),(1,70.0),(2,100.0)],100.0);
+        assert_eq!(recovered.len(),1);assert_eq!(recovered[0].depth_pct,30.0);
+        assert_eq!(recovered[0].trough,1);assert_eq!(recovered[0].end,Some(2));
+        assert_eq!(recovered[0].recovery_bars,Some(1));
+        assert!(drawdowns(&[(0,110.0)],100.0).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod invalid_analysis_tests {
+    use super::*;
+    fn result()->BacktestResult {BacktestResult{errors:vec![],rejected_orders:vec![],ambiguous_bars:vec![],execution:Default::default(),trades:vec![],equity:vec![(0,100.0),(1,90.0)],initial_deposit:100.0,final_equity:90.0}}
+    #[test]
+    fn invalid_runs_cannot_render_successful_analysis(){
+        for case in 0..4 {
+            let mut run=result();let mut annualization=252.0;
+            match case {0=>run.errors.push("execution failed".into()),1=>annualization=0.0,2=>run.equity[1].1=f64::NAN,_=>run.equity[1].0=0}
+            let report=analyze(&run,&[],annualization);
+            assert!(!report.errors.is_empty());assert!(report.summary.net_profit.is_nan());
+            assert!(report.monthly.is_empty());assert!(report.drawdowns.is_empty());assert!(report.rolling_sharpe.is_empty());
+            let text=render_markdown(&report);assert!(text.contains("Analysis unavailable"));assert!(!text.contains("## Summary"));
+        }
+        assert!(analyze(&result(),&[],252.0).errors.is_empty());
+    }
 }

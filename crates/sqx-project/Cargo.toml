@@ -6,8 +6,11 @@ license.workspace = true
 description = "Project and databank persistence (JSON, clean-room design)."
 
 [dependencies]
+sqx-optimizer = { path = "../sqx-optimizer" }
+sqx-backtest = { path = "../sqx-backtest" }
 sqx-core = { path = "../sqx-core" }
 sqx-strategy = { path = "../sqx-strategy" }
 sqx-metrics = { path = "../sqx-metrics" }
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.10"

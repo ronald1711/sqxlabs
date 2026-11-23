@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Instrument {
     pub name: String,
+    #[serde(default)]
+    pub base_currency: String,
+    #[serde(default)]
+    pub quote_currency: String,
     pub tick_size: f64,
     pub tick_value: f64,
     pub point: f64,
@@ -16,6 +20,7 @@ impl Default for Instrument {
     fn default() -> Self {
         Self {
             name: "EURUSD".into(),
+            base_currency: "EUR".into(), quote_currency: "USD".into(),
             tick_size: 0.00001,
             tick_value: 1.0,
             point: 0.0001,
@@ -30,6 +35,8 @@ impl Instrument {
         let point = if name.ends_with("JPY") { 0.01 } else { 0.0001 };
         Self {
             name: name.to_string(),
+            base_currency: name.get(..3).unwrap_or("").to_string(),
+            quote_currency: name.get(3..6).unwrap_or("").to_string(),
             tick_size: point / 10.0,
             tick_value: 1.0,
             point,

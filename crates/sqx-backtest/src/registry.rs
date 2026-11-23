@@ -104,8 +104,8 @@ pub fn compute(name: &str, params: &[sqx_strategy::Param], bars: &[Bar]) -> Opti
             d
         }
         "AwesomeOsc" => ind::awesome_oscillator(&h, &l),
-        "BullsPower" => ind::bulls_power(&h, &c),
-        "BearsPower" => ind::bears_power(&l, &c),
+        "BullsPower" => {let baseline=ind::ema(&c,period(params,13));h.iter().zip(baseline).map(|(high,ema)|high-ema).collect()},
+        "BearsPower" => {let baseline=ind::ema(&c,period(params,13));l.iter().zip(baseline).map(|(low,ema)|low-ema).collect()},
         "DeMarker" => ind::demarker(&h, &l, period(params, 14)),
         "ParabolicSAR" => ind::parabolic_sar(
             bars,
@@ -267,4 +267,21 @@ pub fn compute(name: &str, params: &[sqx_strategy::Param], bars: &[Bar]) -> Opti
         _ => return None,
     };
     Some(res)
+}
+
+#[cfg(test)]
+mod period_tests {
+    use super::*;
+    #[test]
+    fn bull_and_bear_power_honor_configured_period(){
+        let bars:Vec<_>=(0..20).map(|i|Bar::new(i,10.0+i as f64,12.0+i as f64,9.0+i as f64,10.0+i as f64,1.0)).collect();
+        for name in ["BullsPower","BearsPower"] {
+            let short=compute(name,&[sqx_strategy::Param::new("period",2.0)],&bars).unwrap();
+            let normal=compute(name,&[],&bars).unwrap();
+            assert!(short[0].is_nan());assert!(short[1].is_finite());assert!(normal[1].is_nan());
+            // EMA(2) seed is mean(10,11)=10.5; high=13 and low=10.
+            assert_eq!(short[1],if name=="BullsPower"{2.5}else{-0.5});
+            assert_ne!(short[19],normal[19]);
+        }
+    }
 }

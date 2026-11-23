@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "markets": [
+    {
+      "symbol": "EURUSD",
+      "data": "../data/eurusd_sample.csv",
+      "timeframe": "M1"
+    }
+  ]
+}

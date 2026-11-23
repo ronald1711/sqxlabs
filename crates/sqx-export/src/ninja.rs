@@ -14,7 +14,7 @@ fn ind_expr(name: &str, params: &[Param]) -> String {
     match name {
         "SMA" => format!("SMA({})", prd(params, "period", 20)),
         "EMA" => format!("EMA({})", prd(params, "period", 20)),
-        "SMMA" => format!("SMA({})", prd(params, "period", 20)),
+        "SMMA" => "/*SMMA:unmapped*/0.0".into(),
         "LWMA" => format!("WMA({})", prd(params, "period", 20)),
         "HMA" => format!("HMA({})", prd(params, "period", 20)),
         "RSI" => format!("RSI({})", prd(params, "period", 14)),
@@ -34,7 +34,7 @@ fn ind_expr(name: &str, params: &[Param]) -> String {
         "BBLower" => format!("Bollinger({}, 2).Lower", prd(params, "period", 20)),
         "Highest" => format!("MAX(High, {})", prd(params, "period", 20)),
         "Lowest" => format!("MIN(Low, {})", prd(params, "period", 20)),
-        _ => format!("SMA({})", prd(params, "period", 20)),
+        _ => format!("/*{name}:unmapped*/0.0"),
     }
 }
 

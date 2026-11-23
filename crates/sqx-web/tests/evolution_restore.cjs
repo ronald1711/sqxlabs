@@ -1,0 +1,6 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync('crates/sqx-web/assets/workspace.js','utf8'),start=source.indexOf("$('evolution-restore').onchange=");assert(start>=0);
+const raw='{"schema":1,"job_json":"{\\"seed\\":18446744073709551615}"}';
+const fields={'evolution-restore':{files:[{size:raw.length,text:async()=>raw}],value:'file'},'evolution-status':{}};let sent=[],fail=false,refreshes=0;
+const ctx=vm.createContext({$:id=>fields[id],postJSON:async(path,body)=>{sent.push({path,body});if(fail)throw Error('lost');return {status:{}};},refreshEvolutionJobs:async()=>{refreshes++;}});vm.runInContext(source.slice(start),ctx);
+(async()=>{const input=fields['evolution-restore'];await input.onchange();assert.equal(sent[0].body,raw);assert.equal(refreshes,1);assert.equal(input.disabled,false);assert.equal(input.value,'');fail=true;await input.onchange();assert.equal(sent.length,2);assert.equal(refreshes,1);assert.match(fields['evolution-status'].textContent,/response lost/);input.files[0].size=101*1024*1024;await input.onchange();assert.equal(sent.length,2);console.log('Evolution restore transport passed: exact JSON, bounded input and no uncertain-response retry.');})().catch(e=>{console.error(e);process.exitCode=1;});

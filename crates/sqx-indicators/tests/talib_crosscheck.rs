@@ -1,13 +1,11 @@
-//! Cross-checks this crate against ta-lib, the official pure-Rust port of the
-//! TA-Lib C library (verified against the C reference). TA-Lib uses Wilder
-//! smoothing for RSI/ATR/ADX and SMA-seeds its EMA, which are exactly the
-//! conventions this crate chose - so agreement here is a direct correctness
-//! check, including for the indicators this audit actually fixed (ADX, DPO,
-//! CCI, Aroon, RSI, ATR, Stoch).
-//!
-//! The flat-market neutral values (RSI/MFI = 50) are deliberate and differ from
-//! TA-Lib's degenerate 0/100 handling; these tests use a non-flat series so the
-//! comparison is on the well-defined part of the domain.
+//! Cross-checks against the `ta-lib` Rust package pinned by Cargo.lock.
+//! This suite does not run a separate TA-Lib C executable. Agreement is evidence
+//! for the exercised inputs/periods, not certification of the whole library.
+//! Comparisons check nonempty reference output, full tail coverage and warmup;
+//! explicitly documented exceptions cover multi-output alignment and first-bar TR.
+//! ADX/DI below compare only their converged tail because their seeds differ.
+//! Flat-market RSI/MFI neutral values are separate local conventions tested in
+//! regression fixtures; these comparisons use non-flat input.
 
 use sqx_core::Bar;
 use sqx_indicators as ind;
@@ -32,6 +30,15 @@ fn make_series(n: usize) -> (Vec<Bar>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, V
 
 // Compare my series against ta-lib's output, which starts at beg_idx.
 fn cmp(tag: &str, mine: &[f64], theirs: &[f64], beg: usize, count: usize, tol: f64) {
+    assert!(count>0,"{tag}: reference returned no values; comparison would be vacuous");
+    assert_eq!(beg+count,mine.len(),"{tag}: reference must cover the complete defined tail");
+    assert!(theirs.len()>=count,"{tag}: reference buffer is too short");
+    // STOCHF aligns both outputs to the later %D warmup; our %K is valid earlier.
+    // TrueRange explicitly defines the first bar's TR as high-low in this crate.
+    if tag!="StochK(14)" && tag!="TrueRange" {
+        assert!(mine[..beg].iter().all(|v|v.is_nan()),"{tag}: fabricated values before the reference warmup ends");
+    }
+
     for k in 0..count {
         let i = beg + k;
         let (a, b) = (mine[i], theirs[k]);

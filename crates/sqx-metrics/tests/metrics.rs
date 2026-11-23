@@ -16,7 +16,7 @@ fn result_with_trades(pnls: &[f64]) -> BacktestResult {
             size: 1.0,
             pnl: *p,
             pnl_points: p / 10.0,
-            commission: 0.0,
+            commission: 0.0, financing: 0.0,
             bars: 1,
             mae_points: 0.0,
             mfe_points: 0.0,
@@ -32,7 +32,7 @@ fn result_with_trades(pnls: &[f64]) -> BacktestResult {
         }
         out
     };
-    BacktestResult { trades, equity, initial_deposit: 10_000.0, final_equity: 10_000.0 + pnls.iter().sum::<f64>() }
+    BacktestResult { errors: Vec::new(), rejected_orders: Vec::new(), ambiguous_bars: Vec::new(), execution: Default::default(), trades, equity, initial_deposit: 10_000.0, final_equity: 10_000.0 + pnls.iter().sum::<f64>() }
 }
 
 fn approx(a: f64, b: f64) -> bool {
@@ -66,4 +66,34 @@ fn drawdown_tracks_peak() {
     let m: Metrics = compute(&r, 4, 252.0);
     assert!(m.max_drawdown > 0.0);
     assert!(approx(m.max_drawdown, 300.0), "peak 10100 then 9800 -> dd 300");
+}
+
+#[test]
+fn flat_trades_are_neither_winners_nor_losers_and_break_streaks() {
+    let r=result_with_trades(&[10.0,0.0,20.0,-5.0,-0.0,-15.0]);
+    let m=compute(&r,6,252.0);
+    assert_eq!(m.number_of_trades,6.0);assert_eq!(m.number_of_profits,2.0);assert_eq!(m.number_of_losses,2.0);
+    assert!(approx(m.winning_pct,100.0/3.0));
+    assert_eq!(m.avg_win,15.0);assert_eq!(m.avg_loss,-10.0);
+    assert_eq!(m.max_consec_wins,1.0);assert_eq!(m.max_consec_losses,1.0);
+    let flat=compute(&result_with_trades(&[0.0,-0.0]),2,252.0);
+    assert_eq!(flat.winning_pct,0.0);assert_eq!(flat.number_of_losses,0.0);
+    assert!(flat.avg_win.is_nan());assert!(flat.avg_loss.is_nan());assert!(flat.profit_factor.is_nan());
+}
+
+#[test]
+fn corrupt_trade_observations_never_produce_rankable_metrics(){
+    for field in 0..5 {
+        let mut run=result_with_trades(&[100.0,-10.0]);
+        match field {0=>run.trades[0].pnl=f64::NAN,1=>run.trades[0].commission=f64::INFINITY,2=>run.trades[0].financing=f64::NEG_INFINITY,3=>run.trades[0].size=f64::NAN,_=>run.equity[0].1=f64::NAN}
+        assert!(sqx_metrics::validate_observations(&run).is_err());
+        let m=compute(&run,3,252.0);
+        assert!(m.net_profit.is_nan());assert!(m.profit_factor.is_nan());assert!(m.number_of_trades.is_nan());
+    }
+    let mut overflow=result_with_trades(&[1.0,1.0]);
+    for trade in &mut overflow.trades{trade.pnl=f64::MAX;}
+    assert!(sqx_metrics::validate_observations(&overflow).is_err());
+    let mut duration=result_with_trades(&[1.0,1.0]);duration.trades[0].bars=usize::MAX;
+    assert!(sqx_metrics::validate_observations(&duration).is_err());
+    assert!(sqx_metrics::validate_observations(&result_with_trades(&[1.0,0.0])).is_ok());
 }

@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+serde.workspace = true
 sqx-core = { path = "../sqx-core" }
 sqx-backtest = { path = "../sqx-backtest" }
 

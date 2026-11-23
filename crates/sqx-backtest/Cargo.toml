@@ -6,6 +6,7 @@ license.workspace = true
 description = "Event-driven backtest engine: trades, equity, money management."
 
 [dependencies]
+serde.workspace = true
 sqx-core = { path = "../sqx-core" }
 sqx-strategy = { path = "../sqx-strategy" }
 sqx-indicators = { path = "../sqx-indicators" }

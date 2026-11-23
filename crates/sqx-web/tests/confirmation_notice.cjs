@@ -1,0 +1,17 @@
+const fs=require('node:fs');
+const vm=require('node:vm');
+const assert=require('node:assert/strict');
+const source=fs.readFileSync('crates/sqx-web/assets/workspace.js','utf8');
+const start=source.indexOf('function confirmationCoverageNotice(');
+const end=source.indexOf('\nrunBacktest =',start);
+assert(start>=0 && end>start);
+const context=vm.createContext({});vm.runInContext(source.slice(start,end),context);
+const notice=context.confirmationCoverageNotice;
+assert.equal(notice(undefined),'');assert.equal(notice({}),'');
+assert.equal(notice({skipped_leading_confirmation_bucket:null}),'');
+const epoch=notice({skipped_leading_confirmation_bucket:0});
+assert(epoch.includes('1970-01-01T00:00:00.000Z'));
+assert(epoch.includes('excluded'));assert(epoch.includes('not established'));
+assert(notice({skipped_leading_confirmation_bucket:'<script>'}).includes('unknown time'));
+assert(source.includes('notice.textContent=coverageNotice'));
+console.log('Confirmation coverage notice passed: epoch zero and missing legacy evidence handled.');

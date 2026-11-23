@@ -450,7 +450,8 @@ pub fn rmi(c: &[f64], n: usize) -> Series {
 /// `n` (the deviation window), so `period = 30` reproduces the 60/30 defaults.
 /// Range 0..100: 50 neutral, >80 a strong up-trend, <20 a strong down-trend.
 pub fn tii(c: &[f64], n: usize) -> Series {
-    if n == 0 {
+    // No result exists before 2*n closes; check without overflowing 2*n.
+    if n == 0 || n > c.len()/2 {
         return vec![f64::NAN; c.len()];
     }
     let base = sma(c, 2 * n);

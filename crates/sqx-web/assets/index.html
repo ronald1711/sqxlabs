@@ -58,12 +58,54 @@
   .cond-row label { color:var(--dim); font-size:11px; }
   .sig-head { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
   .add-cond { background:#22314f; padding:6px 12px; font-size:12px; }
+
+  :root { --dim:#a6b2ca; --acc:#397be8; }
+  body { font-size:14px; line-height:1.5; }
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline:3px solid var(--acc); outline-offset:3px; }
+  button:disabled { opacity:.55; cursor:wait; }
+  input[type=password], input[type=search] { background:var(--bg); border:1px solid var(--line); color:var(--fg); padding:9px; border-radius:6px; }
+  .muted, .card h2, .cond-row label { font-size:13px; }
+  .nav { position:sticky; top:0; align-self:flex-start; min-height:calc(100vh - 70px); }
+  .nav-btn { min-height:44px; }
+  .workspace-context { display:flex; flex-wrap:wrap; gap:8px 22px; padding:12px 18px; margin-bottom:18px; border:1px solid var(--line); border-radius:10px; background:var(--panel); }
+  .workspace-context strong { display:block; color:var(--fg); }
+  .workspace-context span { color:var(--dim); font-size:12px; }
+  .hero { padding:26px; background:linear-gradient(110deg,var(--panel),var(--bg)); }
+  .hero h2 { color:var(--fg); font-size:26px; text-transform:none; letter-spacing:-.02em; }
+  .journey { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:18px 0; }
+  .journey button { text-align:left; padding:16px; background:var(--panel); border:1px solid var(--line); color:var(--fg); }
+  .journey small { display:block; color:var(--dim); margin-top:5px; }
+  .editor-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+  .secondary { background:transparent; color:var(--fg); border:1px solid var(--line); }
+  .editor-toolbar button[aria-pressed=true] { background:var(--acc); color:white; }
+  #editor-notice, #workspace-message { padding:12px; border:1px solid var(--line); border-radius:8px; margin:10px 0; }
+  [hidden] { display:none !important; }
+  .editor-columns { display:grid; grid-template-columns:minmax(0,1fr) 260px; gap:20px; }
+  #strategy { height:340px; }
+  #run-summary { padding:12px 0; }
+  .status-pill { display:inline-block; border:1px solid var(--line); border-radius:16px; padding:3px 9px; font-size:12px; }
+  .run-card { border:1px solid var(--line); border-radius:8px; padding:12px; margin:10px 0; }
+  .run-card p { margin:4px 0 10px; }
+  .metrics-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:16px 0; }
+  .metric { padding:14px; border:1px solid var(--line); border-radius:8px; }
+  .metric strong { display:block; font-size:23px; font-variant-numeric:tabular-nums; }
+  .table-scroll { overflow:auto; }
+  #paper-workspace { min-width:0; overflow-wrap:anywhere; }
+  #paper-workspace .row > label { min-width:0; max-width:100%; }
+  #paper-workspace select, #paper-workspace input[type="file"] { box-sizing:border-box; min-width:0; max-width:100%; width:100%; }
+  summary { cursor:pointer; padding:10px 0; font-weight:600; }
+  .card + .card { margin-top:18px; }
+  #job-status { position:fixed; bottom:16px; right:18px; background:var(--panel); border:1px solid var(--acc); padding:12px 18px; border-radius:10px; z-index:10; max-width:90vw; }
+  .cond-row select { max-width:100%; min-height:36px; }
+  .indicator-search { width:100% !important; margin:0 0 8px; }
+  @media(max-width:1050px) { .editor-columns { grid-template-columns:1fr; } .journey,.metrics-grid { grid-template-columns:repeat(2,1fr); } }
+  @media(max-width:700px) { header { flex-wrap:wrap; padding:12px; } header>span:last-child { margin-left:0 !important; flex-wrap:wrap; } .nav { position:static; min-height:0; } .journey,.metrics-grid { grid-template-columns:1fr; } .workspace-context { gap:10px; } }
 </style>
 </head>
 <body>
 <header>
   <h1>SqxLabs</h1>
-  <span class="badge">StrategyQuant open-source port · Rust</span>
+  <span class="badge">Trading strategy research</span>
   <span style="margin-left:auto; display:flex; gap:10px; align-items:center;">
     <select id="symbol-select"></select>
     <span id="data-info"></span>
@@ -73,18 +115,22 @@
 </header>
 <main>
   <aside class="nav">
-    <button class="nav-btn active" data-tab="home">Home</button>
+    <button class="nav-btn active" data-tab="home">Overview</button>
     <button class="nav-btn" data-tab="builder">Builder</button>
-    <button class="nav-btn" data-tab="optimizer">Optimizer</button>
-    <button class="nav-btn" data-tab="retester">Retester</button>
-    <button class="nav-btn" data-tab="results">Results</button>
-    <button class="nav-btn" data-tab="data">Data Manager</button>
-    <button class="nav-btn" data-tab="projects">Projects</button>
+    <button class="nav-btn" data-tab="optimizer">Discover</button>
+    <button class="nav-btn" data-tab="retester">Validate</button>
+    <button class="nav-btn" data-tab="results">Strategies</button>
+    <button class="nav-btn" data-tab="data">Data</button>
+    <button class="nav-btn" data-tab="projects">Research pipeline</button>
     <button class="nav-btn" data-tab="settings">Settings</button>
     <button class="nav-btn" data-tab="assistant">AI assistant</button>
   </aside>
   <div class="content">
+    <div id="research-context" class="workspace-context" aria-label="Current research context"></div>
+    <div id="workspace-message" role="alert" hidden></div>
     <section id="tab-home" class="tab active">
+      <div class="card hero"><h2>From market data to tested strategies.</h2><p>Build transparent rules, challenge the results, and export your research.</p><div class="row"><button data-go="builder">Continue in Builder</button><button data-go="data" class="secondary">Import market data</button></div></div>
+      <div class="journey"><button data-go="data">01 · Prepare data<small>Inspect coverage and import CSV</small></button><button data-go="builder">02 · Build or discover<small>Write rules and run a simulation</small></button><button data-go="retester">03 · Validate<small>Explore costs and Monte Carlo outcomes</small></button><button data-go="results">04 · Compare & export<small>Inspect candidates and choose a platform</small></button></div>
       <div class="card">
         <h2>Overview</h2>
         <div id="home-stats" class="row" style="gap:28px"></div>
@@ -92,7 +138,7 @@
       <div class="card" style="margin-top:18px">
         <h2>Quick run</h2>
         <div class="row">
-          <button id="home-tour">Run full tour (pipeline → databank)</button>
+          <button id="home-tour">Run example research pipeline</button>
           <span id="home-tour-status" class="muted"></span>
         </div>
       </div>
@@ -100,50 +146,53 @@
         <h2>Getting started</h2>
         <ol class="muted" style="line-height:1.9; margin:0; padding-left:20px;">
           <li><b>Builder</b> — edit the strategy, backtest it, export to MQL5 / NinjaScript / EasyLanguage.</li>
-          <li><b>Optimizer</b> — generate candidates, or run walk-forward / walk-forward matrix with parameter ranges.</li>
-          <li><b>Retester</b> — what-if cost scenarios and Monte Carlo trade manipulation.</li>
-          <li><b>Results</b> — persistent databank, filter, combine top strategies into a portfolio, download CSV.</li>
-          <li><b>Data Manager</b> — import CSV, broker profiles, sessions.</li>
-          <li><b>Projects</b> — build → retest → optimize pipeline.</li>
+          <li><b>Discover</b> — generate candidates, or run walk-forward / walk-forward matrix with parameter ranges.</li>
+          <li><b>Validate</b> — what-if cost scenarios and Monte Carlo trade manipulation.</li>
+          <li><b>Strategies</b> — persistent databank, filter, combine top strategies into a portfolio, download CSV.</li>
+          <li><b>Data</b> — import CSV, broker profiles, sessions.</li>
+          <li><b>Research pipeline</b> — build → retest → optimize pipeline.</li>
           <li><b>AI assistant</b> — ask the engine in natural language.</li>
         </ol>
       </div>
     </section>
     <section id="tab-builder" class="tab">
       <div class="card">
-        <h2>AlgoWizard — visual strategy editor</h2>
+        <h2>Strategy workspace</h2>
+        <div class="editor-toolbar"><button id="view-visual" class="secondary" aria-pressed="true">Visual rules</button><button id="view-code" class="secondary" aria-pressed="false">Strategy JSON</button><button id="strategy-undo" class="secondary">Undo edit</button><span id="draft-status" class="status-pill" role="status">Draft</span><button id="btn-backtest">Run backtest</button></div>
+        <div id="editor-notice" role="status" hidden></div>
+        <div id="visual-editor">
         <div class="row">
           <label><input type="checkbox" id="aw-long" checked> Long</label>
           <label><input type="checkbox" id="aw-short"> Short</label>
           <label class="muted">Name</label>
           <input type="text" id="aw-name" value="My strategy">
-          <label class="muted">SL pts</label>
+          <label class="muted">Stop loss · points</label>
           <input type="number" id="aw-sl" value="100" min="0">
-          <label class="muted">TP pts</label>
+          <label class="muted">Profit target · points</label>
           <input type="number" id="aw-pt" value="200" min="0">
-          <button id="aw-backtest">Build &amp; Backtest</button>
+
         </div>
-        <div style="display:flex; gap:16px; align-items:flex-start;">
+        <div class="editor-columns">
           <div style="flex:1; min-width:0;" id="aw-signals"></div>
-          <div style="width:290px; flex-shrink:0;">
+          <div>
             <h3 style="margin:0 0 10px; font-size:14px;">Money management</h3>
             <select id="aw-mm-type" style="width:100%;"></select>
             <div id="aw-mm-params" style="margin-top:8px;"></div>
             <h3 style="margin:16px 0 10px; font-size:14px;">Trading options</h3>
             <label class="muted" style="display:block; font-size:12px;"><input type="checkbox" id="aw-eod"> Exit at end of day</label>
             <label class="muted" style="display:block; font-size:12px; margin-top:4px;"><input type="checkbox" id="aw-friday"> Exit on Friday</label>
+            <label>Scheduled close (UTC)<input id="aw-close-time" type="time"></label>
+            <p class="muted">Required for daily/Friday exits. Fills at the first available bar open or tick at/after this time; no assumed candle-close fill.</p>
             <label class="muted" style="display:block; font-size:12px; margin-top:8px;">Max trades/day (0 = no limit)</label>
             <input type="number" id="aw-maxtrades" value="0" min="0" style="width:100%;">
           </div>
         </div>
+        </div><div id="code-editor" hidden><label for="strategy">Strategy JSON · changes update the visual rules when supported</label><textarea id="strategy" spellcheck="false"></textarea></div>
       </div>
       <div class="card" style="margin-top:18px">
-        <h2>Backtest a strategy</h2>
-        <textarea id="strategy"></textarea>
-        <div class="row" style="margin-top:12px">
-          <button id="btn-backtest">Backtest</button>
-          <span id="bt-status" class="muted"></span>
-        </div>
+        <h2>Simulation results & export</h2>
+        <div id="run-summary" class="muted">No backtest yet. Review the rules and assumptions, then run a simulation.</div>
+        <span id="bt-status" role="status" class="muted"></span>
         <div class="row" style="margin-top:8px">
           <label class="muted">Export as</label>
           <select id="exp-engine">
@@ -153,11 +202,49 @@
             <option value="easylanguage">EasyLanguage</option>
             <option value="pine">PineScript</option>
           </select>
-          <button id="btn-export">Export code</button>
+          <button id="btn-export">Review reference export</button>
           <span id="exp-status" class="muted"></span>
         </div>
         <pre id="exp-code" style="display:none; margin-top:12px; max-height:300px"></pre>
         <div id="bt-results"></div>
+        <details id="experiment-panel"><summary>Frozen development &amp; final test</summary>
+          <p class="muted">Reserve a final period before choosing a strategy. Searches here use only earlier candles. Committing one candidate freezes this experiment permanently. This does not prove that the data were never inspected elsewhere.</p>
+          <div class="row"><label>Final test starts (UTC)<input id="experiment-start" type="datetime-local"></label><label>Minimum development trades<input id="experiment-min-dev" type="number" min="1" value="10"></label><label>Minimum final-test trades<input id="experiment-min-final" type="number" min="1" value="10"></label></div>
+          <div class="row"><label>Previously inspected or tested these data?<select id="experiment-exposure"><option value="">Select disclosure</option><option value="true">Yes / unsure</option><option value="false">No, to my knowledge</option></select></label><button id="experiment-create">Freeze dataset, costs &amp; split</button></div>
+          <div class="row"><label>Saved experiment<select id="experiment-select"></select></label><button id="experiment-refresh" class="secondary">Refresh experiments</button></div>
+          <div class="row"><button id="experiment-backup" class="secondary">Download experiment backup</button><label for="experiment-restore">Restore experiment backup</label><input id="experiment-restore" type="file" accept=".json,application/json"></div>
+          <p id="experiment-context" class="muted"></p>
+          <div class="row"><div id="experiment-jobs" aria-live="polite"></div><button id="experiment-trial">Test current strategy on development data</button><label>Candidates<input id="experiment-count" type="number" min="1" max="2000" value="20"></label><label>Seed<input id="experiment-seed" type="number" min="0" value="42"></label><button id="experiment-search">Start saved search</button><button id="experiment-stop" hidden>Pause after current candidate</button></div>
+          <div id="experiment-status" role="status"></div><div id="experiment-trials"></div><div id="experiment-final"></div>
+        </details>
+        <details open><summary>Saved research · survives restarts</summary>
+          <p class="muted">Each saved run includes its dataset snapshot, strategy, account settings and result. Replay uses the archived data and requires the matching engine build.</p>
+          <div class="row"><button id="research-refresh" class="secondary">Refresh saved runs</button><label for="research-restore">Restore research backup</label><input id="research-restore" type="file" accept=".json,application/json"></div>
+          <div id="research-status" role="status"></div><div id="research-runs"></div>
+        </details>
+        <details id="evolution-workspace"><summary>Resume saved genetic searches</summary>
+          <p class="muted">Each step evaluates one generation using frozen data and settings. These are exploratory results, not an untouched final test. Closing the page does not cancel an active generation.</p>
+          <p>New searches freeze the selected market, current execution settings and generator building blocks. Creating a job does not evaluate it.</p>
+          <div class="row"><label>Seed<input id="evolution-seed" type="number" min="0" step="1" value="42"></label><label>Population<input id="evolution-population" type="number" min="2" step="1" value="50"></label><label>Breeding rounds<input id="evolution-generations" type="number" min="0" step="1" value="20"></label><label>Minimum trades<input id="evolution-min-trades" type="number" min="1" step="1" value="10"></label></div>
+          <p class="muted">Each round follows the initial population evaluation. Crossover probability: 80%; mutation: 30%; elite candidates: up to 5.</p>
+          <button id="evolution-create">Create or recover saved search</button>
+          <button id="evolution-discard" class="secondary">Clear pending creation request</button>
+          <button id="evolution-refresh" class="secondary">Refresh saved searches</button>
+          <label>Restore saved search archive<input id="evolution-restore" type="file" accept=".json,application/json"></label>
+          <p id="evolution-status" role="status" aria-live="polite"></p>
+          <div id="evolution-list"></div>
+          <div id="evolution-report" style="min-width:0;overflow-wrap:anywhere"></div>
+        </details>
+        <details id="paper-workspace"><summary>Compare with paper trading</summary>
+          <p>Compare closed paper trades with an archived backtest. Matching trades do not establish profitability or readiness for live trading. Open positions and partial fills are not covered.</p>
+          <div class="row"><label>Reference backtest<select id="paper-run"></select></label><button id="paper-refresh" class="secondary">Refresh comparisons</button></div>
+          <p class="muted">Import the normalized SqxLabs paper-trade JSON format (maximum 4 MiB). Broker exports must first be converted with explicit trade mappings, matching market, currencies, lot units and observation period. Do not upload a research backup here.</p>
+          <div class="row"><label>Paper-trade file<input id="paper-source" type="file" accept=".json,application/json"></label></div>
+          <p>Maximum allowed absolute differences. Zero requires exact agreement.</p>
+          <div class="row"><label>Time (milliseconds)<input id="paper-time" type="number" min="0" step="1" value="0"></label><label>Price (quote units)<input id="paper-price" type="number" min="0" step="any" value="0"></label><label>Size (lots)<input id="paper-size" type="number" min="0" step="any" value="0"></label><label>Money (account currency)<input id="paper-money" type="number" min="0" step="any" value="0"></label><button id="paper-import">Compare and save</button></div>
+          <div class="row"><label>Restore comparison backup<input id="paper-restore" type="file" accept=".json,application/json"></label></div>
+          <div id="paper-status" role="status"></div><div id="paper-report"></div><div id="paper-list"></div>
+        </details><details><summary>Run history · this browser session</summary><p class="muted">Download a run report to keep its inputs and results. Repeats use the currently loaded market data; compare data fingerprints before interpreting changes.</p><div id="run-history"></div></details>
       </div>
       <div class="card" style="margin-top:18px">
         <h2>Strategy project</h2>
@@ -172,13 +259,13 @@
         </div>
       </div>
       <div class="card" style="margin-top:18px">
-        <h2>Indicator catalog</h2>
+        <h2>Indicator reference</h2><label for="catalog-search">Find an indicator</label><input type="search" id="catalog-search" placeholder="Search RSI, volatility, trend…">
         <div id="catalog"></div>
       </div>
     </section>
     <section id="tab-optimizer" class="tab">
       <div class="card">
-        <h2>Generator settings</h2>
+        <h2>Discover strategies</h2><p class="muted">Choose the search space, generate candidates, then evaluate them on unseen data. Generated results are not robustness certificates.</p>
         <div class="row">
           <label class="muted">Min cond.</label>
           <input type="number" id="gen-minc" value="1" min="1" max="6">
@@ -205,22 +292,24 @@
         <div class="row">
           <label class="muted">Type</label>
           <select id="opt-kind">
-            <option value="simple">Simple (generate + rank)</option>
+            <option value="simple">Generate and rank candidates</option>
             <option value="walk-forward">Walk-forward</option>
             <option value="wf-matrix">Walk-forward matrix</option>
           </select>
-          <label class="muted">Candidates</label>
-          <input type="number" id="opt-count" value="200" min="10" max="2000">
+          <label for="opt-count" class="muted">Candidates (per window for walk-forward; maximum 200)</label>
+          <input type="number" id="opt-count" value="200" min="1" max="2000">
           <label class="muted">Windows</label>
           <input type="number" id="opt-windows" value="5" min="2" max="12">
-          <label class="muted">OOS</label>
-          <input type="number" id="opt-oos" value="0.3" min="0.1" max="0.6" step="0.05">
+          <label class="muted">Out-of-sample share (0.05–0.5)</label>
+          <input type="number" id="opt-oos" value="0.3" min="0.05" max="0.5" step="0.05">
+          <label for="opt-min-is">Minimum training trades</label><input id="opt-min-is" type="number" min="1" value="10">
+          <label for="opt-min-oos">Minimum test trades per window</label><input id="opt-min-oos" type="number" min="1" value="10">
           <button id="opt-run">Run optimizer</button>
         </div>
         <div id="opt-results" class="muted">Pick a type and run. Walk-forward evaluates out-of-sample windows; the matrix sweeps windows × OOS.</div>
       </div>
       <div class="card" style="margin-top:18px">
-        <h2>Generate &amp; rank</h2>
+        <h2>Reproducible quick search</h2>
         <div class="row">
           <label class="muted">Count</label>
           <input type="number" id="count" value="200" min="1" max="2000">
@@ -245,7 +334,7 @@
     <section id="tab-retester" class="tab">
       <div class="card">
         <h2>Retester — robustness</h2>
-        <p class="muted" style="margin-top:0;">Uses the strategy in the Builder tab. Runs what-if cost scenarios and Monte Carlo trade manipulation.</p>
+        <p class="muted" style="margin-top:0;">Uses the current Builder draft and the assumptions shown above. These tests explore sensitivity; passing a test does not guarantee live performance.</p>
         <div class="row">
           <button id="btn-robust">Run what-if + Monte Carlo</button>
           <span id="rob-status" class="muted"></span>
@@ -259,32 +348,34 @@
         <div class="row">
           <span class="muted" id="res-count">0 strategies</span>
           <span class="muted" id="res-overview"></span>
-          <button id="res-portfolio">Combine top 5 → portfolio</button>
-          <button id="res-clear" style="background:#3a2430">Clear</button>
+          <button id="res-portfolio">Build portfolio from selection</button>
+          <button id="compare-selected" class="secondary">Compare selected</button><button id="res-clear" style="background:#3a2430">Clear databank…</button>
           <a id="res-csv" href="/api/databank.csv" download="databank.csv" class="muted" style="text-decoration:underline">Download CSV</a>
         </div>
         <div class="row">
           <input type="text" id="res-filter" placeholder="filter name" style="width:140px">
           <input type="number" id="res-minpf" placeholder="min PF" step="0.1" style="width:90px">
         </div>
-        <div id="res-grid" class="muted">Run the Optimizer or Generate to fill the databank.</div>
+        <p class="muted">Historical candidates may use different datasets or costs. Compare recorded metrics as research evidence, not as a validated ranking. New portfolio runs use the current assumptions above.</p><div id="comparison"></div><div id="res-grid" class="muted">Run the Optimizer or Generate to fill the databank.</div>
         <div id="res-portfolio-out" class="muted" style="margin-top:12px"></div>
       </div>
     </section>
     <section id="tab-data" class="tab">
       <div class="card">
         <h2>Data Manager — symbols</h2>
-        <div id="dm-list" class="muted">Loading…</div>
+        <div id="dm-list" class="muted">Loading…</div><h3>Selected dataset quality</h3><pre id="data-quality-output">Select a dataset to inspect quality.</pre>
       </div>
       <div class="card" style="margin-top:18px">
         <h2>Import CSV</h2>
         <div class="row">
           <label class="muted">Symbol</label>
           <input type="text" id="dm-symbol" value="EURUSD" style="width:120px">
+          <label for="dm-timeframe">Candle timeframe</label><select id="dm-timeframe"><option>M1</option><option>M5</option><option>M15</option><option>M30</option><option>H1</option><option>H4</option><option>D1</option><option>W1</option><option>MN1</option></select>
           <button id="dm-import">Import</button>
           <span id="dm-status" class="muted"></span>
         </div>
-        <textarea id="dm-csv" placeholder="timestamp,open,high,low,close,volume&#10;1700000000,1.10,1.11,1.09,1.105,100"></textarea>
+        <details><summary>Explicit UTC trading calendar (optional)</summary><p>Use weekly sessions and date overrides for holidays or daylight-saving changes. No calendar means gaps remain unclassified. Timestamps must be UTC candle-open times in Unix seconds.</p><textarea id="dm-calendar" aria-label="UTC calendar JSON" placeholder='{"name":"My broker UTC","weekly":[{"weekday":0,"start_minute":0,"end_minute":1440}],"date_overrides":{}}'></textarea></details>
+        <label for="dm-file">Choose a CSV file or paste its contents below</label><input type="file" id="dm-file" accept=".csv,text/csv"><pre id="csv-preview" hidden></pre><textarea id="dm-csv" placeholder="timestamp,open,high,low,close,volume&#10;1700000000,1.10,1.11,1.09,1.105,100"></textarea>
       </div>
       <div class="card" style="margin-top:18px">
         <h2>QuestDB</h2>
@@ -323,6 +414,7 @@
           <label class="muted">End</label><input type="number" id="ss-end" value="20" min="0" max="23" style="width:70px">
           <label><input type="checkbox" id="ss-eod"> EOD</label>
           <label><input type="checkbox" id="ss-fri"> Friday</label>
+          <label>Scheduled close (UTC)<input id="ss-close-time" type="time"></label>
           <button id="ss-save">Save session</button>
         </div>
       </div>
@@ -333,7 +425,7 @@
         <p class="muted" style="margin-top:0;">Build → retest → optimize on the selected symbol. The log shows what each task did.</p>
         <div class="row">
           <label class="muted">Count</label>
-          <input type="number" id="proj-count" value="300" min="50" max="2000">
+          <input type="number" id="proj-count" value="300" min="1" max="2000">
           <label class="muted">Keep</label>
           <input type="number" id="proj-keep" value="20" min="1" max="200">
           <button id="proj-run">Run pipeline</button>
@@ -354,7 +446,29 @@
           <label class="muted">Commission/lot</label>
           <input type="number" id="set-commission" value="0">
         </div>
-        <p class="muted">Applied to Builder backtests and Optimizer runs.</p>
+        <label><input type="checkbox" id="set-allow-gaps"> Allow unresolved data gaps for exploratory runs</label><p class="muted">Off by default. Inspect the dataset and calendar first. Acknowledging gaps does not repair missing data or validate the result.</p>
+        <h3>Candle execution assumption</h3>
+        <label for="set-intrabar">Order of prices within each OHLC candle</label>
+        <select id="set-intrabar"><option value="adverse_first">Adverse extreme first (side-aware)</option><option value="favorable_first">Favorable extreme first (side-aware)</option><option value="high_first">Open → high → low → close</option><option value="low_first">Open → low → high → close</option></select>
+        <p class="muted">Candles do not reveal the actual price sequence. Reports flag candles where the two OHLC paths differ. These scenarios are not mathematical worst/best bounds.</p>
+        <label><input type="checkbox" id="set-compare-paths"> Compare all four complete backtest scenarios (additional computation)</label>
+        <h3>Account and broker assumptions</h3>
+        <div class="row">
+          <label for="set-currency">Account currency</label><input id="set-currency" value="USD" maxlength="3" size="4">
+          <label for="set-leverage">Maximum leverage</label><input id="set-leverage" type="number" min="1" value="30">
+          <label for="set-stopout">Stop-out equity / margin</label><input id="set-stopout" type="number" min="0" max="1" step="0.05" value="0.5">
+          <label for="set-long-financing">Long financing / lot / day</label><input id="set-long-financing" type="number" step="0.01" value="0">
+          <label for="set-short-financing">Short financing / lot / day</label><input id="set-short-financing" type="number" step="0.01" value="0">
+        </div>
+        <p class="muted">These are simulation assumptions, not a broker specification. Financing is charged at UTC day boundaries; negative values are credits. Zero means financing is excluded.</p>
+        <details><summary>Volume rules and historical conversion rates</summary>
+          <div class="row"><label for="set-min-lots">Minimum lots</label><input id="set-min-lots" type="number" min="0.000001" step="0.01" value="0.01">
+          <label for="set-lot-step">Lot step</label><input id="set-lot-step" type="number" min="0.000001" step="0.01" value="0.01">
+          <label for="set-max-lots">Maximum lots</label><input id="set-max-lots" type="number" min="0.01" value="100"></div>
+          <label for="set-rates">Conversion observations (JSON)</label><textarea id="set-rates" style="height:90px">[]</textarea>
+          <p class="muted">For crosses: [{"time":1700000000000,"from":"JPY","to":"USD","rate":0.0067}]. Only observations available at that timestamp are used, for at most 24 hours. Direct account-currency pairs use the current execution or valuation price.</p>
+        </details>
+        <p class="muted">Applied to strategy simulations, discovery and portfolio evaluation. Orders exceeding margin or volume limits are rejected, not silently resized.</p>
         <h2 style="margin-top:18px">AI model</h2>
         <div id="set-ai" class="muted" style="font-size:12px;"></div>
         <div class="row" style="margin-top:10px">
@@ -388,7 +502,7 @@
     <section id="tab-assistant" class="tab">
       <div class="card">
         <h2>AI assistant</h2>
-        <div id="ai-status" class="muted" style="font-size:12px; margin-bottom:8px;"></div>
+        <div class="row"><button class="secondary" data-prompt="Explain the rules and execution assumptions of my current strategy">Explain my strategy</button><button class="secondary" data-prompt="Suggest robustness checks for my current strategy without changing it">Suggest validation checks</button></div><div id="ai-status" class="muted" style="font-size:12px; margin-bottom:8px;"></div>
         <div class="row">
           <input id="ai-q" type="text" placeholder="e.g. generate 50 strategies and analyse the best" style="flex:1">
           <button id="btn-ai">Ask</button>
@@ -453,14 +567,15 @@ async function refreshDataInfo() {
 async function loadInfo() {
   const ds = await getJSON("/api/datasources");
   const sel = document.getElementById("symbol-select");
+  const previous=sel.value;
   sel.innerHTML = "";
   (ds.symbols || []).forEach(function(s) {
     var opt = document.createElement("option");
-    opt.value = s.symbol;
-    opt.textContent = s.symbol + " (" + s.bars + " bars)";
+    opt.value = s.key;
+    opt.textContent = s.symbol + " · " + s.timeframe + " (" + s.bars + " bars)";
     sel.appendChild(opt);
   });
-  if (ds.default) { sel.value = ds.default; }
+  if (Array.from(sel.options).some(o=>o.value===previous)) {sel.value=previous;} else if(ds.default){sel.value=ds.default;}
   sel.onchange = refreshDataInfo;
   await refreshDataInfo();
 }
@@ -636,6 +751,13 @@ function renderMmList() {
   renderMmParams();
 }
 
+function utcCloseMinute(id) {
+  const value = document.getElementById(id).value;
+  if (!value) return null;
+  const parts = value.split(":").map(Number);
+  return parts[0] * 60 + parts[1];
+}
+
 function buildStrategyJSON() {
   const sl = parseFloat(document.getElementById("aw-sl").value);
   const pt = parseFloat(document.getElementById("aw-pt").value);
@@ -651,6 +773,7 @@ function buildStrategyJSON() {
     trading_options: {
       exit_at_end_of_day: document.getElementById("aw-eod").checked,
       exit_on_friday: document.getElementById("aw-friday").checked,
+      session_close_utc_minute: utcCloseMinute("aw-close-time"),
       max_trades_per_day: (function() { var v = parseInt(document.getElementById("aw-maxtrades").value); return v > 0 ? v : null; })(),
       limit_hours: null
     }
@@ -691,7 +814,7 @@ async function runBacktest() {
   status.textContent = "Running...";
   let body;
   try {
-    var obj = JSON.parse(document.getElementById("strategy").value);
+    var obj = readStrategy();
     obj.symbol = selectedSymbol();
     Object.assign(obj, settings());
     body = JSON.stringify(obj);
@@ -700,7 +823,7 @@ async function runBacktest() {
   try { d = await postJSON("/api/backtest", body); }
   catch (e) { status.textContent = "Error"; return; }
   status.textContent = "";
-  if (d.error) { out.innerHTML = "<span class=\"neg\">" + d.error + "</span>"; return; }
+  if (d.error) { out.innerHTML = "<span class=\"neg\">" + escapeHtml(d.error) + "</span>"; return; }
   const m = d.metrics;
   const rows = [
     ["Net profit", fmt(m.net_profit, 2)],
@@ -725,20 +848,25 @@ async function runBacktest() {
 
 document.getElementById("strategy").value = document.getElementById("default-strategy").textContent.trim();
 
+function researchNotice(context) {
+  if(!context)return "";
+  return (context.data_gaps_acknowledged ? "Data gaps explicitly allowed. " : "") + context.scope;
+}
 document.getElementById("btn-generate").onclick = async function() {
   const count = Number(document.getElementById("count").value);
   const seed = Number(document.getElementById("seed").value);
   const box = document.getElementById("gen-results");
   box.textContent = "Generating...";
-  const body = Object.assign({ count: count, seed: seed, symbol: selectedSymbol() }, settings(), genSettings());
+  const inputs=generatorInputs(box);if(!inputs)return;
+  const body = Object.assign({ count: count, seed: seed, symbol: selectedSymbol() }, inputs);
   const d = await postJSON("/api/generate", JSON.stringify(body));
-  if (d.error) { box.innerHTML = "<span class=\"neg\">" + d.error + "</span>"; return; }
+  if (d.error) { box.innerHTML = "<span class=\"neg\">" + escapeHtml(d.error) + "</span>"; return; }
   let rows = "<table><tr><th>Name</th><th>Profit factor</th><th>Net profit</th><th>Trades</th><th>DD %</th></tr>";
   d.results.forEach(function(r) {
-    rows += "<tr><td>" + r.name + "</td><td class=\"" + cls(r.profit_factor - 1) + "\">" + fmt(r.profit_factor, 2) + "</td><td class=\"" + cls(r.net_profit) + "\">" + fmt(r.net_profit, 2) + "</td><td>" + fmt(r.trades, 0) + "</td><td>" + fmt(r.dd_pct, 2) + "</td></tr>";
+    rows += "<tr><td>" + escapeHtml(r.name) + "</td><td class=\"" + cls(r.profit_factor - 1) + "\">" + fmt(r.profit_factor, 2) + "</td><td class=\"" + cls(r.net_profit) + "\">" + fmt(r.net_profit, 2) + "</td><td>" + fmt(r.trades, 0) + "</td><td>" + fmt(r.dd_pct, 2) + "</td></tr>";
   });
   rows += "</table>";
-  box.innerHTML = rows;
+  box.innerHTML = "<p>"+escapeHtml(researchNotice(d.research_context))+"</p>"+rows;
   refreshDatabank();
   box.querySelectorAll("tr").forEach(function(tr, i) {
     if (i === 0) return;
@@ -750,7 +878,7 @@ document.getElementById("btn-generate").onclick = async function() {
     btn.onclick = function() {
       const r = d.results[i - 1];
       if (!r || !r.strategy) return;
-      document.getElementById("strategy").value = JSON.stringify(r.strategy, null, 2);
+      setStrategy(r.strategy, "Opened candidate");
       document.querySelector('.nav-btn[data-tab="builder"]').click();
     };
     td.appendChild(btn);
@@ -773,10 +901,11 @@ async function refreshProjects() {
 document.getElementById("prj-save").onclick = async function() {
   const name = document.getElementById("prj-name").value.trim();
   let obj;
-  try { obj = JSON.parse(document.getElementById("strategy").value); }
-  catch (e) { alert("Invalid strategy JSON"); return; }
+  try { obj = readStrategy(); }
+  catch (e) { alert("Invalid strategy: " + e.message); return; }
   const d = await postJSON("/api/project/save", JSON.stringify({ name: name, strategy: obj }));
   if (d.error) { alert(d.error); return; }
+  markStrategySaved(obj);
   await refreshProjects();
 };
 document.getElementById("prj-load").onclick = async function() {
@@ -784,28 +913,29 @@ document.getElementById("prj-load").onclick = async function() {
   if (!name) return;
   const d = await getJSON("/api/project/load?name=" + encodeURIComponent(name));
   if (d.error) { alert(d.error); return; }
-  document.getElementById("strategy").value = JSON.stringify(d, null, 2);
+  setStrategy(d, "Loaded saved strategy");
 };
 refreshProjects();
 
 document.getElementById("btn-export").onclick = async function() {
   const st = document.getElementById("exp-status");
   const pre = document.getElementById("exp-code");
-  st.textContent = "Exporting...";
+  st.textContent = "Checking export limitations...";
+  pre.textContent = ""; pre.style.display = "none";
   let obj;
-  try { obj = JSON.parse(document.getElementById("strategy").value); }
-  catch (e) { st.textContent = "Invalid strategy JSON"; return; }
+  try { obj = readStrategy(); }
+  catch (e) { st.textContent = "Invalid strategy: " + e.message; return; }
   const engine = document.getElementById("exp-engine").value;
   const d = await postJSON("/api/export", JSON.stringify({ engine: engine, strategy: obj }));
-  if (d.error) { st.textContent = d.error; return; }
-  st.textContent = "";
+  if (d.error) { st.textContent = "Export blocked: " + d.error; return; }
+  st.textContent = (d.limitations || []).join(" ");
   pre.style.display = "block";
   pre.textContent = d.code;
   const blob = new Blob([d.code], { type: "text/plain" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "strategy." + (engine === "mql5" || engine === "mql4" ? "mq5" : engine === "ninjascript" ? "cs" : engine === "easylanguage" ? "els" : "txt");
-  a.textContent = " Download";
+  a.download = "strategy." + (engine === "mql5" ? "mq5" : engine === "mql4" ? "mq4" : engine === "ninjascript" ? "cs" : engine === "easylanguage" ? "els" : "txt");
+  a.textContent = d.status === "documentation" ? " Download rules" : " Download reference draft";
   a.style.marginLeft = "10px";
   st.appendChild(a);
 };
@@ -835,18 +965,36 @@ async function refreshAiStatus() {
   } catch (e) {}
 }
 
+let assistantBusy=false;
 async function askAssistant() {
+  if(assistantBusy)return;
   const q = document.getElementById("ai-q").value.trim();
   if (!q) return;
   const out = document.getElementById("ai-answer");
+  assistantBusy=true;document.getElementById("btn-ai").disabled=true;
   out.textContent = "Thinking…";
   const sym = document.getElementById("symbol-select").value;
   try {
-    const d = await postJSON("/api/assistant", JSON.stringify({ question: q, symbol: sym }));
-    out.textContent = d.answer || d.error || JSON.stringify(d);
+    const d = await postJSON("/api/assistant", JSON.stringify(Object.assign({}, settings(), { question: q, symbol: sym })));
+    out.textContent = d.error ? "Error: " + d.error + (d.answer ? "\n\nAssistant response (research unresolved):\n" + d.answer : "") : d.answer || JSON.stringify(d);
+    if(Array.isArray(d.candidate_evaluations)){
+      const rows=d.candidate_evaluations;
+      out.textContent += "\n\nGeneration evidence: " + rows.length + " candidates; " + rows.filter(r=>r.outcome?.status==='evaluated').length + " evaluated, " + rows.filter(r=>r.outcome?.status==='invalid').length + " invalid, " + rows.filter(r=>r.outcome?.status==='not_evaluated').length + " not evaluated. These are generation summaries, not independent validation.";
+    }
+    if(Array.isArray(d.detail_evaluations))out.textContent += "\nDetails reruns recorded: " + d.detail_evaluations.length + ". Repeated evaluations are not independent evidence.";
+    if(d.archive?.run_id){
+      out.textContent += "\nSaved research: " + d.archive.run_id + ". Open Builder → Saved research to download the complete backup. Replay is unavailable for AI summaries.";
+      if(typeof refreshResearchRuns==='function')await refreshResearchRuns();
+    }else if(d.candidate_evaluations?.length){
+      out.textContent += "\nNo archive receipt was returned. These outcomes are not confirmed saved.";
+    }
+    if(d.research_context){
+      const c=d.research_context.config;
+      out.textContent += "\n\nResearch scope: " + d.research_context.scope + "\nAssumptions: deposit " + c.initial_deposit + " " + c.account.currency + ", spread " + c.spread_points + " points, slippage " + c.slippage_points + " points, commission " + c.commission_per_lot + "/lot, maximum leverage " + c.account.max_leverage + ":1. " + d.research_context.backtests_attempted + " backtests attempted.";
+    }
   } catch (e) {
     out.textContent = "Error: " + e;
-  }
+  } finally {assistantBusy=false;document.getElementById("btn-ai").disabled=false;}
 }
 document.getElementById("btn-ai").onclick = askAssistant;
 
@@ -1022,27 +1170,22 @@ document.getElementById("ai-text-only").onchange = function() {
 renderAiProviderSelect();
 selectProfile("Groq");
 refreshAiStatus();
-document.getElementById("aw-backtest").onclick = function() {
-  document.getElementById("strategy").value = buildStrategyJSON();
-  runBacktest();
-};
-
 document.getElementById("pf-build").onclick = async function() {
   const box = document.getElementById("pf-results");
   box.textContent = "Building...";
-  const d = await postJSON("/api/portfolio", JSON.stringify({
+  const d = await postJSON("/api/portfolio", JSON.stringify(Object.assign({},settings(),{
     count: Number(document.getElementById("pf-count").value),
     seed: Number(document.getElementById("pf-seed").value),
     symbol: selectedSymbol(),
     top: 12, min_k: 2, max_k: 4
-  }));
-  if (d.error) { box.innerHTML = "<span class=\"neg\">" + d.error + "</span>"; return; }
+  })));
+  if (d.error) { box.innerHTML = "<span class=\"neg\">" + escapeHtml(d.error) + "</span>"; return; }
   const m = d.metrics;
   let html = "<p class=\"muted\">" + d.components.length + " strategies · net " + fmt(m.net_profit, 2) + " · PF " + fmt(m.profit_factor, 2) + " · DD " + fmt(m.max_drawdown_pct, 2) + "% · Return/DD " + fmt(m.return_dd, 2) + "</p>";
   html += "<table><tr><th>Strategy</th><th>Weight</th><th>Net</th><th>DD %</th><th>Trades</th></tr>";
   d.components.forEach(function(c) { html += "<tr><td>" + c.name + "</td><td>" + fmt(c.weight, 2) + "</td><td>" + fmt(c.net_profit, 2) + "</td><td>" + fmt(c.max_drawdown_pct, 2) + "</td><td>" + fmt(c.trades, 0) + "</td></tr>"; });
   html += "</table>";
-  html += "<h2 style=\"margin-top:16px\">Correlation</h2><table>";
+  html += "<h2 style=\"margin-top:16px\">Correlation</h2><p>Undefined values are not evidence of diversification; flat returns or non-positive equity can make correlation unavailable.</p><table>";
   d.correlation.forEach(function(row) { html += "<tr>"; row.forEach(function(v) { html += "<td>" + fmt(v, 2) + "</td>"; }); html += "</tr>"; });
   html += "</table>";
   html += "<h2 style=\"margin-top:16px\">Portfolio equity</h2><div id=\"pf-chart\"></div>";
@@ -1055,37 +1198,44 @@ async function loadCatalog() {
   renderChips();
   renderEditor();
   renderMmList();
+  initializeWorkspace();
 }
 
 document.getElementById("proj-run").onclick = async function() {
   const box = document.getElementById("proj-log");
   box.textContent = "Running pipeline (build → retest → optimize)...";
+  const inputs=generatorInputs(box);if(!inputs)return;
   const body = Object.assign({
     count: Number(document.getElementById("proj-count").value),
     keep: Number(document.getElementById("proj-keep").value),
     symbol: selectedSymbol()
-  }, settings(), genSettings());
+  }, inputs);
   const d = await postJSON("/api/pipeline", JSON.stringify(body));
-  if (d.error) { box.textContent = d.error; return; }
-  box.textContent = "Databank: " + (d.databank || 0) + " strategies\n\n" + (d.log || []).join("\n");
+  const archiveNote=d.archive ? "\nReport archived: "+d.archive.run_id : "";
+  if(d.archive)refreshResearchRuns();
+  if (d.error) { box.textContent = d.error+archiveNote; return; }
+  box.textContent = researchNotice(d.research_context)+"\nDatabank: " + (d.databank || 0) + " strategies\n\n" + (d.log || []).join("\n")+archiveNote;
 };
 
 document.getElementById("opt-run").onclick = async function() {
   const box = document.getElementById("opt-results");
   box.textContent = "Running...";
+  const inputs=generatorInputs(box);if(!inputs)return;
   const body = Object.assign({
     kind: document.getElementById("opt-kind").value,
     count: Number(document.getElementById("opt-count").value),
     windows: Number(document.getElementById("opt-windows").value),
+    min_is_trades: Number(document.getElementById("opt-min-is").value),
+    min_oos_trades: Number(document.getElementById("opt-min-oos").value),
     oos: Number(document.getElementById("opt-oos").value),
     symbol: selectedSymbol()
-  }, settings(), genSettings());
+  }, inputs);
   const d = await postJSON("/api/optimize", JSON.stringify(body));
-  if (d.error) { box.innerHTML = "<span class=\"neg\">" + d.error + "</span>"; return; }
+  if (d.error) { box.innerHTML = "<span class=\"neg\">" + escapeHtml(d.error) + "</span>"; return; }
   if (d.kind === "simple") {
     let html = "<table><tr><th>Name</th><th>PF</th><th>Net</th><th>Trades</th><th>DD %</th></tr>";
     (d.results || []).forEach(function(r) {
-      html += "<tr><td>" + r.name + "</td><td>" + fmt(r.profit_factor, 2) + "</td><td>" + fmt(r.net_profit, 2) + "</td><td>" + fmt(r.trades, 0) + "</td><td>" + fmt(r.dd_pct, 2) + "</td></tr>";
+      html += "<tr><td>" + escapeHtml(r.name) + "</td><td>" + fmt(r.profit_factor, 2) + "</td><td>" + fmt(r.net_profit, 2) + "</td><td>" + fmt(r.trades, 0) + "</td><td>" + fmt(r.dd_pct, 2) + "</td></tr>";
     });
     html += "</table>";
     box.innerHTML = html;
@@ -1093,29 +1243,45 @@ document.getElementById("opt-run").onclick = async function() {
   } else if (d.kind === "walk-forward") {
     let html = "<table><tr><th>Windows</th><th>OOS trades</th><th>OOS net</th><th>OOS PF</th><th>OOS win %</th><th>OOS DD %</th></tr>";
     html += "<tr><td>" + d.windows + "</td><td>" + d.oos_trades + "</td><td>" + fmt(d.oos_net_profit, 2) + "</td><td>" + fmt(d.oos_profit_factor, 2) + "</td><td>" + fmt(d.oos_winning_pct, 1) + "</td><td>" + fmt(d.oos_max_dd_pct, 2) + "</td></tr></table>";
+    html += '<p><b>'+ (d.evidence_sufficient ? 'Trade-count criteria met' : 'Insufficient or incomplete evidence') + '</b> · '+d.candidates_attempted+' candidates attempted. This is not a robustness certificate or an untouched final holdout.</p>';
+    if(d.errors && d.errors.length)html+='<p class="neg">'+d.errors.map(escapeHtml).join('; ')+'</p>';
+    html+='<div class="table-scroll"><table><tr><th>Window</th><th>Test start</th><th>Test end</th><th>Starting equity</th><th>Final equity</th><th>Trades</th><th>Evidence</th></tr>'+(d.window_results||[]).map(w=>'<tr><td>'+(w.index+1)+'</td><td>'+day(w.test_start)+'</td><td>'+day(w.test_end)+'</td><td>'+fmt(w.starting_equity,2)+'</td><td>'+fmt(w.final_equity,2)+'</td><td>'+w.oos_trades+'</td><td>'+escapeHtml(w.reason)+'</td></tr>').join('')+'</table></div>';
     box.innerHTML = html;
   } else {
-    let html = "<table><tr><th>Windows</th><th>OOS</th><th>Net</th><th>PF</th><th>Trades</th><th>DD %</th></tr>";
+    let html = "<table><tr><th>Windows</th><th>OOS</th><th>Net</th><th>PF</th><th>Trades</th><th>DD %</th><th>Evidence</th></tr>";
     (d.rows || []).forEach(function(r) {
       var a = Math.min(0.55, Math.abs(r.net) / 4000 + 0.08).toFixed(2);
       var bg = r.net > 0 ? "rgba(52,201,142," + a + ")" : "rgba(255,107,107," + a + ")";
-      html += "<tr style=\"background:" + bg + "\"><td>" + r.windows + "</td><td>" + fmt(r.oos, 2) + "</td><td>" + fmt(r.net, 2) + "</td><td>" + fmt(r.pf, 2) + "</td><td>" + r.trades + "</td><td>" + fmt(r.dd_pct, 2) + "</td></tr>";
+      html += "<tr style=\"background:" + bg + "\"><td>" + r.windows + "</td><td>" + fmt(r.oos, 2) + "</td><td>" + fmt(r.net, 2) + "</td><td>" + fmt(r.pf, 2) + "</td><td>" + r.trades + "</td><td>" + fmt(r.dd_pct, 2) + "</td><td>" + (r.evidence_sufficient ? "Trade-count criteria met" : "Insufficient evidence") + "</td></tr>";
     });
-    html += "</table>";
+    html += "</table><p>Matrix cells are additional research trials; selecting the best cell does not create an untouched holdout.</p>";
     box.innerHTML = html;
   }
+  const notice=document.createElement("p");notice.textContent=researchNotice(d.research_context);box.prepend(notice);
 };
 
+function parseGeneratorRanges(text) {
+  const ranges=[],seen=new Set();
+  const number='[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?';
+  const pattern=new RegExp('^([A-Za-z0-9_]+)\\.([A-Za-z0-9_]+)\\s*=\\s*('+number+')\\s*\\.\\.\\s*('+number+')$');
+  text.split('\n').forEach((raw,index)=>{
+    const line=raw.trim();if(!line)return;
+    const match=line.match(pattern);
+    if(!match)throw new Error('Parameter line '+(index+1)+': use Indicator.parameter = min..max.');
+    const min=Number(match[3]),max=Number(match[4]),key=match[1]+'.'+match[2];
+    if(!Number.isFinite(min)||!Number.isFinite(max)||min>max)throw new Error('Parameter line '+(index+1)+': require finite min <= max.');
+    if(seen.has(key))throw new Error('Parameter line '+(index+1)+': duplicate '+key+'.');
+    seen.add(key);ranges.push({indicator:match[1],param:match[2],min,max});
+  });
+  return ranges;
+}
+function generatorInputs(out) {
+  try{return Object.assign({},settings(),genSettings());}
+  catch(error){out.textContent='Invalid research settings: '+error.message;return null;}
+}
 function genSettings() {
-  var g = function(id, d) { var el = document.getElementById(id); var v = el ? parseFloat(el.value) : NaN; return isNaN(v) ? d : v; };
-  var ranges = [];
-  var box = document.getElementById("gen-ranges");
-  if (box) {
-    box.value.split("\n").forEach(function(line) {
-      var m = line.trim().match(/^([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\s*=\s*(-?[0-9.]+)\s*\.\.\s*(-?[0-9.]+)$/);
-      if (m) ranges.push({ indicator: m[1], param: m[2], min: parseFloat(m[3]), max: parseFloat(m[4]) });
-    });
-  }
+  const g=function(id,defaultValue){const el=document.getElementById(id);if(!el)return defaultValue;const text=el.value.trim(),value=Number(text);if(!text||!Number.isFinite(value))throw new Error('Enter a finite number for '+(el.labels?.[0]?.textContent.trim()||id)+'.');return value;};
+  const ranges=parseGeneratorRanges(document.getElementById("gen-ranges")?.value||'');
   return {
     min_conditions: g("gen-minc", 1), max_conditions: g("gen-maxc", 3),
     sl_min: g("gen-slmin", 0), sl_max: g("gen-slmax", 200),
@@ -1146,7 +1312,7 @@ function renderResults() {
   }
   if (!box) return;
   if (!RESULTS.length) { box.innerHTML = "<p class=\"muted\">Run the Optimizer or Generate to fill the databank.</p>"; return; }
-  var cols = [["name","Name"],["profit_factor","PF"],["net_profit","Net"],["trades","Trades"],["dd_pct","DD %"]];
+  var cols = [["name","Strategy"],["profit_factor","Profit factor"],["net_profit","Net profit"],["trades","Trades"],["dd_pct","Drawdown %"]];
   var fname = (document.getElementById("res-filter") ? document.getElementById("res-filter").value : "").toLowerCase();
   var minpfEl = document.getElementById("res-minpf");
   var minpf = minpfEl ? (parseFloat(minpfEl.value) || 0) : 0;
@@ -1164,7 +1330,7 @@ function renderResults() {
   html += "<th></th></tr>";
   order.forEach(function(i) {
     var r = RESULTS[i];
-    html += "<tr><td>" + r.name + "</td><td>" + fmt(r.profit_factor, 2) + "</td><td>" + fmt(r.net_profit, 2) + "</td><td>" + r.trades + "</td><td>" + fmt(r.dd_pct, 2) + "</td><td><button data-ri=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">Use</button> <button data-exp=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">MQL5</button> <button data-rob=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">Robust</button> <button data-ana=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">Analyze</button></td></tr>";
+    html += "<tr><td>" + escapeHtml(r.name) + "</td><td>" + fmt(r.profit_factor, 2) + "</td><td>" + fmt(r.net_profit, 2) + "</td><td>" + r.trades + "</td><td>" + fmt(r.dd_pct, 2) + "</td><td><button data-ri=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">Open in Builder</button> <button data-exp=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">Review MQL5 draft</button> <button data-rob=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">Validate</button> <button data-ana=\"" + i + "\" style=\"padding:4px 9px;font-size:12px\">Analyze</button></td></tr>";
   });
   html += "</table>";
   box.innerHTML = html;
@@ -1175,22 +1341,20 @@ function renderResults() {
     b.onclick = function() {
       var r = RESULTS[Number(b.dataset.ri)];
       if (!r || !r.strategy) return;
-      document.getElementById("strategy").value = JSON.stringify(r.strategy, null, 2);
+      setStrategy(r.strategy, "Opened candidate");
       document.querySelector('.nav-btn[data-tab="builder"]').click();
-      if (typeof runBacktest === "function") runBacktest();
+      announce("Candidate opened. Review the rules and assumptions before running.");
     };
   });
   box.querySelectorAll("button[data-exp]").forEach(function(b) {
     b.onclick = async function() {
       var r = RESULTS[Number(b.dataset.exp)];
       if (!r || !r.strategy) return;
-      var d = await postJSON("/api/export", JSON.stringify({ engine: "mql5", strategy: r.strategy }));
-      if (d.error) { alert(d.error); return; }
-      var blob = new Blob([d.code], { type: "text/plain" });
-      var a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = (r.name || "strategy") + ".mq5";
-      a.click();
+      setStrategy(r.strategy, "Opened candidate for export review");
+      document.querySelector('.nav-btn[data-tab="builder"]').click();
+      document.getElementById("exp-engine").value = "mql5";
+      await document.getElementById("btn-export").onclick();
+      document.getElementById("exp-status").scrollIntoView({block:"center"});
     };
   });
   box.querySelectorAll("button[data-rob]").forEach(function(b) {
@@ -1198,13 +1362,10 @@ function renderResults() {
       var r = RESULTS[Number(b.dataset.rob)];
       if (!r || !r.strategy) return;
       var out = document.getElementById("res-portfolio-out");
-      out.textContent = "Running robustness for " + r.name + "...";
+      out.textContent = "Running robustness for " + escapeHtml(r.name) + "...";
       out.scrollIntoView({ behavior: "smooth", block: "start" });
-      var body = Object.assign({}, r.strategy, { symbol: selectedSymbol() }, settings());
-      var d = await postJSON("/api/robustness", JSON.stringify(body));
-      if (d.error) { out.textContent = d.error; return; }
-      var m = d.mc || {};
-      out.innerHTML = "<b>Robustness " + r.name + "</b>: " + (d.trades || 0) + " trades · MC net p5 " + fmt(m.net_p5, 2) + " / p50 " + fmt(m.net_p50, 2) + " / p95 " + fmt(m.net_p95, 2) + " · losing " + fmt(m.losing_pct, 1) + "%";
+      var d = await requestRobustness(r.strategy);
+      out.innerHTML = robustnessQuickSummary(d,r.name);
       out.scrollIntoView({ behavior: "smooth", block: "start" });
     };
   });
@@ -1213,7 +1374,7 @@ function renderResults() {
       var r = RESULTS[Number(b.dataset.ana)];
       if (!r || !r.strategy) return;
       var out = document.getElementById("res-portfolio-out");
-      out.textContent = "Analyzing " + r.name + "...";
+      out.textContent = "Analyzing " + escapeHtml(r.name) + "...";
       out.scrollIntoView({ behavior: "smooth", block: "start" });
       var body = Object.assign({}, r.strategy, { symbol: selectedSymbol() }, settings());
       var d = await postJSON("/api/analyze", JSON.stringify(body));
@@ -1221,14 +1382,14 @@ function renderResults() {
       out.innerHTML = "";
       var pre = document.createElement("pre");
       pre.style.maxHeight = "420px";
-      pre.textContent = d.markdown || "";
+      pre.textContent = researchNotice(d.research_context)+"\n\n"+(d.markdown || "");
       out.appendChild(pre);
       out.scrollIntoView({ behavior: "smooth", block: "start" });
     };
   });
 }
 var resClear = document.getElementById("res-clear");
-if (resClear) resClear.onclick = async function() { await postJSON("/api/databank/clear", "{}"); await refreshDatabank(); };
+if (resClear) resClear.onclick = async function() { if (!confirm("Clear all strategies from the databank? Download the CSV first if you need a copy. This cannot be undone.")) return; await postJSON("/api/databank/clear", "{}"); await refreshDatabank(); };
 ["res-filter", "res-minpf"].forEach(function(id) {
   var el = document.getElementById(id);
   if (el) el.oninput = function() { renderResults(); };
@@ -1237,7 +1398,7 @@ var resPortfolio = document.getElementById("res-portfolio");
 if (resPortfolio) resPortfolio.onclick = async function() {
   var out = document.getElementById("res-portfolio-out");
   out.textContent = "Combining...";
-  var d = await postJSON("/api/portfolio/databank", JSON.stringify({ symbol: selectedSymbol(), top: 5 }));
+  var d = await postJSON("/api/portfolio/databank", JSON.stringify(Object.assign({},settings(),{ symbol: selectedSymbol(), top: 5 })));
   if (d.error) { out.textContent = d.error; return; }
   var m = d.metrics || {};
   out.innerHTML = "<b>Portfolio</b> (" + (d.components || []).join(", ") + "): net " + fmt(m.net_profit, 2) + ", PF " + fmt(m.profit_factor, 2) + ", DD% " + fmt(m.max_drawdown_pct, 2) + ", trades " + fmt(m.number_of_trades, 0) + "<div id=\"res-portfolio-chart\" style=\"height:200px; margin-top:12px\"></div>";
@@ -1245,8 +1406,36 @@ if (resPortfolio) resPortfolio.onclick = async function() {
 };
 
 function settings() {
-  var g = function(id, d) { var el = document.getElementById(id); var v = el ? parseFloat(el.value) : NaN; return isNaN(v) ? d : v; };
-  return { deposit: g("set-deposit", 10000), spread: g("set-spread", 0), slippage: g("set-slippage", 0), commission: g("set-commission", 0) };
+  const g=function(id,defaultValue){const el=document.getElementById(id);if(!el)return defaultValue;const text=el.value.trim(),value=Number(text);if(!text||!Number.isFinite(value))throw new Error('Enter a finite number for '+(el.labels?.[0]?.textContent.trim()||id)+'.');return value;};
+  return { deposit: g("set-deposit", 10000), spread: g("set-spread", 0), slippage: g("set-slippage", 0), commission: g("set-commission", 0), intrabar_policy: document.getElementById("set-intrabar").value, compare_paths: document.getElementById("set-compare-paths").checked, allow_data_gaps: document.getElementById("set-allow-gaps").checked, account: {
+    currency: document.getElementById("set-currency").value.trim().toUpperCase(),
+    max_leverage: g("set-leverage", NaN), stop_out_ratio: g("set-stopout", NaN),
+    min_lots: g("set-min-lots", NaN), lot_step: g("set-lot-step", NaN), max_lots: g("set-max-lots", NaN),
+    long_financing_per_lot: g("set-long-financing", NaN), short_financing_per_lot: g("set-short-financing", NaN),
+    conversion_rates: JSON.parse(document.getElementById("set-rates").value)
+  } };
+}
+
+function robustnessArchiveNotice(d) {
+  return d.archive && d.archive.run_id ? '<p class="muted">Saved research run: '+escapeHtml(d.archive.run_id)+'. Open Saved research runs to inspect, back up or replay this report.</p>' : '';
+}
+async function requestRobustness(strategy) {
+  var body;
+  try { body=Object.assign({},strategy,{symbol:selectedSymbol()},settings()); }
+  catch(e) { return {error:'Correct the simulation settings: '+e.message}; }
+  try { return await postJSON('/api/robustness',JSON.stringify(body)); }
+  catch(e) { return {error:'The response could not be received. The server may have completed and archived the stress test; refresh Saved research runs before retrying.'}; }
+}
+function robustnessQuickSummary(d,name) {
+  var html=robustnessArchiveNotice(d);
+  if(d.error)return html+'<p class="neg">'+escapeHtml(d.error)+'</p>';
+  html+='<p class="muted">'+escapeHtml(d.interpretation||'Exploratory stress test; not independent validation.')+'</p>';
+  if(d.data_gaps_acknowledged)html+='<p class="neg">Data gaps were allowed for this exploratory run.</p>';
+  var invalid=(d.what_if||[]).filter(function(row){return (row.errors||[]).length;});
+  invalid.forEach(function(row){html+='<p class="neg">Invalid cost scenario: '+escapeHtml(row.errors.join('; '))+'</p>';});
+  var m=d.mc||{};
+  if((m.errors||[]).length)return html+'<p class="neg">Monte Carlo unavailable: '+escapeHtml(m.errors.join('; '))+'</p>';
+  return html+'<b>Robustness '+escapeHtml(name)+'</b>: '+(d.trades||0)+' trades · MC net p5 '+fmt(m.net_p5,2)+' / p50 '+fmt(m.net_p50,2)+' / p95 '+fmt(m.net_p95,2)+' · losing '+fmt(m.losing_pct,1)+'%';
 }
 
 async function runRobustness() {
@@ -1255,19 +1444,22 @@ async function runRobustness() {
   out.innerHTML = "";
   st.textContent = "Running...";
   var obj;
-  try { obj = JSON.parse(document.getElementById("strategy").value); }
-  catch (e) { st.textContent = "Invalid strategy JSON"; return; }
-  obj.symbol = selectedSymbol();
-  Object.assign(obj, settings());
-  var d = await postJSON("/api/robustness", JSON.stringify(obj));
+  try { obj = readStrategy(); }
+  catch (e) { st.textContent = "Invalid strategy: " + e.message; return; }
+  var d = await requestRobustness(obj);
   st.textContent = "";
-  if (d.error) { out.innerHTML = "<p class=\"neg\">" + d.error + "</p>"; return; }
-  var html = "<h2 style=\"margin-top:16px\">What-if (spread / slippage / commission)</h2><table><tr><th>Spread</th><th>Slippage</th><th>Commission</th><th>Net</th><th>PF</th></tr>";
+  if (d.error) { out.innerHTML = robustnessArchiveNotice(d)+"<p class=\"neg\">" + escapeHtml(d.error) + "</p>"; return; }
+  var html = robustnessArchiveNotice(d)+"<p class=\"muted\">"+escapeHtml(d.interpretation||"")+"</p>";
+  if(d.data_gaps_acknowledged)html+="<p class=\"neg\">Data gaps were explicitly allowed for this exploratory run. Review Data quality before interpreting these results.</p>";
+  html += "<h2 style=\"margin-top:16px\">What-if (spread / slippage / commission)</h2><table><tr><th>Spread</th><th>Slippage</th><th>Commission</th><th>Net</th><th>PF</th></tr>";
   (d.what_if || []).forEach(function(w) {
+    if((w.errors||[]).length){html+="<tr><td>"+w.spread+"</td><td>"+w.slippage+"</td><td>"+w.commission+"</td><td colspan=\"2\">Invalid scenario: "+escapeHtml(w.errors.join("; "))+"</td></tr>";return;}
     html += "<tr><td>" + w.spread + "</td><td>" + w.slippage + "</td><td>" + w.commission + "</td><td class=\"" + cls(w.net_profit) + "\">" + fmt(w.net_profit, 2) + "</td><td>" + fmt(w.profit_factor, 2) + "</td></tr>";
   });
   html += "</table>";
   var m = d.mc || {};
+  if((m.errors||[]).length){out.innerHTML=html+"<p class=\"neg\">Monte Carlo unavailable: "+escapeHtml(m.errors.join("; "))+"</p>";return;}
+  html += "<p>Strictly profitable runs: "+fmt(m.positive_pct,1)+"% · Zero-profit runs: "+fmt(m.flat_pct,1)+"%. Zero-profit runs are not counted as profitable.</p>";
   html += "<h2 style=\"margin-top:16px\">Monte Carlo trade manipulation (" + (d.trades || 0) + " trades)</h2><table><tr><th>Runs</th><th>Net p5</th><th>Net p50</th><th>Net p95</th><th>Losing %</th><th>Max DD 95%</th></tr>";
   html += "<tr><td>" + (m.runs || 0) + "</td><td class=\"" + cls(m.net_p5) + "\">" + fmt(m.net_p5, 2) + "</td><td class=\"" + cls(m.net_p50) + "\">" + fmt(m.net_p50, 2) + "</td><td class=\"" + cls(m.net_p95) + "\">" + fmt(m.net_p95, 2) + "</td><td>" + fmt(m.losing_pct, 1) + "</td><td>" + fmt(m.max_dd_95, 2) + "</td></tr></table>";
   out.innerHTML = html;
@@ -1280,12 +1472,13 @@ async function refreshDataManager() {
   if (!(ds.symbols || []).length) { box.innerHTML = "<p class=\"muted\">No symbols yet. Paste a CSV below to import one.</p>"; return; }
   let html = "<table><tr><th>Symbol</th><th>TF</th><th>Bars</th><th></th></tr>";
   (ds.symbols || []).forEach(function(s) {
-    html += "<tr><td>" + s.symbol + "</td><td>" + s.timeframe + "</td><td>" + s.bars + "</td><td><button class=\"remove\" data-sym=\"" + s.symbol + "\">Delete</button></td></tr>";
+    html += "<tr><td>" + escapeHtml(s.symbol) + "</td><td>" + escapeHtml(s.timeframe) + "</td><td>" + s.bars + "</td><td><button class=\"remove\" data-sym=\"" + s.key + "\" data-label=\"" + escapeHtml(s.symbol+" "+s.timeframe) + "\">Delete</button></td></tr>";
   });
   html += "</table>";
   box.innerHTML = html;
   box.querySelectorAll("button[data-sym]").forEach(function(btn) {
     btn.onclick = async function() {
+      if (!confirm("Remove " + btn.dataset.label + " from the loaded data?")) return;
       await postJSON("/api/data/delete", JSON.stringify({ symbol: btn.dataset.sym }));
       await refreshDataManager();
       await loadInfo();
@@ -1319,12 +1512,13 @@ async function refreshProfiles() {
       var p = s.find(function(x) { return x.name === btn.dataset.ss; });
       if (!p) return;
       try {
-        var o = JSON.parse(document.getElementById("strategy").value);
+        var o = readStrategy();
         o.trading_options = o.trading_options || {};
         o.trading_options.limit_hours = [p.start, p.end];
         o.trading_options.exit_at_end_of_day = !!p.exit_eod;
         o.trading_options.exit_on_friday = !!p.exit_friday;
-        document.getElementById("strategy").value = JSON.stringify(o, null, 2);
+        o.trading_options.session_close_utc_minute = p.session_close_utc_minute ?? null;
+        setStrategy(o, "Applied trading session");
       } catch (e) {}
       document.querySelector('.nav-btn[data-tab="builder"]').click();
     };
@@ -1340,7 +1534,7 @@ document.getElementById("bp-save").onclick = async function() {
   await refreshProfiles();
 };
 document.getElementById("ss-save").onclick = async function() {
-  var p = { name: document.getElementById("ss-name").value.trim(), start: parseInt(document.getElementById("ss-start").value) || 0, end: parseInt(document.getElementById("ss-end").value) || 23, exit_eod: document.getElementById("ss-eod").checked, exit_friday: document.getElementById("ss-fri").checked };
+  var p = { name: document.getElementById("ss-name").value.trim(), start: parseInt(document.getElementById("ss-start").value) || 0, end: parseInt(document.getElementById("ss-end").value) || 23, exit_eod: document.getElementById("ss-eod").checked, exit_friday: document.getElementById("ss-fri").checked, session_close_utc_minute: utcCloseMinute("ss-close-time") };
   if (!p.name) return;
   await postJSON("/api/profiles/save", JSON.stringify({ kind: "session", profile: p }));
   await refreshProfiles();
@@ -1351,11 +1545,13 @@ document.getElementById("dm-import").onclick = async function() {
   const csv = document.getElementById("dm-csv").value;
   const st = document.getElementById("dm-status");
   st.textContent = "Importing...";
-  const d = await postJSON("/api/data/import", JSON.stringify({ symbol: symbol, csv: csv }));
+  let calendar=null;try{const raw=document.getElementById("dm-calendar").value.trim();if(raw)calendar=JSON.parse(raw);}catch(e){st.textContent="Invalid calendar JSON: "+e.message;return;}
+  const d = await postJSON("/api/data/import", JSON.stringify({ symbol: symbol, csv: csv, timeframe:document.getElementById("dm-timeframe").value, calendar }));
   if (d.error) { st.textContent = d.error; return; }
   st.textContent = "Imported " + (d.bars || 0) + " bars";
   await refreshDataManager();
   await loadInfo();
+  document.getElementById("symbol-select").value=d.key;await refreshDataInfo();
 };
 
 document.getElementById("qdb-list").onclick = async function() {
@@ -1426,7 +1622,8 @@ var tour = document.getElementById("home-tour");
 if (tour) tour.onclick = async function() {
   var st = document.getElementById("home-tour-status");
   st.textContent = "Running pipeline...";
-  var body = Object.assign({ symbol: selectedSymbol(), count: 200, keep: 15 }, settings(), genSettings());
+  const inputs=generatorInputs(st);if(!inputs)return;
+  var body = Object.assign({ symbol: selectedSymbol(), count: 200, keep: 15 }, inputs);
   var d = await postJSON("/api/pipeline", JSON.stringify(body));
   if (d.error) { st.textContent = d.error; return; }
   st.textContent = "Databank: " + (d.databank || 0) + " strategies";
@@ -1442,9 +1639,8 @@ if (themeBtn) themeBtn.onclick = function() {
   localStorage.setItem("theme", document.body.classList.contains("light") ? "light" : "dark");
 };
 
-loadInfo();
-loadCatalog();
-refreshHome();
+
 </script>
+<script src="/workspace.js"></script>
 </body>
 </html>

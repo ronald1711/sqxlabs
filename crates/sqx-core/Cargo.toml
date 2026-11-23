@@ -7,3 +7,4 @@ description = "Shared data model: bars, timeframes, symbols, directions."
 
 [dependencies]
 serde.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["std"] }

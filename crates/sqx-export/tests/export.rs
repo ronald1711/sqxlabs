@@ -58,3 +58,40 @@ fn easylanguage_exports_cross() {
     assert!(code.contains("RSI(Close, 14)"));
     assert!(code.contains("crosses under"));
 }
+
+#[test]
+fn unsupported_features_never_emit_partial_platform_code() {
+    use sqx_export::export_report;
+    for engine in [Engine::Mql4,Engine::Mql5,Engine::PineScript,Engine::NinjaTrader,Engine::EasyLanguage] {
+        let mut s = rsi_strategy();
+        s.trading_options.exit_on_friday = true;
+        s.trading_options.session_close_utc_minute = Some(1260);
+        let report = export_report(&s,engine);
+        assert_eq!(report.status,"blocked");
+        assert!(report.code.is_none());
+        assert!(report.blockers.iter().any(|e|e.contains("Scheduled")));
+        s.trading_options = Default::default();
+        s.signals[0].conditions[0].left = Operand::Indicator("UnmappedTestIndicator".into(),vec![]);
+        let report = export_report(&s,engine);
+        assert!(report.code.is_none(),"{engine:?} must not substitute SMA or zero");
+        assert!(report.blockers.iter().any(|e|e.contains("indicator")));
+        s = rsi_strategy(); s.stop_loss = Some(sqx_strategy::StopLoss::Points(100.0));
+        assert!(export_report(&s,engine).code.is_none(),"must not silently omit protection");
+    }
+}
+
+#[test]
+fn draft_limitations_travel_with_downloaded_source() {
+    use sqx_export::export_report;
+    let report = export_report(&rsi_strategy(),Engine::Mql5);
+    assert_eq!(report.status,"reference_draft");
+    let code = report.code.unwrap();
+    assert!(code.contains("REFERENCE DRAFT ONLY"));
+    assert!(code.contains("order actions are placeholders"));
+    let mut s = rsi_strategy();
+    s.trading_options.exit_at_end_of_day = true;
+    s.trading_options.session_close_utc_minute = Some(1200);
+    let rules = export_report(&s,Engine::PseudoCode).code.unwrap();
+    assert!(rules.contains("session_close_utc_minute: Some(1200)"));
+    assert!(rules.contains("size: 0.1"));
+}

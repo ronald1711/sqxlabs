@@ -72,20 +72,65 @@ https://github.com/open-free-llm-api/awesome-freellm-apis). If Ollama runs on
 export SQX_LLM_API_KEY=...                       # e.g. from console.groq.com/keys
 export SQX_LLM_BASE_URL=https://api.groq.com/openai/v1
 export SQX_LLM_MODEL=llama-3.3-70b-versatile
-cargo run -q -p sqx-cli -- assistant --data data/mt5/EURUSD_M5.csv --ask "generate 50 strategies and analyse the best"
+cargo run -q -p sqx-cli -- assistant --symbol EURUSD --timeframe M5 --data data/mt5/EURUSD_M5.csv --ask "generate 50 strategies and analyse the best"
 ```
+
+Assistant candidate indices remain stable within one assistant session, including
+when the model calls `generate` more than once. Later searches append candidates;
+`details` can still inspect earlier indices. Each generation call returns its own
+top candidates. The session-wide 200-backtest budget still applies, including
+`details` calls. Candidate indices are session-local; a new session does not preserve them. The CLI emits an
+`Assistant candidate evidence` JSON line; the web API returns
+`candidate_evaluations` on both completed and failed assistant responses. These
+contain every generation outcome before top-five filtering, with the strategy,
+seed and batch reference. `detail_evaluations` records each executed details rerun,
+including failed evaluations, its tool-call reference and exact strategy. These
+summaries are kept separate from full engine results. Dashboard sessions with candidate outcomes save both
+summaries and `trial_executions` (including trades, equity and execution evidence)
+with the frozen dataset, settings and engine identity in Saved research,
+including outcomes from sessions that later fail. Existing backup/restore applies;
+summary replay is explicitly unavailable. Prompts, answers and provider credentials
+are excluded from this archive. These saved sessions count as known data exposure
+for holdout checks. CLI sessions with candidate outcomes also archive automatically in `data/research`
+relative to the working directory, printing an `Assistant archive` receipt. Provider
+failure after generation preserves completed candidate summaries; archive failures
+produce a nonzero exit without claiming that failed storage succeeded. Both entry
+points now save an `assistant_trial_started` checkpoint before each backtest and an
+`assistant_trial` result immediately after it. The records bind strategy, data,
+configuration, engine identity, tool call and a unique session identifier. A
+storage error stops further work in that session. Completed trial records survive
+process interruption and appear individually in Saved research; pending checkpoints
+also disclose potential holdout exposure. These record counts are not independent
+trial counts. Provider-conversation resume remains unfinished; no provider credentials or
+conversation text are checkpointed. In Saved research, **Verify replay** compares
+a trial's complete result and **Restart frozen trial** reruns one checkpoint from
+the beginning and saves its result. Both require the matching executable; neither
+contacts the provider. A matching replay of a failed trial remains invalid.
+
+CLI equivalents (the archive defaults to `data/research`):
+
+```bash
+sqx-cli list-assistant-trials
+sqx-cli replay-assistant-trial --run-id RESULT_ID
+sqx-cli replay-assistant-trial --run-id CHECKPOINT_ID --resume
+```
+
+A pending checkpoint does not establish whether another process is still running.
+Repeated restarts deduplicate identical results; a contradictory existing result
+causes an error rather than silently publishing a replacement. Portable standalone
+result backups can be replayed without the original checkpoint or source CSV.
 
 ### CLI examples
 
 ```bash
 # generate 300 random strategies, backtest, rank, print top 10
-cargo run -q -p sqx-cli -- generate --data data/eurusd_sample.csv --count 300 --top 10
+cargo run -q -p sqx-cli -- generate --symbol EURUSD --timeframe M1 --data data/eurusd_sample.csv --count 300 --top 10
 
 # genetic evolution
-cargo run -q -p sqx-cli -- evolve --data data/eurusd_sample.csv --generations 20 --population 50
+cargo run -q -p sqx-cli -- evolve --symbol EURUSD --timeframe M1 --data data/eurusd_sample.csv --generations 20 --population 50
 
 # backtest a strategy defined as JSON
-cargo run -q -p sqx-cli -- backtest --strategy examples/rsi-mean-reversion.json --data data/eurusd_sample.csv
+cargo run -q -p sqx-cli -- backtest --strategy examples/rsi-mean-reversion.json --data data/eurusd_sample.csv --timeframe M1
 
 # export a strategy to platform source code (mql4 | mql5 | pine | ninjascript | easylanguage | pseudocode)
 cargo run -q -p sqx-cli -- export --strategy examples/rsi-mean-reversion.json --engine mql5
@@ -93,31 +138,32 @@ cargo run -q -p sqx-cli -- export --strategy examples/rsi-mean-reversion.json --
 cargo run -q -p sqx-cli -- export --strategy examples/rsi-mean-reversion.json --engine easylanguage
 
 # full robustness cross-check set (what-if, MC trade, MC retest, walk-forward)
-cargo run -q -p sqx-cli -- robustness --strategy examples/rsi-mean-reversion.json --data data/eurusd_sample.csv
+cargo run -q -p sqx-cli -- robustness --symbol EURUSD --timeframe M1 --strategy examples/rsi-mean-reversion.json --data data/eurusd_sample.csv
 
 # walk-forward optimization
-cargo run -q -p sqx-cli -- optimize --data data/eurusd_sample.csv --windows 6 --oos 0.25
+# Nonzero exit on invalid computation; exit 0 alone does not certify sufficient trade evidence.
+cargo run -q -p sqx-cli -- optimize --symbol EURUSD --timeframe M1 --data data/eurusd_sample.csv --windows 6 --oos 0.25
 
 # portfolio: best subset of generated strategies (equal weights + correlation)
-cargo run -q -p sqx-cli -- portfolio --data data/eurusd_sample.csv --count 300 --top 12
+cargo run -q -p sqx-cli -- portfolio --symbol EURUSD --timeframe M1 --data data/eurusd_sample.csv --count 300 --top 12
 
-# multi-market cross-check (one strategy on every symbol in a folder)
-cargo run -q -p sqx-cli -- crosscheck --strategy examples/rsi-mean-reversion.json --data-dir data
+# multi-market cross-check (explicit symbols and timeframes in a manifest)
+cargo run -q -p sqx-cli -- crosscheck --strategy examples/rsi-mean-reversion.json --manifest examples/crosscheck-markets.json
 
 # analysis report (monthly returns, drawdown periods, trade stats, rolling Sharpe)
-cargo run -q -p sqx-cli -- analyze --strategy examples/rsi-mean-reversion.json --data data/eurusd_sample.csv
+cargo run -q -p sqx-cli -- analyze --timeframe M1 --strategy examples/rsi-mean-reversion.json --data data/eurusd_sample.csv
 
 # AlgoCloud-style daily signals for a folder of strategies
-cargo run -q -p sqx-cli -- cloud --strategies /tmp/sqx_strats --data data/eurusd_sample.csv
+cargo run -q -p sqx-cli -- cloud --symbol EURUSD --timeframe M1 --strategies /tmp/sqx_strats --data data/eurusd_sample.csv
 
 # build -> retest -> optimize pipeline
-cargo run -q -p sqx-cli -- pipeline --data data/eurusd_sample.csv --count 200 --keep 20
+cargo run -q -p sqx-cli -- pipeline --symbol EURUSD --timeframe M1 --data data/eurusd_sample.csv --count 200 --keep 20
 
 # MCP server over stdio (JSON-RPC 2.0) for LLM clients
 cargo run -q -p sqx-mcp
 
 # dashboard on http://127.0.0.1:8080
-cargo run -q -p sqx-cli -- serve --data data/eurusd_sample.csv
+cargo run -q -p sqx-cli -- serve --data data/eurusd_sample.csv --symbol EURUSD --data-timeframe M1
 ```
 
 ### Strategy JSON format
@@ -127,6 +173,136 @@ A strategy is a transparent rule tree (serde-serialized). See
 `sqx-cli pseudocode` and by the backtest output.
 
 ### Data format
+
+CLI `backtest` and `analyze` now require `--timeframe` for CSV candles. Optional `--calendar`
+loads an explicit UTC calendar JSON; `--allow-data-gaps` acknowledges unresolved
+gaps for exploratory research and cannot override invalid or unfinished candles.
+Tick execution also uses the declared timeframe; optional legacy `--tick-bar-ms`
+must agree with it. Successful output includes a JSON `Research context` line
+with source quality, calendar, cutoff and resolved execution settings. This
+contract currently applies to `backtest`, `analyze`, `generate`, `optimize`, `montecarlo`, `robustness`, `portfolio`, `pipeline`, `assistant`, `evolve` and `start-evolution`;
+other CLI research commands still need migration. `generate`, `optimize`, `montecarlo`, `robustness`, `portfolio`, `pipeline`, `assistant`, `evolve` and `start-evolution` also
+require `--symbol` and accept `--config`; they no longer silently assume EURUSD. `analyze --config settings.json` loads a full BacktestConfig
+(including account and transaction costs) and rejects a conflicting candle duration. CSV bar and tick timestamps are Unix **seconds**, not milliseconds.
+
+`unexecuted_entry` preserves a final queued entry signal when no following opening
+quote exists, including its direction, source candle and recorded signal values.
+It is separate from entry attempts: no size, margin check or fill is claimed.
+Single-candle inputs are evaluated for this boundary signal while remaining
+untradeable without a next opening quote. The dashboard shows this evidence below
+Entry decisions and distinguishes older records without boundary evidence.
+
+`account_snapshots` samples balance, gross open PnL, commission reserve, accrued
+financing, equity, required margin and free margin after each candle's execution.
+An open position includes its ID, liquidation-side price and conversion rate.
+Actual tick timestamps are recorded separately from candle labels. Terminal
+liquidation adds a separate flat-account snapshot; the preceding mark-to-market
+snapshot remains available, including any difference from exit slippage. These
+are sampled valuations, not every intrabar margin check or a broker cash ledger.
+
+Filled entry attempts include `initial_protection`: installed stop-loss and
+profit-target levels, trailing/break-even flags and their fixed initial distance,
+plus the completed candle reference used for ATR resolution. Unconfigured levels
+are null; rejected entries have no installed protection record. This captures
+engine state at entry, not broker order acceptance messages.
+
+`stop_changes` records effective trailing/break-even amendments only on the chosen
+execution path, with trade ID, reached price, previous/new stop and reason.
+Observed ticks retain their quote timestamps; OHLC records use the candle label,
+path name and ordered path step without inventing intrabar times. Alternative
+OHLC scenarios and price observations after closure do not create executed
+amendment records. These are effective protective-stop changes, not a full broker
+order-message history.
+
+`stop_out_decisions` records the modelled threshold, liquidation price before
+slippage, final fill, applied conversion rate, balance, unrealized PnL, reserved
+commission, accrued financing, equity, required margin and minimum permitted
+equity for each stop-out. A continuous OHLC-path liquidation is modelled at the
+threshold; a tick or gap may execute beyond it. Timestamp precision follows the
+underlying execution mode. These records explain executed stop-outs, not every
+margin check while the position was open.
+
+Entry-attempt evidence includes an optional `margin_check`: normalized lots,
+proposed price, conversion rate, leverage, required margin, spread/slippage and
+commission reserves, equity after entry costs, free margin and admission result.
+It is absent when earlier gates or lot constraints prevent reaching that check;
+older records may lack the field entirely. The dashboard exposes the calculation
+under Entry decisions. A proposed fill is not evidence of an executed order, and
+this admission estimate is not a later margin-level history.
+
+Backtest execution evidence includes `cash_settlements`: one record per closed
+trade with gross quote-currency PnL, conversion rate, gross account-currency PnL,
+commission, signed financing charge, net change and balances before/after. This
+follows the engine's existing settlement-at-close model; it is not a broker's
+daily cash-posting ledger. Spread and slippage are already included in trade
+prices. `financing_accruals` records nonzero daily accruals with UTC rollover day,
+recognition quote timestamp, lots, signed daily rate, multiplier and cumulative
+charge. Gaps can delay recognition; these are accrued position costs, not separate
+cash postings. Zero-charge days do not create records. Bar timestamps retain their
+candle-label semantics, and end-of-data liquidation remains a reporting convention.
+
+Walk-forward reports retain all in-sample candidate evaluations in original order,
+including successful nonselected strategies. Each record contains the strategy,
+metrics or execution errors, eligibility, exclusion reason and selection flag;
+`selected_candidate_index` identifies the winner within its window. This records
+selection evidence, not independent validation or a complete order ledger.
+
+CLI `montecarlo`, `optimize` and `robustness` exit unsuccessfully if their
+requested calculations report errors. The available research context is printed
+before that failure. The combined `robustness` context includes stage-labelled
+`errors`, including unavailable Monte Carlo distributions and incomplete retest
+coverage. A successful exit means the calculations completed; it does not certify
+sufficient trade evidence, an untouched holdout or suitability for live trading.
+
+CLI `crosscheck` uses `--manifest` instead of inferring instruments from a folder.
+The schema-1 manifest contains a `markets` array with explicit `symbol`, `data`
+and `timeframe` per entry; optional `calendar`, `config` paths and
+`allow_data_gaps` apply per market. Relative paths resolve beside the manifest.
+`examples/crosscheck-markets.json` contains the single bundled EURUSD dataset;
+add explicitly declared datasets to compare multiple markets. All sources are
+checked before evaluation. Invalid simulations remain in the output, are excluded
+from eligible-market counts and make the command exit unsuccessfully. Too few
+trades are reported separately and do not certify robustness.
+
+For multiple dashboard datasets, prefer
+`serve --data-manifest examples/dashboard-data.json`. This schema-1 manifest has
+`datasets`, each with explicit `symbol`, `data`, `timeframe` and optional
+`calendar` JSON path. Paths resolve relative to the manifest. Different timeframes
+and arbitrary filenames are supported; duplicate symbol/timeframe entries and
+invalid datasets reject the entire load before server startup. Gaps remain
+visible for inspection and require separate disclosure before research. The
+manifest is a source mapping, not a backtest-settings or crosscheck manifest.
+
+Dashboard startup with `serve --data` requires `--symbol` and
+`--data-timeframe`. Directory loading requires `--data-timeframe`, shared by all
+CSV files; its existing convention uses each filename stem as the instrument,
+so stems must be actual intended instrument identifiers. Mixed-timeframe folders
+must not be loaded under one declared interval. CSV and QuestDB source flags are
+mutually exclusive. Starting without a source still loads labeled M1 demo data.
+
+CLI `cloud` requires symbol/timeframe and audits closed source candles before
+producing raw entry indications. `FLAT` means no entry condition, not a request to
+close an existing position. Disabled directions are respected; evaluation errors
+and unsupported higher-timeframe confirmation show `UNAVAILABLE`, with a failing
+exit status. This preview is not a position-aware trading or execution service.
+Strategy directories are loaded in sorted order and rejected as a whole if any
+JSON strategy cannot be read, parsed or validated.
+
+For MCP research tools, a `data` path selects CSV and requires explicit `symbol`
+and `timeframe` fields, for example `{"source":"csv","data":"prices.csv","symbol":"USDJPY","timeframe":"M1"}`
+(with the tool's strategy/settings fields added). Without `data`, `symbol` selects
+QuestDB and `timeframe` defaults to M5. Optional `source` accepts `csv` or
+`questdb`; conflicting source/path combinations are rejected. CSV requests that
+previously omitted symbol/timeframe must now provide them. Fixed candle duration
+is derived from the timeframe; conflicting `config.bar_duration_ms` is rejected.
+Calendar months are not assigned a nominal fixed duration.
+MCP research also audits candles against the current server time. Invalid,
+overlapping, duplicate or still-open candles are rejected. Unresolved gaps require
+`allow_data_gaps: true` for exploratory runs, or an explicit `calendar` with UTC
+weekly sessions and optional date overrides that explains market closures.
+Successful research responses include `research_context` with the quality report,
+full supplied calendar, cutoff time, symbol, timeframe and simulation settings.
+These checks do not establish broker execution parity or an untouched holdout.
 
 CSV with header `timestamp,open,high,low,close,volume`, timestamp in unix
 seconds. `data/eurusd_sample.csv` is a 2000-bar synthetic EURUSD sample.
@@ -143,9 +319,9 @@ bash "$HOME/Library/Application Support/SiliconMT5/runtime/macos/native.sh" star
 "$HOME/Library/Application Support/SiliconMT5/venv/bin/python" scripts/mt5_export.py --symbols EURUSD,GBPUSD,USDJPY --timeframe M5 --count 5000 --out data/mt5
 
 # use the real data
-cargo run -q -p sqx-cli -- generate --data data/mt5/EURUSD_M5.csv --count 300
-cargo run -q -p sqx-cli -- crosscheck --strategy examples/rsi-mean-reversion.json --data-dir data/mt5
-cargo run -q -p sqx-cli -- serve --data-dir data/mt5
+cargo run -q -p sqx-cli -- generate --symbol EURUSD --timeframe M5 --data data/mt5/EURUSD_M5.csv --count 300
+cargo run -q -p sqx-cli -- crosscheck --strategy examples/rsi-mean-reversion.json --manifest examples/crosscheck-markets.json
+cargo run -q -p sqx-cli -- serve --data-dir data/mt5 --data-timeframe M5
 ```
 
 Export ticks with `--ticks` (writes `<symbol>_ticks.csv`). MT5 bar times are
@@ -171,7 +347,7 @@ cargo run -q -p sqx-cli -- questdb bars --symbol EURUSD --timeframe M5 --limit 5
 
 # ... and write them to CSV, then feed any existing command
 cargo run -q -p sqx-cli -- questdb bars --symbol EURUSD --timeframe M5 --limit 20000 --out data/questdb/EURUSD_M5.csv
-cargo run -q -p sqx-cli -- generate --data data/questdb/EURUSD_M5.csv --count 300
+cargo run -q -p sqx-cli -- generate --symbol EURUSD --timeframe M5 --data data/questdb/EURUSD_M5.csv --count 300
 
 # serve the dashboard straight from QuestDB (no CSV needed)
 cargo run -q -p sqx-cli -- serve --questdb --questdb-symbols EURUSD,GBPUSD --questdb-timeframe M5
@@ -233,13 +409,74 @@ operations. All endpoints are plain JSON:
 - **Parallel backtests**: `backtest_batch` spreads strategies across cores
   (deterministic, order-preserving).
 
+Remaining reliability work and release priorities: [TODO.md](TODO.md).
+
 ## Tests
 
-32 tests across the workspace: indicator references, engine behaviour,
-exporters, metrics edge cases, strategy JSON round-trips, walk-forward
-determinism, generator parameter ranges, and an in-process HTTP test of the
-web endpoints. Run with `cargo test`.
+Run `cargo test --workspace` and `cargo build --workspace`. The broader local
+gate, `bash ci/check.sh debug`, also checks dashboard JavaScript regressions.
+The latest debug and release gates each passed 368 Rust tests, 16 frontend
+regression checks and four Python exporter tests, plus workspace builds. The
+profile comparison also passed four execution fixtures and two seeded evolution
+fixtures with byte-identical evidence (excluding executable identity in evolution
+headers).
+Passing tests alone does not establish independent execution parity; see
+`RELIABILITY.md` for the evidence and remaining completion requirements.
+
+New engine results carry account-evidence schema 1. Before returning a valid
+result, the engine reconciles cash settlements, currency conversion arithmetic,
+financing accruals, sampled account components and final equity. Metrics reject
+inconsistent schema-1 evidence. Numeric reconciliation uses a relative tolerance
+of 1e-10 with a unit floor. Legacy and aggregate schema-0 results remain usable
+for metrics, but cannot pass the strict account-evidence validator. This is an
+internal consistency check, not independent verification of market prices, every
+order transition, or broker execution.
 
 ## License
 
 MIT. See Cargo.toml.
+
+CLI backtests automatically retain full research evidence in `data/research`
+relative to the working directory. Override it with
+`backtest ... --archive-dir path/to/research`. The content-addressed archive stores
+the parsed candles/ticks, instrument, strategy, account/execution settings, source
+quality context, executable identity and full result (including trades and equity).
+A receipt is printed only after storage succeeds; storage failures return nonzero.
+This default applies to the standalone `backtest` command; it does not imply
+complete recording of every other research command. CLI records support archive inspection/backup. Replay them with
+`replay-backtest --archive-dir path/to/research --run-id <id>`. Replay requires the
+exact recorded executable and compares the full engine result using only archived
+inputs; mismatches return nonzero. Dashboard replay is not yet supported.
+
+Archived CLI backtests in an experiment's research archive are included in its
+prior-data-use audit, including recorded failures. A CLI subset count identifies
+their source; it is not an additional independent trial count. Archives in other
+directories and unrecorded work remain outside that audit.
+
+Tick CSV accepts `timestamp,bid,ask` (integer Unix seconds) or the explicit
+`timestamp_ms,bid,ask` header (integer Unix milliseconds). Headerless input
+remains seconds; units are never guessed from magnitude. The MT5 exporter now
+writes the millisecond form from `time_msc` and uses an explicitly UTC request
+date. Existing second-resolution files cannot recover discarded milliseconds.
+
+MT5 bar export excludes the terminal's current candle. If any requested symbol
+cannot be selected or returns no data, the exporter reports a partial export and
+returns nonzero; successful symbols may already have been saved. Received row
+counts do not guarantee that the terminal supplied all requested history.
+
+A CLI backtest publishes an immutable input checkpoint
+before simulation and prints its ID. Restart a checkpoint with
+`replay-backtest --resume --archive-dir path/to/research --run-id <checkpoint-id>`.
+This restarts the calculation from frozen inputs using the matching executable;
+it does not continue from an intermediate candle. Completed records link to their
+checkpoint, and repeated restarts converge on the same content-addressed result.
+Checkpoints count as conservative prior data exposure even without a result.
+Find checkpoint IDs after losing terminal output with
+`list-backtests --archive-dir path/to/research`. The JSON lists checkpoint identity,
+linked result IDs, execution validity and whether the current executable matches.
+`result_not_recorded` does not prove the process stopped: it may still be running.
+
+`list-backtests` and `replay-backtest` use the same `data/research` default. An
+unwritable archive stops the operation before simulation; storage failure is not
+silently converted to an unrecorded run. Each working directory has its own
+default archive, so use a shared explicit archive for unified holdout auditing.

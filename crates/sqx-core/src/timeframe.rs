@@ -19,6 +19,23 @@ impl Timeframe {
         })
     }
 
+    /// UTC candle interval containing this timestamp. Weeks start Monday;
+    /// months start on day one and have their actual calendar length.
+    pub fn bucket_bounds(self,time:i64)->Option<(i64,i64)>{
+        use chrono::{DateTime,Datelike,NaiveDate,Utc};
+        if self==Self::MN1 {
+            let dt=DateTime::<Utc>::from_timestamp_millis(time)?;
+            let start=NaiveDate::from_ymd_opt(dt.year(),dt.month(),1)?.and_hms_opt(0,0,0)?.and_utc().timestamp_millis();
+            let (year,month)=if dt.month()==12{(dt.year().checked_add(1)?,1)}else{(dt.year(),dt.month()+1)};
+            let end=NaiveDate::from_ymd_opt(year,month,1)?.and_hms_opt(0,0,0)?.and_utc().timestamp_millis();
+            return Some((start,end));
+        }
+        let width=self.minutes()?.checked_mul(60_000)?;
+        let offset=if self==Self::W1 {4*86_400_000}else{0}; // 1970-01-05, Monday
+        let start=time.checked_sub(offset)?.div_euclid(width).checked_mul(width)?.checked_add(offset)?;
+        Some((start,start.checked_add(width)?))
+    }
+
     /// Human-readable label used in logs and reports.
     pub fn label(self) -> &'static str {
         use Timeframe::*;

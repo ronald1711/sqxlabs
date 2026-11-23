@@ -29,7 +29,7 @@ fn ind_expr(name: &str, params: &[Param]) -> String {
         "BBLower" => format!("BollingerBand(Close, {}, -2)", prd(params, "period", 20)),
         "Highest" => format!("Highest(High, {})", prd(params, "period", 20)),
         "Lowest" => format!("Lowest(Low, {})", prd(params, "period", 20)),
-        _ => format!("Average(Close, {})", prd(params, "period", 20)),
+        _ => format!("/*{name}:unmapped*/0.0"),
     }
 }
 

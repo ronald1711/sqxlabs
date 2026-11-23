@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+sqx-project = { path = "../sqx-project" }
 sqx-core = { path = "../sqx-core" }
 sqx-strategy = { path = "../sqx-strategy" }
 sqx-backtest = { path = "../sqx-backtest" }
@@ -11,3 +12,5 @@ sqx-metrics = { path = "../sqx-metrics" }
 sqx-optimizer = { path = "../sqx-optimizer" }
 serde_json.workspace = true
 rand.workspace = true
+ureq = { version = "2.12.1", default-features = false, features = ["tls"] }
+url = "2"

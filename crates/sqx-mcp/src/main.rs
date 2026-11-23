@@ -81,7 +81,7 @@ fn error_json(id: Value, code: i64, message: &str) -> Value {
 }
 
 fn tools_list() -> Vec<Value> {
-    vec![
+    let mut tools=vec![
         json!({
             "name": "list_indicators",
             "description": "List the indicator building-block catalog.",
@@ -104,25 +104,36 @@ fn tools_list() -> Vec<Value> {
         }),
         json!({
             "name": "backtest",
-            "description": "Backtest a strategy JSON on CSV ('data' path) or QuestDB ('symbol' + 'timeframe') data.",
-            "inputSchema": { "type": "object", "properties": { "data": { "type": "string" }, "symbol": { "type": "string" }, "timeframe": { "type": "string" }, "limit": { "type": "integer" }, "strategy": { "type": "object" } }, "required": ["strategy"] }
+            "description": "Backtest a strategy JSON on CSV (data path, symbol and timeframe required) or QuestDB (symbol, optional timeframe default M5).",
+            "inputSchema": { "type": "object", "properties": { "source": {"type":"string","enum":["csv","questdb"],"description":"CSV when data is present; otherwise QuestDB. CSV requires explicit symbol and timeframe."}, "config": { "type": "object", "description": "BacktestConfig: initial_deposit, spread_points, slippage_points, commission_per_lot and account (currency, max_leverage, stop_out_ratio, financing and historical conversion_rates)." }, "data": { "type": "string" }, "symbol": { "type": "string" }, "timeframe": { "type": "string" }, "limit": { "type": "integer" }, "strategy": { "type": "object" } }, "required": ["strategy"] }
         }),
         json!({
             "name": "generate",
             "description": "Generate random strategies, backtest and rank them on CSV or QuestDB data.",
-            "inputSchema": { "type": "object", "properties": { "data": { "type": "string" }, "symbol": { "type": "string" }, "timeframe": { "type": "string" }, "limit": { "type": "integer" }, "count": { "type": "integer" }, "seed": { "type": "integer" } } }
+            "inputSchema": { "type": "object", "properties": { "source": {"type":"string","enum":["csv","questdb"],"description":"CSV when data is present; otherwise QuestDB. CSV requires explicit symbol and timeframe."}, "config": { "type": "object", "description": "BacktestConfig: initial_deposit, spread_points, slippage_points, commission_per_lot and account (currency, max_leverage, stop_out_ratio, financing and historical conversion_rates)." }, "data": { "type": "string" }, "symbol": { "type": "string" }, "timeframe": { "type": "string" }, "limit": { "type": "integer" }, "count": { "type": "integer" }, "seed": { "type": "integer" } } }
         }),
         json!({
             "name": "portfolio",
             "description": "Build a portfolio from generated strategies (best subset, correlation) on CSV or QuestDB data.",
-            "inputSchema": { "type": "object", "properties": { "data": { "type": "string" }, "symbol": { "type": "string" }, "timeframe": { "type": "string" }, "limit": { "type": "integer" }, "count": { "type": "integer" }, "seed": { "type": "integer" } } }
+            "inputSchema": { "type": "object", "properties": { "source": {"type":"string","enum":["csv","questdb"],"description":"CSV when data is present; otherwise QuestDB. CSV requires explicit symbol and timeframe."}, "config": { "type": "object", "description": "BacktestConfig: initial_deposit, spread_points, slippage_points, commission_per_lot and account (currency, max_leverage, stop_out_ratio, financing and historical conversion_rates)." }, "data": { "type": "string" }, "symbol": { "type": "string" }, "timeframe": { "type": "string" }, "limit": { "type": "integer" }, "count": { "type": "integer" }, "seed": { "type": "integer" } } }
         }),
         json!({
             "name": "robustness",
             "description": "Run the robustness cross-check set (what-if, MC trade, MC retest, walk-forward) on CSV or QuestDB data.",
-            "inputSchema": { "type": "object", "properties": { "data": { "type": "string" }, "symbol": { "type": "string" }, "timeframe": { "type": "string" }, "limit": { "type": "integer" }, "strategy": { "type": "object" } }, "required": ["strategy"] }
+            "inputSchema": { "type": "object", "properties": { "source": {"type":"string","enum":["csv","questdb"],"description":"CSV when data is present; otherwise QuestDB. CSV requires explicit symbol and timeframe."}, "config": { "type": "object", "description": "BacktestConfig: initial_deposit, spread_points, slippage_points, commission_per_lot and account (currency, max_leverage, stop_out_ratio, financing and historical conversion_rates)." }, "data": { "type": "string" }, "symbol": { "type": "string" }, "timeframe": { "type": "string" }, "limit": { "type": "integer" }, "strategy": { "type": "object" } }, "required": ["strategy"] }
         }),
-    ]
+    ];
+    for tool in &mut tools {
+        if matches!(tool["name"].as_str(),Some("backtest"|"generate"|"portfolio"|"robustness")) {
+            let schema=&mut tool["inputSchema"];
+            let mut required=schema["required"].as_array().cloned().unwrap_or_default();
+            required.push(json!("symbol"));schema["required"]=json!(required);
+            schema["properties"]["calendar"]=json!({"type":"object","description":"Explicit UTC market calendar: name, weekly sessions (weekday Monday=0, start_minute, end_minute), optional date_overrides."});
+            schema["properties"]["allow_data_gaps"]=json!({"type":"boolean","default":false,"description":"Acknowledge unresolved gaps for exploratory research; never overrides invalid or incomplete candles."});
+            schema["allOf"]=json!([{"if":{"required":["data"]},"then":{"required":["timeframe"]}}]);
+        }
+    }
+    tools
 }
 
 fn text_result(s: String) -> Value {
@@ -203,29 +214,83 @@ fn tool_questdb_bars(args: &Value) -> Value {
     text_result(out)
 }
 
-/// Resolve the bar series from either a QuestDB symbol or a CSV path.
-/// Returns (bars, symbol) where symbol is used for instrument sizing.
-fn resolve_bars(args: &Value) -> Result<(Vec<Bar>, String), String> {
-    if let Some(symbol) = args.get("symbol").and_then(|v| v.as_str()) {
-        let symbol = symbol.trim();
-        if !symbol.is_empty() {
-            let tf: Timeframe = args
-                .get("timeframe")
-                .and_then(|v| v.as_str())
-                .unwrap_or("M5")
-                .parse()
-                .map_err(|e| format!("bad timeframe: {e}"))?;
-            let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(5000).clamp(1, 200_000) as usize;
-            let client = QuestdbClient::new(&QuestdbConfig::from_env());
-            let bars = client.fetch_bars(symbol, tf, None, None, Some(limit)).map_err(|e| e)?;
-            return Ok((bars, symbol.to_string()));
+/// A local path selects CSV; symbol describes the instrument in either source.
+#[derive(Debug,PartialEq)]
+struct SourceRequest { data:Option<String>, symbol:String, timeframe:Timeframe }
+fn source_request(args:&Value)->Result<SourceRequest,String> {
+    let field=|key:&str|->Result<Option<String>,String>{
+        match args.get(key) {
+            None=>Ok(None),
+            Some(Value::String(s)) if !s.trim().is_empty()=>Ok(Some(s.trim().to_string())),
+            _=>Err(format!("{key} must be a nonempty string")),
         }
+    };
+    let data=field("data")?;
+    let source=field("source")?;
+    match source.as_deref() {
+        Some("csv") if data.is_none()=>return Err("CSV source requires data path".into()),
+        Some("questdb") if data.is_some()=>return Err("QuestDB source conflicts with CSV data path".into()),
+        Some("csv"|"questdb")|None=>{},
+        Some(_)=>return Err("source must be csv or questdb".into()),
     }
-    if let Some(data) = args.get("data").and_then(|v| v.as_str()) {
-        let bars = read_csv_bars(data).map_err(|e| e)?;
-        return Ok((bars, "EURUSD".to_string()));
+    let symbol=field("symbol")?.ok_or("symbol is required for the source instrument")?;
+    let timeframe=match field("timeframe")? {
+        Some(label)=>label.parse().map_err(|e|format!("bad timeframe: {e}"))?,
+        None if data.is_some()=>return Err("CSV source requires an explicit timeframe".into()),
+        None=>Timeframe::M5,
+    };
+    if timeframe==Timeframe::Tick{return Err("Tick cannot describe OHLC source candles".into());}
+    Ok(SourceRequest{data,symbol,timeframe})
+}
+
+fn resolve_bars(args:&Value)->Result<(Vec<Bar>,String,Timeframe,Value),String>{
+    let request=source_request(args)?;
+    let bars=if let Some(data)=&request.data {
+        read_csv_bars(data)?
+    }else{
+        let limit=args.get("limit").and_then(|v|v.as_u64()).unwrap_or(5000).clamp(1,200000) as usize;
+        QuestdbClient::new(&QuestdbConfig::from_env()).fetch_bars(&request.symbol,request.timeframe,None,None,Some(limit))?
+    };
+    let quality=research_quality(args,&bars,request.timeframe,sqx_data::quality::now_ms())?;
+    Ok((bars,request.symbol,request.timeframe,quality))
+}
+
+fn research_quality(args:&Value,bars:&[Bar],timeframe:Timeframe,as_of_ms:i64)->Result<Value,String>{
+    let calendar:Option<sqx_data::quality::MarketCalendar>=match args.get("calendar") {
+        None=>None,
+        Some(value)=>Some(serde_json::from_value(value.clone()).map_err(|e|format!("invalid calendar: {e}"))?),
+    };
+    let allow=match args.get("allow_data_gaps") {
+        None=>false,Some(Value::Bool(value))=>*value,
+        Some(_)=>return Err("allow_data_gaps must be a boolean".into()),
+    };
+    let quality=sqx_data::quality::audit(bars,timeframe,as_of_ms,calendar.as_ref());
+    let error=if !quality.errors.is_empty(){Some(quality.errors.join("; "))}
+        else if !allow && (quality.missing_open_intervals>0 || quality.unclassified_intervals>0 || quality.irregular_steps>0){Some("Unresolved data gaps; supply a calendar or explicitly allow_data_gaps for exploratory research".into())}
+        else{None};
+    let context=json!({"data_quality":quality,"calendar":calendar,"as_of_ms":as_of_ms,"data_gaps_acknowledged":allow});
+    if let Some(error)=error{return Err(json!({"error":error,"research_context":context}).to_string());}
+    Ok(context)
+}
+
+fn research_result(summary:String,mut context:Value,symbol:&str,timeframe:Timeframe,config:&BacktestConfig)->Value{
+    context["symbol"]=json!(symbol);context["timeframe"]=json!(timeframe);context["config"]=json!(config);
+    context["scope"]=json!("Exploratory research; quality checks do not certify execution parity, untouched holdout or complete trial accounting.");
+    text_result(format!("{summary}\nresearch_context: {context}"))
+}
+
+fn simulation_config(args:&Value,timeframe:Timeframe)->Result<BacktestConfig,String>{
+    let mut config:BacktestConfig=match args.get("config") {
+        Some(value)=>serde_json::from_value(value.clone()).map_err(|e|format!("invalid backtest config: {e}"))?,
+        None=>BacktestConfig::default(),
+    };
+    let duration=if timeframe==Timeframe::MN1 {None}else{timeframe.minutes().and_then(|n|n.checked_mul(60000))};
+    if config.bar_duration_ms.is_some() && config.bar_duration_ms!=duration {
+        return Err(format!("bar_duration_ms conflicts with source timeframe {timeframe}"));
     }
-    Err("need either 'symbol' (QuestDB) or 'data' (CSV path)".to_string())
+    config.bar_duration_ms=duration;
+    config.account.validate()?;
+    Ok(config)
 }
 
 fn instrument_for(symbol: &str) -> Instrument {
@@ -262,20 +327,22 @@ fn tool_backtest(args: &Value) -> Value {
         Ok(s) => s,
         Err(e) => return err_result(format!("bad strategy: {e}")),
     };
-    let (bars, symbol) = match resolve_bars(args) {
+    let (bars, symbol, timeframe, quality) = match resolve_bars(args) {
         Ok(v) => v,
         Err(e) => return err_result(e),
     };
     let inst = instrument_for(&symbol);
     let pyp = pyp_for(&bars);
-    let cfg = BacktestConfig::default();
+    let cfg=match simulation_config(args,timeframe){Ok(config)=>config,Err(error)=>return err_result(error)};
+    if let Err(error)=sqx_backtest::validate_backtest_inputs(&bars,&inst,&cfg){return err_result(error);}
     let r = backtest(&strategy, &bars, &inst, &cfg);
+    if !r.errors.is_empty() { return err_result(r.errors.join("; ")); }
     let m = compute_metrics(&r, bars.len(), pyp);
-    text_result(metrics_summary(&m))
+    research_result(metrics_summary(&m),quality,&symbol,timeframe,&cfg)
 }
 
 fn tool_generate(args: &Value) -> Value {
-    let (bars, symbol) = match resolve_bars(args) {
+    let (bars, symbol, timeframe, quality) = match resolve_bars(args) {
         Ok(v) => v,
         Err(e) => return err_result(e),
     };
@@ -286,19 +353,20 @@ fn tool_generate(args: &Value) -> Value {
     let strategies: Vec<Strategy> = (0..count).map(|i| random_strategy(&mut rng, &format!("s{i:04}"), &gen)).collect();
     let inst = instrument_for(&symbol);
     let pyp = pyp_for(&bars);
-    let cfg = BacktestConfig::default();
+    let cfg=match simulation_config(args,timeframe){Ok(config)=>config,Err(error)=>return err_result(error)};
+    if let Err(error)=sqx_backtest::validate_backtest_inputs(&bars,&inst,&cfg){return err_result(error);}
     let scored = backtest_batch(&strategies, &bars, &inst, &cfg, pyp);
     let ranked = rank(scored, Fitness::ProfitFactor, 5);
     let mut lines = Vec::new();
     for (i, (s, m)) in ranked.iter().take(10).enumerate() {
         lines.push(format!("{}. {} net={:.2} pf={:.2} trades={:.0}", i + 1, s.name, m.net_profit, m.profit_factor, m.number_of_trades));
     }
-    text_result(lines.join("
-"))
+    research_result(lines.join("
+"),quality,&symbol,timeframe,&cfg)
 }
 
 fn tool_portfolio(args: &Value) -> Value {
-    let (bars, symbol) = match resolve_bars(args) {
+    let (bars, symbol, timeframe, quality) = match resolve_bars(args) {
         Ok(v) => v,
         Err(e) => return err_result(e),
     };
@@ -310,7 +378,8 @@ fn tool_portfolio(args: &Value) -> Value {
     let names: Vec<String> = strategies.iter().map(|s| s.name.clone()).collect();
     let inst = instrument_for(&symbol);
     let pyp = pyp_for(&bars);
-    let cfg = BacktestConfig::default();
+    let cfg=match simulation_config(args,timeframe){Ok(config)=>config,Err(error)=>return err_result(error)};
+    if let Err(error)=sqx_backtest::validate_backtest_inputs(&bars,&inst,&cfg){return err_result(error);}
     let results = sqx_portfolio::backtest_all(&strategies, &bars, &inst, &cfg);
     let mets: Vec<Metrics> = results.iter().map(|r| compute_metrics(r, bars.len(), pyp)).collect();
     let mut order: Vec<usize> = (0..results.len()).collect();
@@ -327,12 +396,13 @@ fn tool_portfolio(args: &Value) -> Value {
     let comp_names: Vec<String> = subset.iter().map(|&i| sel_names[i].clone()).collect();
     let weights = sqx_portfolio::equal_weights(comp.len());
     let pf = sqx_portfolio::combine(&comp_names, &comp, &weights, cfg.initial_deposit, bars.len(), pyp);
+    if !pf.errors.is_empty(){return err_result(pf.errors.join("; "));}
     let mut lines = vec![format!("portfolio: {} strategies | {}", comp.len(), metrics_summary(&pf.metrics))];
     for c in &pf.components {
         lines.push(format!("  {} w={:.2} net={:.2} dd={:.2}%", c.name, c.weight, c.net_profit, c.max_drawdown_pct));
     }
-    text_result(lines.join("
-"))
+    research_result(lines.join("
+"),quality,&symbol,timeframe,&cfg)
 }
 
 fn tool_robustness(args: &Value) -> Value {
@@ -344,27 +414,120 @@ fn tool_robustness(args: &Value) -> Value {
         Ok(s) => s,
         Err(e) => return err_result(format!("bad strategy: {e}")),
     };
-    let (bars, symbol) = match resolve_bars(args) {
+    let (bars, symbol, timeframe, quality) = match resolve_bars(args) {
         Ok(v) => v,
         Err(e) => return err_result(e),
     };
     let inst = instrument_for(&symbol);
     let pyp = pyp_for(&bars);
-    let cfg = BacktestConfig::default();
+    let cfg=match simulation_config(args,timeframe){Ok(config)=>config,Err(error)=>return err_result(error)};
+    if let Err(error)=sqx_backtest::validate_backtest_inputs(&bars,&inst,&cfg){return err_result(error);}
     let base = backtest(&strategy, &bars, &inst, &cfg);
+    if !base.errors.is_empty(){return err_result(base.errors.join("; "));}
     let base_m = compute_metrics(&base, bars.len(), pyp);
     let mut lines = vec![format!("base: {}", metrics_summary(&base_m))];
     let scenarios = [(1.0, 0.0, 0.0), (3.0, 1.0, 5.0), (5.0, 2.0, 10.0)];
-    for r in what_if(&strategy, &bars, &inst, &cfg, &scenarios) {
+    let mut errors=Vec::new();
+    for (index,r) in what_if(&strategy, &bars, &inst, &cfg, &scenarios).into_iter().enumerate() {
+        errors.extend(r.errors.iter().map(|error|format!("What-if scenario {index}: {error}")));
+        if !r.errors.is_empty(){lines.push(format!("invalid what-if: {}",r.errors.join("; ")));continue;}
         lines.push(format!("what-if spread={:.0} slip={:.0} comm={:.0} -> net {:.2}", r.spread, r.slippage, r.commission, r.net_profit));
     }
     let mc = monte_carlo_trade_manipulation(&base.trades, 500, 0.1, 42);
-    lines.push(format!("mc_trade: losing_runs={:.1}%", mc.losing_runs_pct));
+    lines.push(sqx_robustness::render(&mc));
     let rt = monte_carlo_retest(&strategy, &bars, &inst, &cfg, 200, 7);
+    lines.push(format!("mc_retest assumptions: seed {}; {}",rt.seed,rt.warmup_policy));
+    lines.push(format!("mc_retest coverage: requested {}, skipped {}, invalid {}; issues: {:?}",rt.requested_runs,rt.skipped_runs,rt.invalid_runs,rt.errors));
     lines.push(format!("mc_retest: median_net={:.2} losing={:.1}%", rt.net_profit_50pct, rt.losing_runs_pct));
     let gen = GeneratorConfig::default();
     let wf = walk_forward(&bars, &inst, &cfg, pyp, &gen, 4, 0.25, 20, 42);
-    lines.push(format!("walk_forward: windows={} oos_net={:.2} oos_pf={:.2}", wf.windows, wf.oos_net_profit, wf.oos_profit_factor));
-    text_result(lines.join("
-"))
+    lines.push(format!("walk_forward (trade-count evidence is not a robustness certificate): {}", serde_json::to_string(&wf).unwrap_or_else(|e|format!("report serialization failed: {e}"))));
+    errors.extend(mc.errors.iter().map(|error|format!("Monte Carlo: {error}")));
+    errors.extend(rt.errors.iter().map(|error|format!("MC retest: {error}")));
+    errors.extend(wf.errors.iter().map(|error|format!("Walk-forward: {error}")));
+    let mut context=quality;
+    context["errors"]=json!(errors);
+    let mut response=research_result(lines.join("\n"),context,&symbol,timeframe,&cfg);
+    if !errors.is_empty(){response["isError"]=json!(true);}
+    response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn failed_robustness_stages_are_protocol_errors_with_context(){
+        let path=std::env::temp_dir().join(format!("sqx-mcp-stress-{}-{}.csv",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::write(&path,"timestamp,open,high,low,close,volume\n1700000000,1,1,1,1,1\n1700000060,1,1,1,1,1\n").unwrap();
+        let response=call_tool(&json!({"name":"robustness","arguments":{"data":path,"symbol":"EURUSD","timeframe":"M1","strategy":Strategy::new("no trades")}}));
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(response["isError"],true,"{response}");
+        let text=response["content"][0]["text"].as_str().unwrap();
+        let context:Value=serde_json::from_str(text.split("research_context: ").nth(1).unwrap()).unwrap();
+        assert_eq!(context["symbol"],"EURUSD");
+        assert_eq!(context["config"]["bar_duration_ms"],60000);
+        let errors=context["errors"].as_array().unwrap();
+        for stage in ["Monte Carlo:","MC retest:","Walk-forward:"] {
+            assert!(errors.iter().any(|error|error.as_str().unwrap().starts_with(stage)),"{context}");
+        }
+    }
+    #[test]
+    fn source_selection_separates_csv_instrument_from_questdb(){
+        let csv=source_request(&json!({"data":"prices.csv","symbol":"USDJPY","timeframe":"M1"})).unwrap();
+        assert_eq!(csv,SourceRequest{data:Some("prices.csv".into()),symbol:"USDJPY".into(),timeframe:Timeframe::M1});
+        assert_eq!(source_request(&json!({"symbol":"USDJPY"})).unwrap().timeframe,Timeframe::M5);
+        for request in [json!({"data":"prices.csv"}),json!({"data":"prices.csv","symbol":"USDJPY"}),json!({"source":"questdb","data":"prices.csv","symbol":"USDJPY","timeframe":"M1"}),json!({"source":"csv","symbol":"USDJPY","timeframe":"M1"}),json!({"source":"other","symbol":"USDJPY"}),json!({"symbol":12}),json!({"symbol":"USDJPY","timeframe":null})] {
+            assert!(source_request(&request).is_err(),"{request}");
+        }
+    }
+    #[test]
+    fn csv_symbol_and_duration_reach_all_research_tools_without_network(){
+        let path=std::env::temp_dir().join(format!("sqx-mcp-source-{}-{}.csv",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::write(&path,"timestamp,open,high,low,close,volume\n1700000000,150,151,149,150,1\n1700000060,150,151,149,150,1\n").unwrap();
+        let mut request=json!({"source":"csv","data":path,"symbol":"USDJPY","timeframe":"M1","strategy":Strategy::new("source fixture"),"count":10,"config":{"bar_duration_ms":30000}});
+        let (bars,symbol,timeframe,_)=resolve_bars(&request).unwrap();assert_eq!(bars.len(),2);assert_eq!(symbol,"USDJPY");assert_eq!(timeframe,Timeframe::M1);
+        for tool in [tool_backtest,tool_generate,tool_portfolio,tool_robustness] {
+            let response=tool(&request);assert_eq!(response["isError"],true,"{response}");assert!(response.to_string().contains("conflicts with source timeframe"),"{response}");
+        }
+        request["config"]=json!({});
+        assert_eq!(simulation_config(&request,timeframe).unwrap().bar_duration_ms,Some(60000));
+        assert_eq!(simulation_config(&request,Timeframe::MN1).unwrap().bar_duration_ms,None);
+        let valid=tool_backtest(&request);
+        assert!(valid.get("isError").is_none(),"{valid}");
+        assert!(valid.to_string().contains("research_context"));
+        std::fs::write(&path,"timestamp,open,high,low,close,volume\n1700000000,150,151,149,150,1\n1700000120,150,151,149,150,1\n").unwrap();
+        for tool in [tool_backtest,tool_generate,tool_portfolio,tool_robustness] {
+            let response=tool(&request);assert_eq!(response["isError"],true,"{response}");assert!(response.to_string().contains("Unresolved data gaps"),"{response}");
+        }
+        request["allow_data_gaps"]=json!(true);
+        let exploratory=tool_backtest(&request);assert!(exploratory.get("isError").is_none(),"{exploratory}");
+        let context:Value=serde_json::from_str(exploratory["content"][0]["text"].as_str().unwrap().split("research_context: ").nth(1).unwrap()).unwrap();
+        assert_eq!(context["symbol"],"USDJPY");assert_eq!(context["timeframe"],"M1");
+        assert_eq!(context["config"]["bar_duration_ms"],60000);assert_eq!(context["data_quality"]["unclassified_intervals"],1);
+        assert_eq!(context["data_gaps_acknowledged"],true);
+        std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn quality_gate_distinguishes_market_closures_from_missing_and_invalid_data(){
+        let bar=|time|Bar::new(time,1.0,1.1,0.9,1.0,1.0);
+        let bars=[bar(0),bar(120000)];
+        let denied=research_quality(&json!({}),&bars,Timeframe::M1,180000).unwrap_err();
+        assert!(denied.contains("Unresolved data gaps"));
+        let allowed=research_quality(&json!({"allow_data_gaps":true}),&bars,Timeframe::M1,180000).unwrap();
+        assert_eq!(allowed["data_quality"]["unclassified_intervals"],1);
+        assert_eq!(allowed["data_gaps_acknowledged"],true);
+        let request=json!({"calendar":{"name":"Thursday split session","weekly":[{"weekday":3,"start_minute":0,"end_minute":1},{"weekday":3,"start_minute":2,"end_minute":3}]}});
+        let closed=research_quality(&request,&bars,Timeframe::M1,180000).unwrap();
+        assert_eq!(closed["data_quality"]["scheduled_closed_intervals"],1);
+        assert_eq!(closed["data_quality"]["unclassified_intervals"],0);
+        assert_eq!(closed["calendar"]["weekly"],request["calendar"]["weekly"]);
+        for invalid in [vec![bar(0),bar(0)],vec![bar(0),bar(30000)]] {
+            assert!(research_quality(&json!({"allow_data_gaps":true}),&invalid,Timeframe::M1,180000).is_err());
+        }
+        assert!(research_quality(&json!({"allow_data_gaps":true}),&bars,Timeframe::M1,179999).unwrap_err().contains("not closed"));
+        for request in [json!({"allow_data_gaps":"true"}),json!({"calendar":null}),json!({"calendar":{"name":"bad","weekly":[{"weekday":7,"start_minute":0,"end_minute":1}]}})] {
+            assert!(research_quality(&request,&bars,Timeframe::M1,180000).is_err());
+        }
+    }
+
 }

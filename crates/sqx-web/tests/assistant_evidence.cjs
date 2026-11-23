@@ -1,0 +1,27 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const source=fs.readFileSync(require('node:path').join(__dirname,'../assets/index.html'),'utf8');
+const start=source.indexOf('let assistantBusy=false;'),end=source.indexOf('document.getElementById("btn-ai").onclick',start);
+assert(start>=0&&end>start);
+const nodes={'ai-q':{value:'research'},'ai-answer':{},'btn-ai':{},'symbol-select':{value:'EURUSD'}};
+let result,refreshes=0;
+const ctx=vm.createContext({document:{getElementById:id=>nodes[id]},settings:()=>({}),postJSON:async()=>result,refreshResearchRuns:async()=>{refreshes++}});
+vm.runInContext(source.slice(start,end),ctx);
+(async()=>{
+ result={answer:'Candidate looks promising',error:'Archive storage failed',detail_evaluations:[{},{}],candidate_evaluations:[{outcome:{status:'evaluated'}},{outcome:{status:'invalid'}},{outcome:{status:'not_evaluated'}}]};
+ await ctx.askAssistant();
+ assert.match(nodes['ai-answer'].textContent,/^Error: Archive storage failed/);
+ assert.match(nodes['ai-answer'].textContent,/research unresolved/);
+ assert.match(nodes['ai-answer'].textContent,/3 candidates; 1 evaluated, 1 invalid, 1 not evaluated/);
+ assert.match(nodes['ai-answer'].textContent,/not confirmed saved/);
+ assert.match(nodes['ai-answer'].textContent,/Details reruns recorded: 2/);
+ assert.equal(refreshes,0);assert.equal(nodes['btn-ai'].disabled,false);
+ result={error:'Provider stopped after research',candidate_evaluations:[],archive:{run_id:'a'.repeat(64)}};
+ await ctx.askAssistant();
+ assert.match(nodes['ai-answer'].textContent,/^Error: Provider stopped/);
+ assert.match(nodes['ai-answer'].textContent,/Builder → Saved research/);
+ assert.match(nodes['ai-answer'].textContent,/Replay is unavailable/);
+ assert.equal(refreshes,1);
+ result={answer:'No research requested'};await ctx.askAssistant();
+ assert.equal(nodes['ai-answer'].textContent,'No research requested');
+ console.log('Assistant evidence UI passed: errors take precedence, counts and archive receipts remain visible, saved research refreshes.');
+})().catch(error=>{console.error(error);process.exitCode=1;});

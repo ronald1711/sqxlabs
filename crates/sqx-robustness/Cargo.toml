@@ -9,4 +9,5 @@ description = "Robustness testing: Monte Carlo trade manipulation."
 sqx-backtest = { path = "../sqx-backtest" }
 sqx-core = { path = "../sqx-core" }
 sqx-strategy = { path = "../sqx-strategy" }
+sqx-metrics = { path = "../sqx-metrics" }
 rand.workspace = true

@@ -91,3 +91,13 @@ pub fn load(path: &str) -> Result<Project, String> {
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     from_json(&text)
 }
+
+pub mod archive;
+
+pub mod experiment;
+
+pub mod reconciliation;
+
+pub mod evolution;
+
+pub mod assistant_trials;

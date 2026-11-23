@@ -8,7 +8,7 @@ use rand::SeedableRng;
 
 use sqx_backtest::{backtest, BacktestConfig};
 use sqx_core::{Bar, Instrument};
-use sqx_optimizer::{backtest_batch, rank, random_strategy, walk_forward, Fitness, GeneratorConfig};
+use sqx_optimizer::{backtest_batch_detailed, rank, random_strategy, Fitness, GeneratorConfig};
 use sqx_robustness::monte_carlo_trade_manipulation;
 use sqx_strategy::Strategy;
 
@@ -37,8 +37,40 @@ pub struct Pipeline {
 /// The outcome of running a pipeline.
 #[derive(Debug, Clone, Default)]
 pub struct PipelineReport {
+    pub retests: Vec<RetestEvaluation>,
+    pub builds: Vec<BuildEvaluation>,
+    pub optimizations: Vec<CandidateOptimization>,
+    pub errors: Vec<String>,
     pub databank: Vec<Strategy>,
     pub log: Vec<String>,
+}
+
+#[derive(Debug,Clone)]
+pub struct BuildEvaluation {
+    pub step: usize,
+    pub candidate_index: usize,
+    pub evaluation: sqx_optimizer::BatchEvaluation,
+    pub selected: bool,
+}
+
+#[derive(Debug,Clone)]
+pub struct RetestEvaluation {
+    pub step:usize,
+    pub strategy:Strategy,
+    pub requested_runs:usize,
+    pub seed:u64,
+    pub minimum_positive_pct:f64,
+    pub errors:Vec<String>,
+    pub report:Option<sqx_robustness::MonteCarloReport>,
+    pub selected:bool,
+}
+
+/// Recorded family evaluation, including rejected/insufficient candidates.
+#[derive(Debug,Clone)]
+pub struct CandidateOptimization {
+    pub original: Strategy,
+    pub family: Vec<Strategy>,
+    pub report: sqx_optimizer::WalkForwardReport,
 }
 
 /// Run a pipeline over the given data.
@@ -51,6 +83,19 @@ pub fn run(
     gen: &GeneratorConfig,
     seed: u64,
 ) -> PipelineReport {
+    let failure=|error:String| PipelineReport{errors:vec![error],..Default::default()};
+    if let Err(error)=gen.validate(){return failure(error);}
+    if let Err(error)=sqx_backtest::validate_backtest_inputs(bars,instrument,config){return failure(error);}
+    for task in &pipeline.tasks {
+        match task.kind {
+            TaskKind::Optimize{windows,candidates} if windows==0 || windows>12 || candidates==0 || candidates>2000=>return failure("Optimize requires 1..12 windows and 1..2000 variants".into()),
+            TaskKind::Build{count,keep} if count==0 || count>2000 || keep==0 || keep>count=>return failure("Build requires 1 <= keep <= count <= 2000".into()),
+            TaskKind::Retest{mc_runs,min_positive_pct} if mc_runs==0 || mc_runs>10000 || !min_positive_pct.is_finite() || !(0.0..=100.0).contains(&min_positive_pct)=>return failure("Invalid retest run count or percentage".into()),
+            TaskKind::GoToTask{index} if index>=pipeline.tasks.len()=>return failure("Pipeline jump target is out of range".into()),
+            _=>{}
+        }
+    }
+    let mut retests=Vec::new();let mut builds=Vec::new();let mut optimizations=Vec::new();let mut errors=Vec::new();
     let mut rng = StdRng::seed_from_u64(seed);
     let mut databank: Vec<Strategy> = Vec::new();
     let mut log = Vec::new();
@@ -63,9 +108,19 @@ pub fn run(
                 let cands: Vec<Strategy> = (0..*count)
                     .map(|i| random_strategy(&mut rng, &format!("b{steps}-{i}"), gen))
                     .collect();
-                let scored = backtest_batch(&cands, bars, instrument, config, periods_per_year);
+                let evaluations = backtest_batch_detailed(&cands, bars, instrument, config, periods_per_year);
+                let mut scored=Vec::new();
+                for (index,evaluation) in evaluations.iter().enumerate(){
+                    if !evaluation.errors.is_empty(){
+                        errors.push(format!("Build step {steps}, candidate {index} ({}): {}",evaluation.strategy.name,evaluation.errors.join("; ")));
+                    }else{scored.push((evaluation.strategy.clone(),evaluation.metrics));}
+                }
                 let ranked = rank(scored, Fitness::ProfitFactor, 5);
                 databank = ranked.into_iter().take(*keep).map(|(s, _)| s).collect();
+                for (candidate_index,evaluation) in evaluations.into_iter().enumerate(){
+                    let selected=databank.contains(&evaluation.strategy);
+                    builds.push(BuildEvaluation{step:steps,candidate_index,evaluation,selected});
+                }
                 log.push(format!("Build: {} candidates -> {} kept", count, databank.len()));
                 pc += 1;
             }
@@ -73,36 +128,45 @@ pub fn run(
                 let mut kept = Vec::new();
                 for s in databank.drain(..) {
                     let r = backtest(&s, bars, instrument, config);
-                    let mc = monte_carlo_trade_manipulation(&r.trades, *mc_runs, 0.1, seed);
-                    let positive_pct = 100.0 - mc.losing_runs_pct;
-                    if positive_pct >= *min_positive_pct {
-                        kept.push(s);
+                    if !r.errors.is_empty(){
+                        retests.push(RetestEvaluation{step:steps,strategy:s,requested_runs:*mc_runs,seed,minimum_positive_pct:*min_positive_pct,errors:r.errors.clone(),report:None,selected:false});
+                        errors.extend(r.errors);continue;
                     }
+                    let mc = monte_carlo_trade_manipulation(&r.trades, *mc_runs, 0.1, seed);
+                    if !mc.errors.is_empty(){let error=format!("Retest step {steps}, {} unavailable: {}",s.name,mc.errors.join("; "));log.push(error.clone());errors.push(error);}
+                    let selected=mc.meets_positive_threshold(*min_positive_pct);
+                    retests.push(RetestEvaluation{step:steps,strategy:s.clone(),requested_runs:*mc_runs,seed,minimum_positive_pct:*min_positive_pct,errors:mc.errors.clone(),report:Some(mc),selected});
+                    if selected {kept.push(s);}
                 }
                 log.push(format!("Retest: {} survivors", kept.len()));
                 databank = kept;
                 pc += 1;
             }
-            TaskKind::Optimize { windows, candidates } => {
-                let mut kept = Vec::new();
-                for s in databank.drain(..) {
-                    let rep = walk_forward(bars, instrument, config, periods_per_year, gen, *windows, 0.25, *candidates, seed);
-                    if rep.oos_net_profit > 0.0 {
-                        kept.push(s);
+            TaskKind::Optimize { windows,candidates } => {
+                let mut kept=Vec::new();
+                for original in databank.drain(..) {
+                    let family=match sqx_optimizer::parameter_family(&original,*candidates,seed,&gen.param_ranges){Ok(family)=>family,Err(error)=>{errors.push(format!("{}: {error}",original.name));continue;}};
+                    let report=sqx_optimizer::walk_forward_candidates(bars,instrument,config,periods_per_year,&family,*windows,0.25,seed,&sqx_optimizer::WalkForwardCriteria::default());
+                    errors.extend(report.errors.iter().map(|error|format!("{}: {error}",original.name)));
+                    if report.evidence_sufficient && report.oos_net_profit>0.0 {
+                        // Keep the last training-selected variant, never retrospectively
+                        // choose the variant with the best OOS outcome.
+                        if let Some(selected)=report.window_results.last().and_then(|w|w.selected_strategy.clone()){kept.push(selected);}
                     }
+                    log.push(format!("Optimize {}: {} frozen parameter/SL/PT variants; {} IS evaluations; OOS net {}; evidence sufficient {}. Full-data candidate discovery means this is exploratory, not an untouched holdout.",original.name,family.len(),report.candidates_attempted,report.oos_net_profit,report.evidence_sufficient));
+                    optimizations.push(CandidateOptimization{original,family,report});
                 }
-                log.push(format!("Optimize: {} survivors", kept.len()));
-                databank = kept;
-                pc += 1;
-            }
+                databank=kept;pc+=1;
+            },
             TaskKind::GoToTask { index } => {
                 log.push(format!("GoToTask {} (databank {})", index, databank.len()));
                 pc = *index;
             }
         }
     }
-    log.push(format!("Pipeline finished after {} steps; {} strategies in databank", steps, databank.len()));
-    PipelineReport { databank, log }
+    log.push(format!("Pipeline {} after {} steps; {} strategies in databank",if pc<pipeline.tasks.len(){"stopped at its limit"}else{"finished"}, steps, databank.len()));
+    if pc<pipeline.tasks.len(){errors.push("Pipeline step limit reached before completion".into());}
+    PipelineReport {errors,retests,builds,optimizations,databank, log }
 }
 
 /// A default demo pipeline: Build -> Retest -> Optimize.

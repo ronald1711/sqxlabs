@@ -5,6 +5,9 @@ algotrader/
 docs/
 scripts/*
 !scripts/mt5_export.py
+!scripts/tests/
+scripts/tests/*
+!scripts/tests/test_*.py
 data/slice.db
 data/mt5/
 data/*.csv

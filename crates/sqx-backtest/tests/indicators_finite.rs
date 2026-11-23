@@ -258,3 +258,46 @@ fn adx_is_finite_and_zero_on_flat_bars() {
         );
     }
 }
+
+/// Causality is independent of formula agreement: appending or replacing future
+/// candles must never revise a historical value or its undefined/warmup status.
+#[test]
+fn catalog_values_and_warmups_are_prefix_invariant() {
+    let mut bars=make_bars(400);
+    for (i,bar) in bars.iter_mut().enumerate(){bar.time=1_700_000_000_000+i as i64*900_000;}
+    let mut failures=Vec::new();
+    for spec in sqx_strategy::indicator_catalog() {
+      for period_override in [None,Some(1.0),Some(2.0),Some(7.0),Some(31.0)] {
+        let mut params=spec.default_params();
+        if let Some(period)=period_override {
+            let Some(parameter)=params.iter_mut().find(|p|p.name=="period") else {continue;};
+            parameter.value=period;
+        }
+        let tag=format!("{} period={period_override:?}",spec.name);
+        let full=match std::panic::catch_unwind(||sqx_backtest::compute(spec.name,&params,&bars).expect("catalog indicator must be registered")) {
+            Ok(values)=>values,Err(_)=>{failures.push(format!("{tag}: panics on full input"));continue;}
+        };
+        for end in [0,1,2,3,5,9,13,14,19,20,21,26,29,30,50,99,199,299,399] {
+            let prefix=match std::panic::catch_unwind(||sqx_backtest::compute(spec.name,&params,&bars[..end]).unwrap()) {
+                Ok(values)=>values,Err(_)=>{failures.push(format!("{}: panics for prefix {end}",tag));continue;}
+            };
+            if prefix.len()!=end {failures.push(format!("{}: length {} for prefix {end}",tag,prefix.len()));continue;}
+            if let Some(i)=(0..end).find(|&i|!same_value(prefix[i],full[i])) {
+                failures.push(format!("{}: prefix {end}, index {i}: alone={}, with future={}",tag,prefix[i],full[i]));
+            }
+        }
+        for end in [1,20,100,300] {
+            let mut changed=bars.clone();
+            for (i,bar) in changed[end..].iter_mut().enumerate(){
+                bar.open=1000.0+i as f64;bar.close=1001.0+i as f64;bar.high=1010.0+i as f64;bar.low=990.0+i as f64;bar.volume=1.0;
+            }
+            let perturbed=sqx_backtest::compute(spec.name,&params,&changed).unwrap();
+            if let Some(i)=(0..end).find(|&i|!same_value(perturbed[i],full[i])) {
+                failures.push(format!("{}: future perturbation from {end} changed index {i}",tag));
+            }
+        }
+    }
+    }
+    assert!(failures.is_empty(),"Historical indicator values changed:\n{}",failures.join("\n"));
+}
+fn same_value(a:f64,b:f64)->bool {(a.is_nan()&&b.is_nan())||a.to_bits()==b.to_bits()}

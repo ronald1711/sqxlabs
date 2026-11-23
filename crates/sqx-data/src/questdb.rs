@@ -108,11 +108,16 @@ impl QuestdbClient {
         limit: Option<usize>,
     ) -> Result<Vec<Bar>, String> {
         let sym = escape_sql_str(symbol);
+        let cutoff = end_ms.unwrap_or_else(now_ms).min(now_ms());
+        if start_ms.is_some_and(|start|start>=cutoff) || limit==Some(0) { return Err("empty or reversed candle range".into()); }
+        let mut source_start = start_ms;
 
-        let bars = if let Some(label) = direct_label(timeframe) {
+        let mut bars = if let Some(label) = direct_label(timeframe) {
             // The requested timeframe is stored natively: reverse scan + LIMIT
             // returns the most recent bars without scanning the whole table.
-            let mut where_clause = format!("symbol = '{sym}' AND timeframe = '{label}'");
+            let duration = timeframe.minutes().ok_or("missing candle duration")? * 60_000;
+            let latest_open = cutoff.checked_sub(duration).ok_or("invalid candle cutoff")?;
+            let mut where_clause = format!("symbol = '{sym}' AND timeframe = '{label}' AND ts <= '{}'", iso_utc(latest_open));
             if let Some(s) = start_ms {
                 where_clause.push_str(&format!(" AND ts >= '{}'", iso_utc(s)));
             }
@@ -128,7 +133,7 @@ impl QuestdbClient {
                 ),
             };
             let rows = self.exec(&sql)?;
-            let mut bars: Vec<Bar> = rows.iter().filter_map(row_to_bar).collect();
+            let mut bars: Vec<Bar> = rows.iter().enumerate().map(|(i,row)|row_to_bar(row).map_err(|e|format!("QuestDB row {}: {e}",i+1))).collect::<Result<Vec<_>,_>>()?;
             if let Some(n) = limit {
                 bars.reverse();
                 bars.truncate(n);
@@ -138,14 +143,15 @@ impl QuestdbClient {
             // Not stored natively: aggregate from a coarser/finer base. The 1m
             // base is huge, so bound intraday aggregation by a time window;
             // daily-base aggregation (W1/MN1) is small and left mostly unbounded.
-            let end = end_ms.unwrap_or_else(now_ms);
+            let end = cutoff;
             let mut where_clause = format!("symbol = '{sym}' AND timeframe = '{base}' AND ts <= '{}'", iso_utc(end));
             if base == "1m" {
                 // The 1m base is huge, so bound intraday aggregation by a window.
                 let start = start_ms.unwrap_or_else(|| match (limit, timeframe.minutes()) {
-                    (Some(n), Some(mins)) => end.saturating_sub(n as i64 * mins * 60_000 * 2),
+                    (Some(n), Some(mins)) => end.saturating_sub(i64::try_from(n).unwrap_or(i64::MAX).saturating_mul(mins).saturating_mul(120_000)),
                     _ => end.saturating_sub(90 * 24 * 3_600_000),
                 });
+                source_start = Some(start);
                 where_clause.push_str(&format!(" AND ts >= '{}'", iso_utc(start)));
             } else if let Some(s) = start_ms {
                 // Daily base is small; only bound when the caller asks for it.
@@ -156,7 +162,9 @@ impl QuestdbClient {
                  FROM candles WHERE {where_clause} SAMPLE BY {unit} ALIGN TO CALENDAR ORDER BY ts ASC"
             );
             let rows = self.exec(&sql)?;
-            let mut bars: Vec<Bar> = rows.iter().filter_map(row_to_bar).collect();
+            let mut bars: Vec<Bar> = rows.iter().enumerate().map(|(i,row)|row_to_bar(row).map_err(|e|format!("QuestDB row {}: {e}",i+1))).collect::<Result<Vec<_>,_>>()?;
+            bars.retain(|bar| source_start.is_none_or(|start|bar.time>=start)
+                && crate::quality::candle_end(bar.time,timeframe).is_some_and(|end|end<=cutoff));
             if let Some(n) = limit {
                 let start = bars.len().saturating_sub(n);
                 bars = bars[start..].to_vec();
@@ -166,6 +174,10 @@ impl QuestdbClient {
             return Err(format!("timeframe {timeframe} is not supported for QuestDB candles"));
         };
 
+        // SAMPLE BY may produce a partial final bucket. Only publish closed candles.
+        bars.retain(|bar|crate::quality::candle_end(bar.time,timeframe).is_some_and(|end|end<=cutoff));
+        let quality=crate::quality::audit(&bars,timeframe,cutoff,None);
+        if !quality.errors.is_empty(){return Err(quality.errors.join("; "));}
         if bars.is_empty() {
             return Err(format!("no bars for {symbol} {timeframe}"));
         }
@@ -236,12 +248,12 @@ fn aggregate_spec(tf: Timeframe) -> Option<(&'static str, &'static str)> {
 }
 
 /// Convert one `dataset` row (ts string, o, h, l, c, v) into a `Bar`.
-fn row_to_bar(row: &serde_json::Value) -> Option<Bar> {
-    let arr = row.as_array()?;
-    let ts_str = arr.first()?.as_str()?;
-    let ts = DateTime::parse_from_rfc3339(ts_str).ok()?.timestamp_millis();
-    let f = |i: usize| arr.get(i).and_then(|v| v.as_f64()).unwrap_or(0.0);
-    Some(Bar::new(ts, f(1), f(2), f(3), f(4), f(5)))
+fn row_to_bar(row: &serde_json::Value) -> Result<Bar,String> {
+    let arr=row.as_array().ok_or("expected row array")?;
+    if arr.len()!=6{return Err("expected timestamp and five OHLCV values".into());}
+    let time=DateTime::parse_from_rfc3339(arr[0].as_str().ok_or("missing timestamp")?).map_err(|e|e.to_string())?.timestamp_millis();
+    let number=|i:usize|arr[i].as_f64().filter(|v|v.is_finite()).ok_or_else(||format!("missing or invalid numeric column {i}"));
+    Ok(Bar::new(time,number(1)?,number(2)?,number(3)?,number(4)?,number(5)?))
 }
 
 fn now_ms() -> i64 {
@@ -300,6 +312,52 @@ mod tests {
     use sqx_core::Timeframe::*;
 
     #[test]
+    fn aggregation_removes_both_partial_edges_before_applying_limit(){
+        use std::io::{Read,Write};
+        let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port=listener.local_addr().unwrap().port();
+        let server=std::thread::spawn(move||{
+            let (mut stream,_)=listener.accept().unwrap();stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let mut request=Vec::new();let mut buf=[0u8;1024];
+            while !request.windows(4).any(|w|w==b"\r\n\r\n"){let n=stream.read(&mut buf).unwrap();assert!(n>0);request.extend_from_slice(&buf[..n]);}
+            assert!(String::from_utf8(request).unwrap().contains("SAMPLE%20BY%203m"));
+            let body=serde_json::json!({"dataset":[
+                ["1970-01-01T00:00:00Z",1.0,1.1,0.9,1.0,1.0],
+                ["1970-01-01T00:03:00Z",1.0,1.1,0.9,1.0,1.0],
+                ["1970-01-01T00:06:00Z",1.0,1.1,0.9,1.0,1.0],
+                ["1970-01-01T00:09:00Z",1.0,1.1,0.9,1.0,1.0]
+            ]}).to_string();
+            write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).unwrap();
+        });
+        let client=QuestdbClient::new(&QuestdbConfig{host:"127.0.0.1".into(),port,user:None,password:None});
+        let bars=client.fetch_bars("EURUSD",M3,Some(60000),Some(600000),Some(2)).unwrap();
+        server.join().unwrap();assert_eq!(bars.iter().map(|b|b.time).collect::<Vec<_>>(),vec![180000,360000]);
+    }
+
+    #[test]
+    fn fetch_queries_closed_candles_and_excludes_partial_server_rows(){
+        use std::io::{Read,Write};
+        let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port=listener.local_addr().unwrap().port();
+        let server=std::thread::spawn(move||{
+            let (mut stream,_)=listener.accept().unwrap();stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let mut request=Vec::new();let mut buf=[0u8;1024];
+            while !request.windows(4).any(|w|w==b"\r\n\r\n"){let n=stream.read(&mut buf).unwrap();assert!(n>0);request.extend_from_slice(&buf[..n]);}
+            let request=String::from_utf8(request).unwrap();
+            assert!(request.contains("1970-01-01T00%3A01%3A00.000000Z"),"{request}");
+            let body=serde_json::json!({"dataset":[
+                ["1970-01-01T00:00:00Z",1.0,1.1,0.9,1.0,1.0],
+                ["1970-01-01T00:01:00Z",1.0,1.1,0.9,1.0,1.0],
+                ["1970-01-01T00:02:00Z",1.0,1.1,0.9,1.0,1.0]
+            ]}).to_string();
+            write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).unwrap();
+        });
+        let client=QuestdbClient::new(&QuestdbConfig{host:"127.0.0.1".into(),port,user:None,password:None});
+        let bars=client.fetch_bars("EURUSD",M1,None,Some(120000),None).unwrap();
+        server.join().unwrap();assert_eq!(bars.len(),2);assert_eq!(bars[1].time,60000);
+    }
+
+    #[test]
     fn direct_and_aggregate_mapping() {
         assert_eq!(direct_label(M1), Some("1m"));
         assert_eq!(direct_label(M5), Some("5m"));
@@ -345,7 +403,6 @@ mod tests {
     #[test]
     fn row_to_bar_rejects_null_volume() {
         let row = serde_json::json!(["2026-11-20T12:34:56Z", 1.0, 1.0, 1.0, 1.0, null]);
-        let b = row_to_bar(&row).unwrap();
-        assert_eq!(b.volume, 0.0);
+        assert!(row_to_bar(&row).is_err());
     }
 }

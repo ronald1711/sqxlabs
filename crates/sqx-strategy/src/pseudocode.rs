@@ -8,7 +8,8 @@ pub fn render(strategy: &Strategy) -> String {
         if strategy.long { "Long" } else { "-" },
         if strategy.short { "Short" } else { "-" }));
     out.push_str("// Money management: ");
-    out.push_str(strategy.money_management.label());
+    out.push_str(&format!("{:?}", strategy.money_management));
+    out.push_str(&format!("\n// Trading options: {:?}\n// Additional exits: {:?}\n// Confirmation: {:?}", strategy.trading_options, strategy.exits, strategy.confirmation));
     out.push_str("\n\n");
 
     for sig in &strategy.signals {

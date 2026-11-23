@@ -7,7 +7,7 @@
 use sqx_backtest::BacktestResult;
 
 /// The computed performance metrics of a strategy.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, serde::Serialize)]
 pub struct Metrics {
     pub net_profit: f64,
     pub net_profit_pct: f64,
@@ -44,12 +44,38 @@ pub struct Metrics {
     pub calmar_ratio: f64,
 }
 
+/// Reject nonfinite observations before deriving or ranking statistics.
+/// Undefined derived ratios (e.g. profit factor without losses) remain allowed.
+pub fn validate_observations(result:&BacktestResult)->Result<(),String>{
+    if result.execution.account_evidence_schema!=0 {sqx_backtest::validate_account_evidence(result)?;}
+    if !result.initial_deposit.is_finite() || !result.final_equity.is_finite()
+        || !(result.final_equity-result.initial_deposit).is_finite()
+        || result.equity.iter().any(|(_,value)|!value.is_finite()) {
+        return Err("Nonfinite account/equity observation".into());
+    }
+    let mut gains=0.0;let mut losses=0.0;let mut bars=0usize;
+    for (index,trade) in result.trades.iter().enumerate(){
+        if [trade.open_price,trade.close_price,trade.size,trade.pnl,trade.pnl_points,trade.commission,trade.financing,trade.mae_points,trade.mfe_points].iter().any(|v|!v.is_finite()) {
+            return Err(format!("Nonfinite observation in trade {index}"));
+        }
+        if trade.pnl>0.0 {gains+=trade.pnl;}else{losses+=trade.pnl;}
+        if !gains.is_finite() || !losses.is_finite(){return Err("Trade PNL aggregation overflow".into());}
+        bars=bars.checked_add(trade.bars).ok_or("Trade duration aggregation overflow")?;
+    }
+    Ok(())
+}
+
 /// Compute metrics over a backtest result.
 ///
 /// bar_count is the total number of bars in the dataset and periods_per_year
 /// the number of bars per calendar year (used to annualize Sharpe and CAGR,
 /// and to measure stagnation in bars).
+/// Equity entries must be end-of-bar observations, without an extra initial
+/// deposit row. Sharpe uses simple returns from that deposit, zero risk-free
+/// return, and sample standard deviation; returns after nonpositive equity
+/// make it undefined rather than being omitted.
 pub fn compute(result: &BacktestResult, bar_count: usize, periods_per_year: f64) -> Metrics {
+    if !result.errors.is_empty() || validate_observations(result).is_err() { return Metrics { net_profit: f64::NAN, net_profit_pct: f64::NAN, gross_profit: f64::NAN, gross_loss: f64::NAN, profit_factor: f64::NAN, max_drawdown: f64::NAN, max_drawdown_pct: f64::NAN, return_dd_ratio: f64::NAN, number_of_trades: f64::NAN, number_of_profits: f64::NAN, number_of_losses: f64::NAN, winning_pct: f64::NAN, avg_trade: f64::NAN, avg_win: f64::NAN, avg_loss: f64::NAN, max_profit: f64::NAN, max_loss: f64::NAN, payout_ratio: f64::NAN, win_loss_ratio: f64::NAN, max_consec_wins: f64::NAN, max_consec_losses: f64::NAN, sharpe_ratio: f64::NAN, sqn: f64::NAN, cagr: f64::NAN, stability: f64::NAN, rsquared: f64::NAN, expectancy: f64::NAN, r_expectancy: f64::NAN, stddev: f64::NAN, exposure_pct: f64::NAN, stagnation_bars: f64::NAN, recovery_factor: f64::NAN, calmar_ratio: f64::NAN }; }
     let mut m = Metrics::default();
     let trades = &result.trades;
     let n = trades.len();
@@ -72,7 +98,7 @@ pub fn compute(result: &BacktestResult, bar_count: usize, periods_per_year: f64)
     for t in trades {
         pnls.push(t.pnl);
         total_bars_held += t.bars;
-        if t.pnl >= 0.0 {
+        if t.pnl > 0.0 {
             gross_profit += t.pnl;
             wins += 1.0;
             sum_win += t.pnl;
@@ -80,7 +106,7 @@ pub fn compute(result: &BacktestResult, bar_count: usize, periods_per_year: f64)
             consec_wins += 1.0;
             consec_losses = 0.0;
             max_consec_wins = max_consec_wins.max(consec_wins);
-        } else {
+        } else if t.pnl < 0.0 {
             gross_loss += t.pnl;
             losses += 1.0;
             sum_loss += t.pnl;
@@ -88,6 +114,9 @@ pub fn compute(result: &BacktestResult, bar_count: usize, periods_per_year: f64)
             consec_losses += 1.0;
             consec_wins = 0.0;
             max_consec_losses = max_consec_losses.max(consec_losses);
+        } else {
+            // A flat trade is neither a profit nor a loss and breaks both streaks.
+            consec_wins=0.0;consec_losses=0.0;
         }
     }
 
@@ -164,7 +193,7 @@ pub fn compute(result: &BacktestResult, bar_count: usize, periods_per_year: f64)
     m.rsquared = r2;
     m.stability = r2;
 
-    m.sharpe_ratio = sharpe(&result.equity, periods_per_year);
+    m.sharpe_ratio = sharpe_from_equity(&result.equity, result.initial_deposit, periods_per_year);
     m.cagr = cagr(result.initial_deposit, result.final_equity, bar_count as f64, periods_per_year);
     m.calmar_ratio = if m.max_drawdown_pct.is_finite() && m.max_drawdown_pct > 0.0 && m.cagr.is_finite() {
         m.cagr / (m.max_drawdown_pct / 100.0)
@@ -248,18 +277,22 @@ fn linear_fit_r2(equity: &[(i64, f64)]) -> (f64, f64) {
     (r2, slope)
 }
 
-fn sharpe(equity: &[(i64, f64)], periods_per_year: f64) -> f64 {
-    if equity.len() < 2 {
+/// Sharpe from end-of-bar equity and the balance preceding its first bar.
+/// Zero risk-free rate and sample standard deviation; invalid returns yield NaN.
+pub fn sharpe_from_equity(equity: &[(i64, f64)], initial: f64, periods_per_year: f64) -> f64 {
+    if equity.len() < 2 || !initial.is_finite() || initial<=0.0
+        || !periods_per_year.is_finite() || periods_per_year<=0.0 {
         return f64::NAN;
     }
-    let mut rets = Vec::with_capacity(equity.len() - 1);
-    for wd in equity.windows(2) {
-        let prev = wd[0].1;
-        if prev > 0.0 {
-            rets.push((wd[1].1 - prev) / prev);
-        }
+    let mut rets = Vec::with_capacity(equity.len());
+    let mut prev=initial;
+    for &(_,current) in equity {
+        if prev<=0.0 || !current.is_finite(){return f64::NAN;}
+        let change=(current-prev)/prev;
+        if !change.is_finite(){return f64::NAN;}
+        rets.push(change);prev=current;
     }
-    let sd = stddev(&rets);
+    let sd = stddev(&rets) * (rets.len() as f64 / (rets.len()-1) as f64).sqrt();
     if sd == 0.0 || sd.is_nan() {
         return f64::NAN;
     }

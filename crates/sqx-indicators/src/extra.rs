@@ -36,13 +36,16 @@ pub fn ichimoku_senkou_b(h: &[f64], l: &[f64]) -> Series {
     out
 }
 
-/// Vortex indicator: returns (+VI, -VI).
+/// Vortex indicator: returns (+VI, -VI). The first value is at index n:
+/// n actual current/previous-candle movements require n+1 candles.
 pub fn vortex(h: &[f64], l: &[f64], c: &[f64], n: usize) -> (Series, Series) {
     let len = h.len();
-    let mut plus_vm = vec![0.0; len];
-    let mut minus_vm = vec![0.0; len];
-    let mut tr = vec![0.0; len];
-    tr[0] = h[0] - l[0];
+    if len == 0 { return (Vec::new(), Vec::new()); }
+    // There is no previous candle at index zero. A fabricated zero movement
+    // would shorten the warmup and bias its first result.
+    let mut plus_vm = vec![f64::NAN; len];
+    let mut minus_vm = vec![f64::NAN; len];
+    let mut tr = vec![f64::NAN; len];
     for i in 1..len {
         plus_vm[i] = (h[i] - l[i - 1]).abs();
         minus_vm[i] = (l[i] - h[i - 1]).abs();
@@ -147,6 +150,9 @@ pub fn mfi(h: &[f64], l: &[f64], c: &[f64], v: &[f64], n: usize) -> Series {
     let len = h.len();
     let mut pos = vec![0.0; len];
     let mut neg = vec![0.0; len];
+    // The first candle has no prior typical price, so it cannot contribute a
+    // classified flow. n classified flows require n+1 input candles.
+    if len > 0 { pos[0] = f64::NAN; neg[0] = f64::NAN; }
     let tp: Vec<f64> = (0..len).map(|i| (h[i] + l[i] + c[i]) / 3.0).collect();
     for i in 1..len {
         let flow = tp[i] * v[i];

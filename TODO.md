@@ -1,0 +1,96 @@
+# Reliability TODO
+
+Status: research tool under validation, not independently certified for trading.
+This checklist tracks remaining work; it does not replace the six completion
+requirements and evidence audit in [RELIABILITY.md](RELIABILITY.md).
+
+## P0 — Independently validate execution
+
+- [ ] Obtain a reproducible independent fixture: market data, instrument/account
+  settings, exact strategy and MT5/broker execution report with declared provenance.
+- [ ] Compare orders, fills, trades and balances for long/short strategies,
+  spread/commission/slippage, account-currency conversion, gap fills, SL/TP,
+  trailing/break-even, margin rejection, stop-out and financing.
+- [ ] Explain every discrepancy and preserve reference results as regression tests.
+- [ ] Document which instrument/account/data/execution combinations have evidence.
+  Start with a concrete end-to-end scenario, then expand coverage; this does not
+  reduce the full programme's scope.
+- [ ] Rerun historical databanks created by the earlier defective execution model
+  after that model has been independently validated. Preserve provenance rather
+  than presenting old rankings as current evidence.
+
+Acceptance: independent results agree within explicit, justified tolerances;
+remaining execution assumptions and unsupported cases are visible.
+
+## P1 — Complete the simulation contract and evidence coverage
+
+- [ ] Reconcile the full intrabar order/account lifecycle, not only sampled
+  account values and final settlement arithmetic.
+- [ ] Complete higher-timeframe confirmation and market-calendar boundary cases.
+- [ ] State quote basis, event ordering and information availability explicitly.
+- [ ] Distinguish local OHLC path scenarios from global adverse/favourable bounds;
+  do not imply that candle data determines the true intrabar sequence.
+- [ ] Maintain a coverage matrix for every advertised indicator, warmup/seed
+  convention and supported execution feature, backed by independent references.
+- [ ] Extend causal/future-perturbation and deterministic replay fixtures to the
+  remaining supported combinations.
+
+## P1 — Make research provenance complete
+
+- [ ] Provide durable trial accounting on every research entry point, including
+  CLI, MCP, pipelines, optimization and robustness operations.
+- [ ] Retain successful, rejected, failed and interrupted trials before selection;
+  distinguish archive record counts from independent trial counts.
+- [ ] Independently review walk-forward boundaries, warmup, capital continuity,
+  minimum evidence thresholds and untouched-holdout handling across all routes.
+- [ ] Make a selected strategy traceable to its full search/selection history.
+
+## P1 — Establish remote release gates
+
+- [ ] Activate [the workflow template](ci/reliability-workflow.yml) at
+  `.github/workflows/reliability.yml`. GitHub rejected workflow publication because
+  the current OAuth connection lacks `workflow` permission; the template is
+  versioned under `ci/` and does not run automatically.
+
+- [ ] Verify actual GitHub Actions runs for Linux/macOS and debug/release,
+  including profile parity; local success is not proof of remote success.
+- [ ] Fix any platform-specific failures exposed by those runs.
+- [ ] Configure successful checks as required branch protections/ruleset checks.
+- [ ] Establish a versioned release/artifact retention procedure: archive replay
+  requires the exact recorded executable, not merely compatible source code.
+
+## P2 — Validate exports and paper trading
+
+- [ ] Check exported strategy semantics and execution against the source strategy
+  for each advertised target and supported feature combination.
+- [ ] Reconcile a real paper-trading dataset against archived strategy results.
+- [ ] Explain fill, timing, costs and financing differences using explicit
+  tolerances; matching results are not a profitability guarantee.
+- [ ] Keep unsupported exports and insufficient evidence visibly unresolved.
+
+## P2 — Finish operational reliability and usability
+
+- [ ] Bound retained full-result memory during large AI research sessions.
+- [ ] Implement provider-conversation/session recovery; current recovery restarts
+  individual frozen backtests, not the AI conversation or unsaved future work.
+- [ ] Test interruption during an AI engine calculation, not only while awaiting
+  the next provider response; define the scope of power-loss guarantees.
+- [ ] Complete the evidence viewer and test rendered recovery flows, keyboard
+  navigation and narrow-screen layouts.
+- [ ] Validate long-running research and backup/restore at representative scale.
+- [ ] If remote hosting is introduced, implement and test authentication and access
+  control first. The supported server currently restricts access to loopback.
+
+## Current verified baseline
+
+- Local debug and release workspace gates: 368 Rust tests, 16 frontend scripts,
+  four Python exporter tests and successful workspace builds.
+- Additional recovery tests passed after the final memory/test-isolation changes.
+- Earlier debug/release parity fixtures cover four execution scenarios and two
+  seeded evolution runs; this is internal determinism evidence, not broker parity.
+- Frozen CLI and AI-trial inputs/results support archives, backup/restore and
+  exact-engine replay; AI checkpoints can restart one trial without provider calls.
+- Internal execution/account checks and per-trade explanations are implemented.
+
+Do not mark this checklist complete solely because existing tests are green.
+See [README.md](README.md) for operation and [ci/README.md](ci/README.md) for checks.

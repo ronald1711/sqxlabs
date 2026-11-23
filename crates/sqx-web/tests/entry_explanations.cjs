@@ -1,0 +1,30 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync('crates/sqx-web/assets/workspace.js','utf8'),start=source.indexOf('function signalEvidenceHtml('),end=source.indexOf('function tradeLedgerHtml(',start);assert(start>=0&&end>start);
+const ctx=vm.createContext({escapeHtml:s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')});vm.runInContext(source.slice(start,end),ctx);
+const data={entry_attempts:[{signal_bar_index:0,signal_bar_open_time:0,attempt_time:60007,direction:'Long',trade_id:0,blocked_by:[],requested_lots:0.1,filled_lots:0.1,fill_price:1.001},{signal_bar_index:2,signal_bar_open_time:120000,attempt_time:180009,direction:'Short',trade_id:null,blocked_by:['daily_entry_limit','outside_trading_hours','<unknown>'],requested_lots:null,filled_lots:null,fill_price:null}]};
+const html=ctx.entryAttemptsHtml(data);assert.match(html,/2 attempts · 1 filled · 1 blocked/);assert.match(html,/Opened trade 0/);assert.match(html,/1970-01-01T00:00:00.000Z/);assert.match(html,/1970-01-01T00:01:00.007Z/);assert.match(html,/Daily entry limit reached/);assert.match(html,/Outside permitted trading hours/);assert.match(html,/&lt;unknown&gt;/);assert.doesNotMatch(html,/<unknown>/);assert.match(html,/Not reached \/ not recorded/);assert.match(html,/not a trade/);
+assert.match(ctx.entryAttemptsHtml({}),/Missing evidence does not mean no signals were blocked/);assert.match(ctx.entryAttemptsHtml({entry_attempts:[]}),/no attempts/);
+console.log('Entry explanations passed: filled trade zero, blocked checks, missing sizing, exact timestamps and legacy absence.');
+
+data.entry_attempts[0].confirmation={timeframe:'M5',source_bar_open_time:0,available_from:300000,signal:null};data.entry_attempts[1].confirmation={timeframe:'M5',source_bar_open_time:null,available_from:null,signal:null};
+const confirmation=ctx.entryAttemptsHtml(data);assert.match(confirmation,/Available from 1970-01-01T00:05:00.000Z/);assert.match(confirmation,/Source candle opened 1970-01-01T00:00:00.000Z/);assert.match(confirmation,/no closed source candle was available/);assert.match(confirmation,/does not certify internal data coverage/);
+data.entry_attempts[0].confirmation=null;assert.match(ctx.entryAttemptsHtml(data),/No confirmation filter was configured/);
+assert.match(ctx.entryAttemptsHtml(data),/Margin calculation was not recorded/);
+data.entry_attempts[0].margin_check=null;
+assert.match(ctx.entryAttemptsHtml(data),/Margin admission was not reached/);
+data.entry_attempts[1].margin_check={accepted:false,balance:10000,normalized_lots:20,proposed_fill_price:1.0003,quote_to_account_rate:1,max_leverage:30,required_margin:66686.66666666667,spread_and_slippage_cost:600,commission:100,equity_after_entry_costs:9300,free_margin_after_entry:-57386.66666666667};
+const rejected=ctx.entryAttemptsHtml(data);
+assert.match(rejected,/Margin admission · Rejected/);assert.match(rejected,/66686.66666666667/);assert.match(rejected,/-57386.66666666667/);assert.match(rejected,/proposed price does not prove an order filled/);
+data.entry_attempts[1].margin_check.accepted=true;
+assert.match(ctx.entryAttemptsHtml(data),/Margin admission · Accepted/);
+assert.match(ctx.entryAttemptsHtml({entry_attempts:[]}),/Terminal entry evidence was not recorded/);
+assert.match(ctx.entryAttemptsHtml({entry_attempts:[],unexecuted_entry:null}),/No entry signal remained queued/);
+const terminal=ctx.entryAttemptsHtml({entry_attempts:[],unexecuted_entry:{direction:'Long',signal_bar_index:0,signal_bar_open_time:0,reason:'no_following_opening_quote',signal:null}});
+assert.match(terminal,/no attempts/);assert.match(terminal,/Unexecuted final entry · Long/);
+assert.match(terminal,/1970-01-01T00:00:00.000Z/);assert.match(terminal,/not sized, checked for margin or filled/);
+
+assert.match(ctx.entryAttemptsHtml(data),/Initial protection was not recorded/);
+data.entry_attempts[0].initial_protection={stop_loss:0.99,profit_target:null,trailing_enabled:true,break_even_enabled:false,dynamic_distance:0.01,reference_bar_index:0,reference_bar_open_time:0};data.entry_attempts[1].initial_protection=null;
+const protectedEntry=ctx.entryAttemptsHtml(data);assert.match(protectedEntry,/Protection at entry/);assert.match(protectedEntry,/<dd>0.99<\/dd>/);assert.match(protectedEntry,/Not configured/);assert.match(protectedEntry,/<dd>Enabled<\/dd>/);assert.match(protectedEntry,/<dd>Disabled<\/dd>/);assert.match(protectedEntry,/1970-01-01T00:00:00.000Z/);assert.match(protectedEntry,/this entry was not filled/);assert.match(protectedEntry,/not broker order acknowledgements/);
+data.entry_attempts[1].initial_protection=data.entry_attempts[0].initial_protection;assert.match(ctx.entryAttemptsHtml(data),/no matching filled trade/);
+console.log('Initial protection passed: installed levels, absent target, enabled rules, epoch reference candle, rejected entry and legacy absence.');

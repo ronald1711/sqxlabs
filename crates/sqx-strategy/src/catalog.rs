@@ -132,7 +132,6 @@ pub fn indicator_catalog() -> &'static [IndicatorSpec] {
         IndicatorSpec { name: "VWMA", label: "Volume-weighted MA", params: &[("period", 20.0)], is_oscillator: false },
         IndicatorSpec { name: "PivotR1", label: "Pivot R1", params: &[], is_oscillator: false },
         IndicatorSpec { name: "PivotS1", label: "Pivot S1", params: &[], is_oscillator: false },
-        IndicatorSpec { name: "LinRegSlope", label: "Linear regression slope", params: &[("period", 14.0)], is_oscillator: true },
         IndicatorSpec { name: "PriceChannelUpper", label: "Price channel upper", params: &[("period", 20.0)], is_oscillator: false },
         IndicatorSpec { name: "PriceChannelLower", label: "Price channel lower", params: &[("period", 20.0)], is_oscillator: false },
         IndicatorSpec { name: "Slope", label: "SMA slope", params: &[("period", 14.0)], is_oscillator: true },

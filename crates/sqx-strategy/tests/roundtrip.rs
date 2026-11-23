@@ -27,3 +27,14 @@ fn strategy_json_roundtrip() {
     assert_eq!(back.stop_loss, Some(StopLoss::Points(100.0)));
     assert_eq!(back.profit_target, Some(ProfitTarget::Points(200.0)));
 }
+
+
+#[test]
+fn catalog_has_one_unambiguous_definition_per_indicator() {
+    let mut names=std::collections::BTreeSet::new();
+    for spec in sqx_strategy::indicator_catalog() {
+        assert!(names.insert(spec.name),"duplicate catalog definition: {}",spec.name);
+    }
+    let slope=sqx_strategy::indicator_catalog().iter().find(|s|s.name=="LinRegSlope").unwrap();
+    assert!(!slope.is_oscillator,"regression slope is not bounded to 0..100");
+}
