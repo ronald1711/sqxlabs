@@ -2,7 +2,7 @@
 //!
 //! Expected values were produced by an independent implementation written from
 //! the published definitions (Ehlers' Center of Gravity, the standard DPO,
-//! Blau's Trend Intensity Index, linear-interpolated percentile), then checked
+//! M. H. Pee's Trend Intensity Index, linear-interpolated percentile), then checked
 //! against this crate element by element. Editing the indicator code until these
 //! tests pass is the intended use; editing the constants is not.
 
@@ -31,7 +31,7 @@ fn assert_series(got: &[f64], want: &[f64], tol: f64, label: &str) {
 // ---------------------------------------------------------- Center of gravity
 
 #[test]
-fn center_of_gravity_weights_the_most_recent_bar_heaviest() {
+fn center_of_gravity_matches_ehlers_reference() {
     let c: Vec<f64> = (1..=10).map(|v| v as f64).collect();
     let g = ind::center_of_gravity(&c, 5);
     let want = [
@@ -58,29 +58,33 @@ fn dpo_is_close_displaced_back_minus_sma() {
 // ----------------------------------------------------------------------- TII
 
 #[test]
-fn tii_is_blau_not_a_cutler_rsi() {
-    // A pure uptrend must read +100 (net upward intensity), a pure downtrend
-    // -100, a flat market 0 - never a value in 0..100 like the old code.
+fn tii_is_pees_price_deviation_indicator() {
+    // M. H. Pee's TII ranges 0..100: a pure uptrend reads 100, a pure
+    // downtrend 0, and a flat market (zero deviation) reads 50 - never a
+    // negative value.
     let up: Vec<f64> = (1..=7).map(|v| v as f64).collect();
     let dn: Vec<f64> = (1..=7).rev().map(|v| v as f64).collect();
     let flat = vec![5.0; 7];
     let t_up = ind::tii(&up, 3);
     let t_dn = ind::tii(&dn, 3);
     let t_flat = ind::tii(&flat, 3);
-    for v in &t_up[2..] { assert!(approx(*v, 100.0, 1e-6), "up-trend TII = {v}"); }
-    for v in &t_dn[2..] { assert!(approx(*v, -100.0, 1e-6), "down-trend TII = {v}"); }
-    for v in &t_flat[2..] { assert!(approx(*v, 0.0, 1e-6), "flat TII = {v}"); }
+    // Warm-up: SMA(3) then a 3-bar deviation window -> first value at index 4.
+    for v in &t_up[4..] { assert!(approx(*v, 100.0, 1e-6), "up-trend TII = {v}"); }
+    for v in &t_dn[4..] { assert!(approx(*v, 0.0, 1e-6), "down-trend TII = {v}"); }
+    for v in &t_flat[4..] { assert!(approx(*v, 50.0, 1e-6), "flat TII = {v}"); }
 }
 
 #[test]
 fn tii_matches_reference_implementation() {
-    let c = [10.0, 11.0, 10.5, 12.0, 11.5, 13.0, 12.0, 14.0];
+    let c = [0.0, 1.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0];
     let t = ind::tii(&c, 3);
+    // Deviations of close from SMA(close,3), summed over the trailing 3 bars:
+    // up/(up+down) * 100 = 80 for the first three windows, then 300/7.
     let want = [
-        f64::NAN, f64::NAN,
-        33.333333, 73.333333, 33.333333, 67.295597, 10.833333, 55.693582,
+        f64::NAN, f64::NAN, f64::NAN, f64::NAN,
+        80.0, 80.0, 80.0, 42.857142857,
     ];
-    assert_series(&t, &want, 1e-5, "tii");
+    assert_series(&t, &want, 1e-6, "tii");
 }
 
 // --------------------------------------------------- percentile / median / MAD
@@ -99,6 +103,31 @@ fn percentile_interpolates_linearly() {
     let q = ind::percentile(&c, 4, 0.25);
     let want = [f64::NAN, f64::NAN, f64::NAN, 1.75, 2.75, 3.75];
     assert_series(&q, &want, 1e-9, "percentile(0.25)");
+}
+
+#[test]
+fn percentile_rejects_nan_containing_windows() {
+    // An undefined value has no rank: a window containing NaN must stay NaN,
+    // not fabricate a percentile from the remaining values.
+    let c = [f64::NAN, 1.0, 2.0, 3.0];
+    let m = ind::median(&c, 3);
+    assert!(m[..3].iter().all(|v| v.is_nan()), "median warm-up = {:?}", &m[..3]);
+    assert!(approx(m[3], 2.0, 1e-9), "median[3] = {}", m[3]);
+}
+
+// ----------------------------------------------------------------------- CMO
+
+#[test]
+fn cmo_is_chandes_rolling_window() {
+    // Chande's original CMO sums up/down moves over the trailing n bars; it is
+    // NOT the Wilder-smoothed variant TA-Lib implements.
+    let c = [10.0, 11.0, 12.0, 11.0, 10.0];
+    let m = ind::cmo(&c, 3);
+    let want = [
+        f64::NAN, f64::NAN, f64::NAN,
+        33.333333333, -33.333333333,
+    ];
+    assert_series(&m, &want, 1e-6, "cmo");
 }
 
 // --------------------------------------------------- RSI / MFI on a flat market

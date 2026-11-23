@@ -823,14 +823,23 @@ async function refreshAiStatus() {
     // Point the controls at the ACTIVE provider's saved profile (the source of
     // truth) so switching back later restores the right base URL, model and key.
     var p = d.provider || "Groq";
+    var label = profileLabel(p);
     var cat = providerCatalog();
-    if (cat[p]) {
-      document.getElementById("ai-provider").value = p;
-      fillModels(p);
-      if (d.base_url) document.getElementById("ai-base").value = d.base_url;
-      if (d.model) document.getElementById("ai-model").value = d.model;
-      keyBadge(p);
+    if (cat[label]) {
+      document.getElementById("ai-provider").value = label;
+      fillModels(label);
+    } else {
+      // A custom or migrated profile not in the catalog: select the Custom
+      // option and still restore its saved endpoint/model (never stale values).
+      document.getElementById("ai-provider").value = "Custom…";
+      fillModels("__custom__");
     }
+    var saved = AI_PROFILES[p] || {};
+    if (saved.base_url) document.getElementById("ai-base").value = saved.base_url;
+    else if (d.base_url) document.getElementById("ai-base").value = d.base_url;
+    if (saved.model) document.getElementById("ai-model").value = saved.model;
+    else if (d.model) document.getElementById("ai-model").value = d.model;
+    keyBadge(p);
     const k = document.getElementById("ai-key");
     if (k) k.placeholder = d.api_key_set ? "•••••• (set)" : "sk-…";
   } catch (e) {}
@@ -895,6 +904,9 @@ var MODEL_BASE = {
 
 var MODELS_CATALOG = null; // full catalog after loading models.dev
 var AI_PROFILES = {}; // provider -> {base_url, model, api_key_set} saved in data/assistant.json
+// "Custom…" is the dropdown label; the saved profile id is "Custom".
+function profileId(label) { return label === "Custom…" ? "Custom" : label; }
+function profileLabel(id) { return id === "Custom" ? "Custom…" : id; }
 
 function providerCatalog() { return MODELS_CATALOG || AI_PROVIDERS; }
 
@@ -931,7 +943,7 @@ function fillModels(provider) {
 function keyBadge(provider) {
   var b = document.getElementById("ai-keybadge");
   if (!b) return;
-  var s = AI_PROFILES[provider];
+  var s = AI_PROFILES[profileId(provider)];
   b.textContent = (s && s.api_key_set) ? "· key saved" : "";
 }
 
@@ -943,7 +955,7 @@ function applyProvider(p) {
   var cat = providerCatalog();
   if (!cat[p]) return;
   document.getElementById("ai-provider").value = p;
-  var saved = AI_PROFILES[p];
+  var saved = AI_PROFILES[profileId(p)];
   document.getElementById("ai-base").value = (saved && saved.base_url) ? saved.base_url : (cat[p].base || "");
   var models = fillModels(p);
   var mi = document.getElementById("ai-model");

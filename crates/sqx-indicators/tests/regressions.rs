@@ -190,6 +190,23 @@ fn parabolic_sar_has_a_one_bar_warmup() {
     assert!(s[1].is_finite(), "SAR must be defined from the second bar");
 }
 
+/// A reversal into an outside bar must clamp the new SAR to that bar's extreme,
+/// not leave it at the previous extreme point inside price.
+#[test]
+fn parabolic_sar_clamps_the_reversal_to_the_outside_bar() {
+    // (open, high, low, close) — the third bar is an outside bar that reverses
+    // the long trend.
+    let b: Vec<Bar> = vec![
+        Bar::new(0, 9.0, 10.0, 8.0, 9.0, 1.0),
+        Bar::new(60_000, 10.0, 11.0, 9.0, 10.0, 1.0),
+        Bar::new(120_000, 8.0, 20.0, 7.0, 8.0, 1.0),
+    ];
+    let s = ind::parabolic_sar(&b, 0.02, 0.2);
+    assert!(s[0].is_nan());
+    assert!((s[1] - 8.0).abs() < 1e-9, "bar 1 SAR = {}", s[1]);
+    assert!((s[2] - 20.0).abs() < 1e-9, "bar 2 reversal SAR must clamp to the high (20), got {}", s[2]);
+}
+
 // ----------------------------------------------------------------------- ADX
 
 #[test]

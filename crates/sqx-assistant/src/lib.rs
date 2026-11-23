@@ -49,7 +49,7 @@ impl Assistant {
                 "temperature": 0.2,
             });
             let resp = post_json(&self.cfg.base_url, &self.cfg.api_key, &body.to_string())?;
-            let v: Value = serde_json::from_str(&resp).map_err(|e| format!("invalid JSON from LLM: {e}: {resp}"))?;
+            let v: Value = serde_json::from_str(&resp).map_err(|e| format!("invalid JSON from LLM: {e}: {}", sanitize(&self.cfg.api_key, &resp)))?;
             // Some providers answer HTTP 200 with an error object; surface it
             // instead of silently returning an empty answer.
             if let Some(err) = v.get("error") {
@@ -58,10 +58,10 @@ impl Assistant {
                     .and_then(|m| m.as_str())
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| err.to_string());
-                return Err(format!("LLM error: {msg}"));
+                return Err(format!("LLM error: {}", sanitize(&self.cfg.api_key, &msg)));
             }
             if v["choices"].as_array().map(|a| a.is_empty()).unwrap_or(true) {
-                return Err(format!("LLM returned no choices: {resp}"));
+                return Err(format!("LLM returned no choices: {}", sanitize(&self.cfg.api_key, &resp)));
             }
             let msg = v["choices"][0]["message"].clone();
             let tool_calls = msg["tool_calls"].as_array().cloned().unwrap_or_default();
@@ -171,6 +171,8 @@ fn post_json(base_url: &str, api_key: &str, body: &str) -> Result<String, String
             "-sS",
             "--max-time",
             "180",
+            "-f",
+            "--fail-with-body",
             "-X",
             "POST",
             &url,
@@ -184,16 +186,28 @@ fn post_json(base_url: &str, api_key: &str, body: &str) -> Result<String, String
         .output()
         .map_err(|e| format!("curl failed: {e} (is curl installed?)"))?;
     if !out.status.success() {
-        // curl exits non-zero on HTTP 4xx/5xx; the useful message is in the
-        // response body (e.g. {"error":{"message":"Invalid API Key"}}), which
-        // curl still writes to stdout. Fall back to stderr for real transport
-        // failures (DNS, timeout, connection refused).
+        // `-f` makes curl exit non-zero on HTTP 4xx/5xx; `--fail-with-body`
+        // keeps the response body on stdout (e.g. {"error":{"message":
+        // "Invalid API Key"}}). stderr carries transport failures (DNS,
+        // timeout, connection refused). Sanitize so the credential can never
+        // leak back through a provider's error text.
         let stdout = String::from_utf8_lossy(&out.stdout);
         let stderr = String::from_utf8_lossy(&out.stderr);
         let detail = if !stdout.trim().is_empty() { stdout.trim().to_string() } else { stderr.trim().to_string() };
-        return Err(format!("LLM request failed (HTTP 4xx/5xx): {detail}"));
+        return Err(format!("LLM request failed: {}", sanitize(api_key, &detail)));
     }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+/// Redact a credential from a diagnostic string and cap its length, so a
+/// provider's response body can never leak the API key or flood the log.
+fn sanitize(secret: &str, text: &str) -> String {
+    let mut t = if secret.is_empty() { text.to_string() } else { text.replace(secret, "***") };
+    if t.len() > 500 {
+        t.truncate(500);
+        t.push('…');
+    }
+    t
 }
 
 fn tool_defs() -> Value {
@@ -226,5 +240,15 @@ mod tests {
         let mut a = Assistant::new(cfg, "EURUSD", bars, Instrument::fx("EURUSD"), 252.0);
         let out = a.dispatch("list_indicators", &json!({}));
         assert!(out.contains("RSI"));
+    }
+
+    #[test]
+    fn sanitize_redacts_the_secret_and_truncates() {
+        assert_eq!(sanitize("sk-abc", "err: sk-abc leaked"), "err: *** leaked");
+        assert_eq!(sanitize("", "no secret"), "no secret");
+        let long = "x".repeat(1000);
+        let s = sanitize("", &long);
+        assert!(s.len() < 1000, "should be truncated, got {} bytes", s.len());
+        assert!(s.ends_with('…'));
     }
 }

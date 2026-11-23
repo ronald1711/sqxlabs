@@ -927,6 +927,11 @@ fn llm_config() -> sqx_assistant::LlmConfig {
 /// Save one provider's profile and make it the active one. An empty `api_key`
 /// means "keep the key already stored for this provider" — the field is never
 /// pre-filled, so leaving it blank must not wipe a working secret.
+///
+/// Security: a stored key is only carried over when the endpoint is unchanged.
+/// Reusing a secret against a different base_url would let a config change
+/// silently redirect the credential to another host, so changing the endpoint
+/// with a blank key clears it (the caller must re-enter it).
 fn assistant_config_save_json(body: &str) -> String {
     let val: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
@@ -942,13 +947,15 @@ fn assistant_config_save_json(body: &str) -> String {
 
     let saved = assistant_config_load();
     let (_, mut profiles) = assistant_profiles(&saved);
-    let existing_key = profiles
-        .get(&provider)
-        .and_then(|p| p.get("api_key"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let stored_key = if api_key.is_empty() { existing_key } else { api_key };
+    let existing = profiles.get(&provider).cloned().unwrap_or_else(|| json!({}));
+    let existing_key = existing.get("api_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let existing_base = existing.get("base_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    // Carry the key over only when the endpoint did not change.
+    let stored_key = if api_key.is_empty() {
+        if base_url == existing_base { existing_key } else { String::new() }
+    } else {
+        api_key
+    };
     let api_key_set = !stored_key.is_empty();
     profiles.insert(provider.clone(), json!({ "base_url": base_url, "model": model, "api_key": stored_key }));
 

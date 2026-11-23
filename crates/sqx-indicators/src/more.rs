@@ -122,32 +122,23 @@ pub fn ultimate_osc(h: &[f64], l: &[f64], c: &[f64], n1: usize, n2: usize, n3: u
 
 /// Chande Momentum Oscillator.
 ///
-/// CMO = 100 * (Su - Sd) / (Su + Sd), where Su and Sd are the *Wilder-smoothed*
-/// sums of up/down moves (the same smoothing RSI uses). The previous version
-/// summed a raw rolling window, which is a different indicator entirely.
+/// CMO = 100 * (Su - Sd) / (Su + Sd), where Su and Sd are the sums of up/down
+/// moves over the trailing `n` bars. This is Chande's original rolling-window
+/// formulation. (TA-Lib smooths those sums with Wilder's average instead, which
+/// is a different variant; the catalog name "CMO" follows Chande, not TA-Lib.)
 pub fn cmo(src: &[f64], n: usize) -> Series {
     if n == 0 || src.len() <= n {
         return vec![f64::NAN; src.len()];
     }
     let len = src.len();
     let mut out = vec![f64::NAN; len];
-    // Seed with the simple sum of the first n changes, then convert it to an
-    // average. TA-Lib divides here (unlike RSI, whose ratio cancels the sum), so
-    // that the Wilder recursion stays on the same scale as the seed.
-    let (mut gain, mut loss) = (0.0, 0.0);
-    for i in 1..=n {
-        let d = src[i] - src[i - 1];
-        if d >= 0.0 { gain += d; } else { loss += -d; }
-    }
-    gain /= n as f64;
-    loss /= n as f64;
-    out[n] = if gain + loss == 0.0 { 0.0 } else { 100.0 * (gain - loss) / (gain + loss) };
-    for i in (n + 1)..len {
-        let d = src[i] - src[i - 1];
-        let (g, l) = if d >= 0.0 { (d, 0.0) } else { (0.0, -d) };
-        gain = (gain * (n as f64 - 1.0) + g) / n as f64;
-        loss = (loss * (n as f64 - 1.0) + l) / n as f64;
-        out[i] = if gain + loss == 0.0 { 0.0 } else { 100.0 * (gain - loss) / (gain + loss) };
+    for i in n..len {
+        let (mut up, mut dn) = (0.0, 0.0);
+        for j in (i - n + 1)..=i {
+            let d = src[j] - src[j - 1];
+            if d >= 0.0 { up += d; } else { dn += -d; }
+        }
+        out[i] = if up + dn == 0.0 { 0.0 } else { 100.0 * (up - dn) / (up + dn) };
     }
     out
 }
@@ -244,7 +235,13 @@ pub fn percentile(src: &[f64], n: usize, p: f64) -> Series {
     let mut out = vec![f64::NAN; len];
     for i in 0..len {
         if i + 1 >= n {
-            let mut w: Vec<f64> = src[i + 1 - n..=i].to_vec();
+            let window = &src[i + 1 - n..=i];
+            // An undefined value has no rank; treating it as equal during the
+            // sort would fabricate a percentile from partial data.
+            if window.iter().any(|v| v.is_nan()) {
+                continue;
+            }
+            let mut w: Vec<f64> = window.to_vec();
             w.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             // Linear interpolation (the numpy "linear" default): an even
             // window returns the midpoint of the two central values rather
@@ -444,32 +441,35 @@ pub fn rmi(c: &[f64], n: usize) -> Series {
     out
 }
 
-/// Trend Intensity Index (Blau).
+/// Trend Intensity Index (M. H. Pee).
 ///
-/// TII is the Wilder-smoothed up-move minus the Wilder-smoothed down-move,
-/// normalised to -100..+100: positive means net upward intensity, negative net
-/// downward. Unlike RSI it is not bounded to 0..100, and it smooths with
-/// Wilder's average rather than a raw rolling sum. A flat market is a neutral 0.
+/// TII = 100 * upSum / (upSum + downSum), where upSum/downSum are the sums of
+/// positive/negative deviations of close from SMA(close, n) over the trailing
+/// `n` bars. It ranges 0..100: 50 is neutral, >80 a strong up-trend, <20 a
+/// strong down-trend. A flat market (zero deviation) reads 50.
 pub fn tii(c: &[f64], n: usize) -> Series {
-    let len = c.len();
-    let mut up = vec![0.0; len];
-    let mut dn = vec![0.0; len];
-    for i in 1..len {
-        let d = c[i] - c[i - 1];
-        if d > 0.0 { up[i] = d; } else { dn[i] = -d; }
+    if n == 0 {
+        return vec![f64::NAN; c.len()];
     }
-    let su = rma(&up, n);
-    let sd = rma(&dn, n);
-    (0..len)
-        .map(|i| {
-            if su[i].is_nan() {
-                f64::NAN
-            } else {
-                let tot = su[i] + sd[i];
-                if tot == 0.0 { 0.0 } else { 100.0 * (su[i] - sd[i]) / tot }
+    let base = sma(c, n);
+    let len = c.len();
+    let mut out = vec![f64::NAN; len];
+    for i in 0..len {
+        if i + 1 >= n {
+            let start = i + 1 - n;
+            // The deviation window must be clear of the SMA's own warm-up NaN.
+            if (start..=i).any(|j| base[j].is_nan()) {
+                continue;
             }
-        })
-        .collect()
+            let (mut up, mut dn) = (0.0, 0.0);
+            for j in start..=i {
+                let dev = c[j] - base[j];
+                if dev > 0.0 { up += dev; } else { dn += -dev; }
+            }
+            out[i] = if up + dn == 0.0 { 50.0 } else { 100.0 * up / (up + dn) };
+        }
+    }
+    out
 }
 
 pub fn vwma(c: &[f64], v: &[f64], n: usize) -> Series {

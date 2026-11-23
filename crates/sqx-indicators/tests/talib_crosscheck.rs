@@ -203,8 +203,11 @@ fn bollinger_matches() {
     cmp("BB.lower", &l, &ol, r.beg_idx, r.count, 1e-6);
 }
 
+// CMO is deliberately NOT asserted here: ta-lib smooths the up/down sums with
+// Wilder's average, while this crate implements Chande's original rolling-window
+// CMO. They are different variants and do not agree.
 #[test]
-fn trange_roc_stddev_obv_cmo_willr_ppo_match() {
+fn trange_roc_stddev_obv_willr_ppo_match() {
     let (bars, _, h, l, c, v) = make_series(200);
     let core = Core::new();
 
@@ -223,10 +226,6 @@ fn trange_roc_stddev_obv_cmo_willr_ppo_match() {
     let mut oo = vec![0.0; c.len()];
     let ro = core.obv(0, c.len() - 1, &c, &v, &mut oo).unwrap();
     cmp("OBV", &ind::obv(&c, &v), &oo, ro.beg_idx, ro.count, 1e-9);
-
-    let mut oc = vec![0.0; c.len()];
-    let rc = core.cmo(0, c.len() - 1, &c, 14, &mut oc).unwrap();
-    cmp("CMO(14)", &ind::cmo(&c, 14), &oc, rc.beg_idx, rc.count, 1e-9);
 
     let mut ow = vec![0.0; c.len()];
     let rw = core.willr(0, c.len() - 1, &h, &l, &c, 14, &mut ow).unwrap();

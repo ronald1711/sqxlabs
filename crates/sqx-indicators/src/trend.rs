@@ -102,8 +102,8 @@ pub fn linreg(src: &[f64], n: usize) -> (Series, Series) {
 /// Follows Wilder's original rules. The two non-obvious parts are:
 ///
 /// * **The clamp.** The computed SAR may never enter the range of the previous
-///   two bars; without it the stop can sit *inside* price and can then never be
-///   hit, which silently turns the indicator into a hold-forever signal.
+///   two bars, and on a reversal the new SAR is clamped to the current and
+///   previous bar's extreme (the EP alone could land inside an outside bar).
 /// * **The seed.** The initial direction is taken from the first two bars
 ///   rather than being hardcoded long. Index 0 is NAN: a single bar carries no
 ///   direction, so PSAR has a one-bar warm-up like every other indicator here.
@@ -130,7 +130,9 @@ pub fn parabolic_sar(bars: &[Bar], step: f64, max_step: f64) -> Series {
             }
             if bars[i].low < sar {
                 up = false;
-                sar = ep;
+                // Reversal: the new (short) SAR must sit at or above the
+                // current and previous high, so it never lands inside price.
+                sar = ep.max(bars[i].high).max(bars[i - 1].high);
                 ep = bars[i].low;
                 af = step;
             } else if bars[i].high > ep {
@@ -145,7 +147,9 @@ pub fn parabolic_sar(bars: &[Bar], step: f64, max_step: f64) -> Series {
             }
             if bars[i].high > sar {
                 up = true;
-                sar = ep;
+                // Reversal: the new (long) SAR must sit at or below the
+                // current and previous low.
+                sar = ep.min(bars[i].low).min(bars[i - 1].low);
                 ep = bars[i].high;
                 af = step;
             } else if bars[i].low < ep {
