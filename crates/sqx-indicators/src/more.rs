@@ -444,26 +444,25 @@ pub fn rmi(c: &[f64], n: usize) -> Series {
 /// Trend Intensity Index (M. H. Pee).
 ///
 /// TII = 100 * upSum / (upSum + downSum), where upSum/downSum are the sums of
-/// positive/negative deviations of close from SMA(close, n) over the trailing
-/// `n` bars. It ranges 0..100: 50 is neutral, >80 a strong up-trend, <20 a
-/// strong down-trend. A flat market (zero deviation) reads 50.
+/// positive/negative deviations of the most recent `n` closes from the CURRENT
+/// SMA(close, 2*n) level. Pee's original uses separate averaging and deviation
+/// periods (historically 60 and 30); this crate maps them 2:1 through the single
+/// `n` (the deviation window), so `period = 30` reproduces the 60/30 defaults.
+/// Range 0..100: 50 neutral, >80 a strong up-trend, <20 a strong down-trend.
 pub fn tii(c: &[f64], n: usize) -> Series {
     if n == 0 {
         return vec![f64::NAN; c.len()];
     }
-    let base = sma(c, n);
+    let base = sma(c, 2 * n);
     let len = c.len();
     let mut out = vec![f64::NAN; len];
     for i in 0..len {
-        if i + 1 >= n {
+        if i + 1 >= n && !base[i].is_nan() {
             let start = i + 1 - n;
-            // The deviation window must be clear of the SMA's own warm-up NaN.
-            if (start..=i).any(|j| base[j].is_nan()) {
-                continue;
-            }
             let (mut up, mut dn) = (0.0, 0.0);
+            // Pee compares each recent close against the CURRENT baseline level.
             for j in start..=i {
-                let dev = c[j] - base[j];
+                let dev = c[j] - base[i];
                 if dev > 0.0 { up += dev; } else { dn += -dev; }
             }
             out[i] = if up + dn == 0.0 { 50.0 } else { 100.0 * up / (up + dn) };

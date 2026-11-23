@@ -68,21 +68,21 @@ fn tii_is_pees_price_deviation_indicator() {
     let t_up = ind::tii(&up, 3);
     let t_dn = ind::tii(&dn, 3);
     let t_flat = ind::tii(&flat, 3);
-    // Warm-up: SMA(3) then a 3-bar deviation window -> first value at index 4.
-    for v in &t_up[4..] { assert!(approx(*v, 100.0, 1e-6), "up-trend TII = {v}"); }
-    for v in &t_dn[4..] { assert!(approx(*v, 0.0, 1e-6), "down-trend TII = {v}"); }
-    for v in &t_flat[4..] { assert!(approx(*v, 50.0, 1e-6), "flat TII = {v}"); }
+    // Warm-up: SMA(2*3 = 6) is defined from index 5.
+    for v in &t_up[5..] { assert!(approx(*v, 100.0, 1e-6), "up-trend TII = {v}"); }
+    for v in &t_dn[5..] { assert!(approx(*v, 0.0, 1e-6), "down-trend TII = {v}"); }
+    for v in &t_flat[5..] { assert!(approx(*v, 50.0, 1e-6), "flat TII = {v}"); }
 }
 
 #[test]
 fn tii_matches_reference_implementation() {
     let c = [0.0, 1.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0];
     let t = ind::tii(&c, 3);
-    // Deviations of close from SMA(close,3), summed over the trailing 3 bars:
-    // up/(up+down) * 100 = 80 for the first three windows, then 300/7.
+    // Pee's TII: deviation window 3, SMA period 6 (2:1), current baseline.
+    // The final bar's TII is 100 * 1.333 / (1.333 + 0.833) = 61.538.
     let want = [
-        f64::NAN, f64::NAN, f64::NAN, f64::NAN,
-        80.0, 80.0, 80.0, 42.857142857,
+        f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN,
+        80.0, 100.0, 61.538461538,
     ];
     assert_series(&t, &want, 1e-6, "tii");
 }

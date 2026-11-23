@@ -171,7 +171,8 @@ fn post_json(base_url: &str, api_key: &str, body: &str) -> Result<String, String
             "-sS",
             "--max-time",
             "180",
-            "-f",
+            // --fail-with-body already implies --fail (non-zero exit on HTTP
+            // 4xx/5xx) while still writing the response body to stdout.
             "--fail-with-body",
             "-X",
             "POST",
@@ -202,12 +203,16 @@ fn post_json(base_url: &str, api_key: &str, body: &str) -> Result<String, String
 /// Redact a credential from a diagnostic string and cap its length, so a
 /// provider's response body can never leak the API key or flood the log.
 fn sanitize(secret: &str, text: &str) -> String {
-    let mut t = if secret.is_empty() { text.to_string() } else { text.replace(secret, "***") };
-    if t.len() > 500 {
-        t.truncate(500);
-        t.push('…');
+    let t = if secret.is_empty() { text.to_string() } else { text.replace(secret, "***") };
+    // Cap at 500 CHARS (not bytes): String::truncate requires a UTF-8 char
+    // boundary and would panic on a multibyte sequence straddling the cut.
+    if t.chars().count() > 500 {
+        let mut s: String = t.chars().take(500).collect();
+        s.push('…');
+        s
+    } else {
+        t
     }
-    t
 }
 
 fn tool_defs() -> Value {
@@ -248,7 +253,53 @@ mod tests {
         assert_eq!(sanitize("", "no secret"), "no secret");
         let long = "x".repeat(1000);
         let s = sanitize("", &long);
-        assert!(s.len() < 1000, "should be truncated, got {} bytes", s.len());
+        assert!(s.chars().count() == 501, "500 chars + ellipsis, got {}", s.chars().count());
         assert!(s.ends_with('…'));
+        // Multibyte straddling the cut must not panic and must stay valid UTF-8.
+        let mb = "é".repeat(600);
+        let s2 = sanitize("", &mb);
+        assert!(s2.chars().count() == 501, "got {} chars", s2.chars().count());
+        assert!(s2.ends_with('…'));
+    }
+
+    /// Spin up a one-shot HTTP server that returns a canned response, then call
+    /// post_json against it. Returns the post_json result.
+    fn post_json_against(status_line: &str, body: &str) -> Result<String, String> {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = body.to_string();
+        let status = status_line.to_string();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 8192];
+            let _ = stream.read(&mut buf);
+            let resp = format!(
+                "{status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(resp.as_bytes());
+        });
+        let url = format!("http://{addr}");
+        let r = post_json(&url, "sk-test", "{}");
+        handle.join().unwrap();
+        r
+    }
+
+    #[test]
+    fn post_json_accepts_http_200() {
+        let r = post_json_against("HTTP/1.1 200 OK", "{\"choices\":[{\"message\":{\"content\":\"hi\"}}]}");
+        assert!(r.is_ok(), "HTTP 200 must succeed: {r:?}");
+        assert!(r.unwrap().contains("hi"));
+    }
+
+    #[test]
+    fn post_json_fails_on_http_500() {
+        // A 500 with a JSON body must be a failure (curl --fail-with-body exits
+        // non-zero) and must surface the body, not just the exit code.
+        let r = post_json_against("HTTP/1.1 500 Internal Server Error", "{\"error\":{\"message\":\"boom\"}}");
+        assert!(r.is_err(), "HTTP 500 must fail, got {r:?}");
+        assert!(r.unwrap_err().contains("boom"), "error should carry the response body");
     }
 }

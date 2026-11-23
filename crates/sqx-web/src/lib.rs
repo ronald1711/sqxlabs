@@ -894,8 +894,9 @@ fn llm_config() -> sqx_assistant::LlmConfig {
     let saved_base = profile.get("base_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let saved_model = profile.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let saved_key = profile.get("api_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let has_saved_base = !saved_base.is_empty();
 
-    let base_url = if !saved_base.is_empty() {
+    let base_url = if has_saved_base {
         saved_base
     } else if let Ok(v) = std::env::var("SQX_LLM_BASE_URL") {
         v
@@ -916,10 +917,15 @@ fn llm_config() -> sqx_assistant::LlmConfig {
     } else {
         "llama-3.3-70b-versatile".to_string()
     };
+    // A saved endpoint override must not silently inherit an unrelated
+    // environment key: the env key belongs to the default (env/auto-detected)
+    // endpoint, so only fall back to it when no saved base_url overrides it.
     let api_key = if !saved_key.is_empty() {
         saved_key
-    } else {
+    } else if !has_saved_base {
         std::env::var("SQX_LLM_API_KEY").unwrap_or_default()
+    } else {
+        String::new()
     };
     sqx_assistant::LlmConfig { base_url, model, api_key, max_rounds: 6 }
 }

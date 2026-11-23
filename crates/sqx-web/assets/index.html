@@ -820,25 +820,15 @@ async function refreshAiStatus() {
     if (a) a.textContent = txt;
     const s = document.getElementById("set-ai");
     if (s) s.textContent = txt;
-    // Point the controls at the ACTIVE provider's saved profile (the source of
-    // truth) so switching back later restores the right base URL, model and key.
+    // Re-render so saved (non-catalog) profiles are selectable, then restore the
+    // active profile through the same path as switching providers.
     var p = d.provider || "Groq";
-    var label = profileLabel(p);
-    var cat = providerCatalog();
-    if (cat[label]) {
-      document.getElementById("ai-provider").value = label;
-      fillModels(label);
-    } else {
-      // A custom or migrated profile not in the catalog: select the Custom
-      // option and still restore its saved endpoint/model (never stale values).
-      document.getElementById("ai-provider").value = "Custom…";
-      fillModels("__custom__");
-    }
+    renderAiProviderSelect();
+    selectProfile(profileLabel(p));
+    // Fall back to the effective config only where the profile has no saved value.
     var saved = AI_PROFILES[p] || {};
-    if (saved.base_url) document.getElementById("ai-base").value = saved.base_url;
-    else if (d.base_url) document.getElementById("ai-base").value = d.base_url;
-    if (saved.model) document.getElementById("ai-model").value = saved.model;
-    else if (d.model) document.getElementById("ai-model").value = d.model;
+    if (!saved.base_url && d.base_url) document.getElementById("ai-base").value = d.base_url;
+    if (!saved.model && d.model) document.getElementById("ai-model").value = d.model;
     keyBadge(p);
     const k = document.getElementById("ai-key");
     if (k) k.placeholder = d.api_key_set ? "•••••• (set)" : "sk-…";
@@ -918,6 +908,14 @@ function renderAiProviderSelect() {
     o.value = p; o.textContent = p;
     sel.appendChild(o);
   });
+  // Saved profiles that are not catalog providers keep their own identity (e.g.
+  // a migrated "Default"); "Custom" is covered by the "Custom…" option below.
+  Object.keys(AI_PROFILES).sort().forEach(function(id) {
+    if (providerCatalog()[id] || id === "Custom") return;
+    var o = document.createElement("option");
+    o.value = id; o.textContent = id;
+    sel.appendChild(o);
+  });
   var c = document.createElement("option");
   c.value = "Custom…"; c.textContent = "Custom…";
   sel.appendChild(c);
@@ -947,22 +945,30 @@ function keyBadge(provider) {
   b.textContent = (s && s.api_key_set) ? "· key saved" : "";
 }
 
-// Select a provider AND keep Base URL / Model / key-badge in sync. Prefers the
-// saved profile for that provider (so switching back restores its endpoint and
-// model) and falls back to the catalog defaults. Programmatic `select.value =`
-// does not fire `change`, so this is the single place that applies a provider.
-function applyProvider(p) {
+// Select a provider (by dropdown label) AND keep Base URL / Model / key-badge in
+// sync. Prefers the saved profile for that provider (so switching back restores
+// its endpoint and model) and falls back to the catalog defaults. A saved
+// profile that is not in the catalog (a migrated "Default" or the "Custom"
+// profile) is restored through the same path instead of being cleared.
+function selectProfile(label) {
+  var id = profileId(label); // "Custom…" -> "Custom"
   var cat = providerCatalog();
-  if (!cat[p]) return;
-  document.getElementById("ai-provider").value = p;
-  var saved = AI_PROFILES[profileId(p)];
-  document.getElementById("ai-base").value = (saved && saved.base_url) ? saved.base_url : (cat[p].base || "");
-  var models = fillModels(p);
+  var saved = AI_PROFILES[id] || {};
+  var sel = document.getElementById("ai-provider");
+  if (!Array.from(sel.options).some(function(o) { return o.value === label; })) {
+    var o = document.createElement("option");
+    o.value = label; o.textContent = label;
+    sel.appendChild(o);
+  }
+  sel.value = label;
+  var cdef = cat[label] || {};
+  document.getElementById("ai-base").value = (saved.base_url) ? saved.base_url : (cdef.base || "");
+  var models = fillModels(label);
   var mi = document.getElementById("ai-model");
-  if (saved && saved.model) mi.value = saved.model;
+  if (saved.model) mi.value = saved.model;
   else if (models.length) mi.value = models[0];
   else mi.value = "";
-  keyBadge(p);
+  keyBadge(id);
 }
 
 async function loadModels() {
@@ -993,15 +999,9 @@ async function loadModels() {
     MODELS_CATALOG = cat;
     var prev = document.getElementById("ai-provider").value;
     renderAiProviderSelect();
-    // Restoring the provider programmatically does not fire `change`, so apply
-    // its base URL explicitly; otherwise Base URL keeps the previous value
-    // (e.g. Groq) while the dropdown shows DeepSeek -> wrong endpoint at save.
-    if (prev === "Custom…") {
-      document.getElementById("ai-provider").value = "Custom…";
-      fillModels("__custom__");
-    } else {
-      applyProvider(cat[prev] ? prev : "Groq");
-    }
+    // Restoring the provider programmatically does not fire `change`; select it
+    // explicitly so Base URL/Model don't keep the previous provider's values.
+    selectProfile(prev || "Groq");
     var total = 0, textTotal = 0;
     Object.keys(cat).forEach(function(k) { total += cat[k].models.length; textTotal += (cat[k].textModels || cat[k].models).length; });
     st.textContent = Object.keys(cat).length + " providers · " + total + " models (" + textTotal + " text-capable)";
@@ -1011,15 +1011,7 @@ async function loadModels() {
 }
 
 document.getElementById("ai-provider").onchange = function() {
-  var p = this.value;
-  if (p === "Custom…") {
-    fillModels("__custom__"); // empty the suggestion list
-    document.getElementById("ai-base").value = "";
-    document.getElementById("ai-model").value = "";
-    keyBadge("Custom…");
-    return;
-  }
-  applyProvider(p);
+  selectProfile(this.value);
 };
 
 document.getElementById("ai-load-models").onclick = loadModels;
@@ -1028,7 +1020,7 @@ document.getElementById("ai-text-only").onchange = function() {
 };
 
 renderAiProviderSelect();
-applyProvider("Groq");
+selectProfile("Groq");
 refreshAiStatus();
 document.getElementById("aw-backtest").onclick = function() {
   document.getElementById("strategy").value = buildStrategyJSON();
