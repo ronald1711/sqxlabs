@@ -304,3 +304,51 @@ fn cli_backtest_archives_disclose_exposure_even_for_failed_execution(){
     let later_id=store.create(&later,plan()).unwrap();
     assert_eq!(store.status(&later_id).unwrap()["current_exposure_audit"]["classification"],"no_known_registry_overlap");
 }
+
+#[test]
+fn crosscheck_inputs_include_later_markets_and_unfinished_execution_in_exposure(){
+    let temp=Temp::new();let store=Experiments::new(&temp.0);let fixture=data();let id=store.create(&fixture,plan()).unwrap();
+    let archive=sqx_project::archive::Archive::new(&temp.0);
+    let dataset=json!({"markets":[
+        {"instrument":Instrument::fx("USDJPY"),"bars":fixture.bars},
+        {"instrument":fixture.instrument,"bars":fixture.bars},
+        {"instrument":fixture.instrument,"bars":fixture.bars}
+    ]});
+    let checkpoint=archive.save("test-engine".into(),dataset.clone(),json!(strategy()),json!({"research_kind":"cli_crosscheck_started"}),json!({"status":"execution_not_recorded"})).unwrap();
+    let audit=store.status(&id).unwrap()["current_exposure_audit"].clone();
+    assert_eq!(audit["classification"],"known_reuse_or_disclosed_exposure");
+    assert_eq!(audit["same_market_archived_crosscheck_records"],1,"one archive record despite multiple matching datasets");
+    assert_eq!(audit["same_market_archived_backtest_records"],0);
+    assert_eq!(audit["known_overlaps"].as_array().unwrap().len(),2);
+    for (i,overlap) in audit["known_overlaps"].as_array().unwrap().iter().enumerate(){
+        assert_eq!(overlap["source"],"archived_cli_crosscheck");assert_eq!(overlap["id"],checkpoint);
+        assert_eq!(overlap["market_index"],i+1);assert_eq!(overlap["record_kind"],"cli_crosscheck_started");
+    }
+    archive.save("test-engine".into(),dataset,json!(strategy()),json!({"research_kind":"cli_crosscheck","started_run_id":checkpoint}),json!({"report":{"invalid_markets":1}})).unwrap();
+    let audit=store.status(&id).unwrap()["current_exposure_audit"].clone();
+    assert_eq!(audit["same_market_archived_crosscheck_records"],2,"record count is not an independent trial count");
+    store.trial(&id,"test-engine",&strategy()).unwrap();
+    let result=store.reveal(&id,"test-engine",0).unwrap();
+    assert_eq!(result["exposure_at_commitment"]["classification"],"known_reuse_or_disclosed_exposure");
+    let restored_root=Temp::new();let restored=Experiments::new(&restored_root.0);
+    restored.restore(&store.backup(&id).unwrap()).unwrap();
+    let restored_audit=restored.status(&id).unwrap()["current_exposure_audit"].clone();
+    assert_eq!(restored_audit["classification"],"known_reuse_or_disclosed_exposure");
+    assert_eq!(restored_audit["carried_commitment_evidence"]["same_market_archived_crosscheck_records"],2);
+}
+
+#[test]
+fn crosscheck_market_and_time_boundaries_do_not_fabricate_overlap(){
+    let temp=Temp::new();let store=Experiments::new(&temp.0);let fixture=data();let id=store.create(&fixture,plan()).unwrap();
+    let archive=sqx_project::archive::Archive::new(&temp.0);
+    archive.save("test-engine".into(),json!({"markets":[
+        {"instrument":Instrument::fx("USDJPY"),"bars":fixture.bars},
+        {"instrument":fixture.instrument,"bars":&fixture.bars[..70]}
+    ]}),json!(strategy()),json!({"research_kind":"cli_crosscheck"}),json!({})).unwrap();
+    let audit=store.status(&id).unwrap()["current_exposure_audit"].clone();
+    assert_eq!(audit["classification"],"no_known_registry_overlap");
+    assert_eq!(audit["same_market_archived_crosscheck_records"],1);
+    assert!(audit["known_overlaps"].as_array().unwrap().is_empty());
+    archive.save("test-engine".into(),json!({"markets":[]}),json!(strategy()),json!({"research_kind":"cli_crosscheck_started"}),json!({})).unwrap();
+    assert!(store.status(&id).unwrap_err().contains("nonempty market inputs"),"malformed evidence cannot become a clean audit");
+}

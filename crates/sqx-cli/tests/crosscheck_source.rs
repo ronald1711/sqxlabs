@@ -34,6 +34,16 @@ fn crosscheck_uses_explicit_manifest_and_retains_failed_market_evidence(){
     assert_eq!(archive.list().unwrap().len(),4);
     let restored=sqx_project::archive::Archive::new(root.join("restored"));
     restored.restore(&saved).unwrap();restored.restore(&checkpoint).unwrap();restored.restore(&failed_record).unwrap();
+    // Use actual CLI-produced/restored crosscheck archives in the holdout registry.
+    let experiments=sqx_project::experiment::Experiments::new(root.join("restored"));
+    let mut experiment_bars:Vec<sqx_core::Bar>=serde_json::from_value(saved.dataset["markets"][0]["bars"].clone()).unwrap();
+    let mut prior=experiment_bars[0];prior.time-=60000;experiment_bars.insert(0,prior);
+    let experiment_data=sqx_project::experiment::ExperimentData{bars:experiment_bars,instrument:sqx_core::Instrument::fx("EURUSD"),provenance:json!({"fixture":"CLI crosscheck archive"})};
+    let experiment_plan=sqx_project::experiment::ExperimentPlan{schema:1,engine_id:saved.run.engine_id.clone(),dataset_id:String::new(),holdout_start:2,config:sqx_backtest::BacktestConfig::default(),min_development_trades:1,min_holdout_trades:1,periods_per_year:525600.0,prior_exposure_disclosed:false};
+    let experiment_id=experiments.create(&experiment_data,experiment_plan).unwrap();
+    let audit=experiments.status(&experiment_id).unwrap()["current_exposure_audit"].clone();
+    assert_eq!(audit["classification"],"known_reuse_or_disclosed_exposure");
+    assert_eq!(audit["same_market_archived_crosscheck_records"],3);
     fs::remove_file(&manifest).unwrap();fs::remove_file(&strategy).unwrap();fs::remove_file(root.join("arbitrary.csv")).unwrap();
     let replay=|id:&str,resume:bool|{let mut c=Command::new(env!("CARGO_BIN_EXE_sqx-cli"));c.args(["replay-crosscheck","--archive-dir"]).arg(root.join("restored")).args(["--run-id",id]);if resume{c.arg("--resume");}c.output().unwrap()};
     let output=replay(&saved.run_id,false);assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));

@@ -57,6 +57,7 @@ remaining execution assumptions and unsupported cases are visible.
   minimum evidence thresholds and untouched-holdout handling across all routes.
   A separate integer-price SMA3 fixture now checks segmented selection, warmup,
   costs and carried capital; broader configurations and holdout remain open.
+- [x] Include all markets from archived CLI crosschecks, including checkpoints and failures, in holdout exposure audits and restored commitment evidence.
 - [ ] Make a selected strategy traceable to its full search/selection history.
 
 ## P1 — Establish remote release gates
@@ -69,7 +70,10 @@ remaining execution assumptions and unsupported cases are visible.
   debug/release, including profile parity. Commit: e832c2f.
 - [x] Push and independently verify the expanded MT5/reference changes. Commit
   156c0d7 passed all four jobs and both profile comparisons in run 45358671142.
+- [x] Verify recorder commit ed76833 in GitHub run 45362906500: all four jobs and profile comparisons passed.
 - [ ] Fix any platform-specific failures exposed by those runs.
+  Run 45364814462 exposed a mock-provider nonblocking read failure on macOS.
+  The fixture was corrected in fdee568; the replacement matrix must pass.
 - [ ] Configure successful checks as required branch protections/ruleset checks.
 - [ ] Establish a versioned release/artifact retention procedure: archive replay
   requires the exact recorded executable, not merely compatible source code.

@@ -3556,3 +3556,25 @@ timeouts. A delayed-fragment test exercises this condition on every platform.
 This fixes the test transport rather than relaxing archive or engine assertions.
 The affected run is failed evidence, not a successful release gate; a later exact
 commit needs a fresh full matrix result.
+
+### Crosscheck archives in holdout exposure audits
+
+The exposure registry now reads every market in CLI crosscheck archives instead
+of trying to parse a multi-market dataset as a single backtest. Previously such
+an archive made experiment status/commitment fail. Both execution checkpoints
+and completed or failed reports count conservatively as recorded input exposure;
+a checkpoint cannot establish what was inspected before an interruption.
+
+The audit records the matching market index and observation interval. Multiple
+matching datasets in one archive remain one record count, while checkpoint and
+result remain separate records rather than being advertised as independent
+trials. Unrelated markets and intervals outside the holdout do not create overlap.
+Malformed empty market inputs fail closed. A final commitment retains known reuse
+after its experiment backup is restored without the original crosscheck archive.
+The dashboard displays the separate crosscheck-record count.
+
+Regression coverage includes a matching market after an unrelated first market,
+multiple matching datasets, an interrupted checkpoint, a failed result, temporal
+boundaries, retained exposure after restore, and actual CLI-produced crosscheck
+archives read by the experiment registry. This closes this archive-format gap;
+it does not establish that external or unarchived research was never performed.

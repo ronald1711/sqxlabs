@@ -251,7 +251,7 @@ impl Experiments {
     fn exposure_audit(&self,id:&str,plan:&ExperimentPlan,data:&ExperimentData,own_attempts:usize)->Result<Value,String>{
         let start=data.bars[plan.holdout_start].time;
         let end=data.bars.last().unwrap().time;
-        let mut overlaps=Vec::new();let mut attempts=own_attempts;let mut archived_runs=0usize;let mut archived_pipelines=0usize;let mut archived_robustness=0usize;let mut archived_assistant=0usize;let mut archived_cli=0usize;
+        let mut overlaps=Vec::new();let mut attempts=own_attempts;let mut archived_runs=0usize;let mut archived_pipelines=0usize;let mut archived_robustness=0usize;let mut archived_assistant=0usize;let mut archived_cli=0usize;let mut archived_crosschecks=0usize;
         for other_id in self.list()? {
             if other_id==id{continue;}
             let other_plan=self.plan(&other_id)?;let other_data=self.data(&other_plan)?;
@@ -274,6 +274,24 @@ impl Experiments {
         // A single archive record is not a count of all optimizer trials or reruns.
         for run_id in self.archive.list()? {
             let bundle=self.archive.load(&run_id)?;
+            if matches!(bundle.run.request["research_kind"].as_str(),Some("cli_crosscheck"|"cli_crosscheck_started")) {
+                let markets=bundle.dataset["markets"].as_array().filter(|m|!m.is_empty()).ok_or("crosscheck exposure requires nonempty market inputs")?;
+                let mut same_market_record=false;
+                for (market_index,market) in markets.iter().enumerate() {
+                    let instrument:Instrument=serde_json::from_value(market["instrument"].clone()).map_err(err)?;
+                    let bars:Vec<Bar>=serde_json::from_value(market["bars"].clone()).map_err(err)?;
+                    let (Some(first),Some(last))=(bars.first(),bars.last()) else{return Err("crosscheck exposure requires market candles".into());};
+                    if !same_market(&data.instrument,&instrument){continue;}
+                    same_market_record=true;
+                    // A checkpoint claims the full input window before execution.
+                    // A crash cannot establish which inputs were already inspected.
+                    if intersects(start,end,first.time,last.time) {
+                        overlaps.push(json!({"source":"archived_cli_crosscheck","id":run_id,"market_index":market_index,"record_kind":bundle.run.request["research_kind"],"start":first.time,"end":last.time}));
+                    }
+                }
+                archived_crosschecks+=usize::from(same_market_record);
+                continue;
+            }
             let instrument:Instrument=serde_json::from_value(bundle.dataset["instrument"].clone()).map_err(err)?;
             if !same_market(&data.instrument,&instrument){continue;}
             let bars:Vec<Bar>=serde_json::from_value(bundle.dataset["bars"].clone()).map_err(err)?;
@@ -309,8 +327,8 @@ impl Experiments {
             if intersects(start,end,job.start,job.end){overlaps.push(json!({"source":"evolution_generation_claim","id":job.job_id,"claimed_generations":job.claimed_generations,"start":job.start,"end":job.end}));}
         }
         Ok(json!({"classification":if plan.prior_exposure_disclosed||!overlaps.is_empty(){"known_reuse_or_disclosed_exposure"}else{"no_known_registry_overlap"},
-            "known_overlaps":overlaps,"same_market_experiment_attempts":attempts,"same_market_archived_backtest_records":archived_runs,"same_market_archived_cli_backtest_records":archived_cli,"same_market_archived_assistant_records":archived_assistant,"same_market_archived_pipeline_records":archived_pipelines,"same_market_archived_robustness_records":archived_robustness,"same_market_archived_comparison_records":archived_comparisons,"same_market_evolution_generation_claims":evolution_claims,
-            "scope":"Overlap of recorded observation-time ranges on the same named market or FX pair. Includes other experiment trials/commitments and archived dashboard and CLI backtests (including recorded failures) and completed pipeline/robustness reports and assistant session summaries and trial checkpoints/results (including pending work and reported failures), plus backtests embedded in saved paper comparisons and claimed durable evolution generations (including interrupted work). CLI backtest counts are a subset of backtest record counts. Record counts may reference the same run and are not independent trial counts. Only records in this archive are visible; unarchived searches, data viewing, other CLI/MCP and external work are not covered. No known overlap does not prove independence."}))
+            "known_overlaps":overlaps,"same_market_experiment_attempts":attempts,"same_market_archived_backtest_records":archived_runs,"same_market_archived_cli_backtest_records":archived_cli,"same_market_archived_crosscheck_records":archived_crosschecks,"same_market_archived_assistant_records":archived_assistant,"same_market_archived_pipeline_records":archived_pipelines,"same_market_archived_robustness_records":archived_robustness,"same_market_archived_comparison_records":archived_comparisons,"same_market_evolution_generation_claims":evolution_claims,
+            "scope":"Overlap of recorded observation-time ranges on the same named market or FX pair. Includes other experiment trials/commitments and archived multi-market CLI crosscheck inputs (including checkpoints and failures) and dashboard and CLI backtests (including recorded failures) and completed pipeline/robustness reports and assistant session summaries and trial checkpoints/results (including pending work and reported failures), plus backtests embedded in saved paper comparisons and claimed durable evolution generations (including interrupted work). CLI backtest counts are a subset of backtest record counts. Record counts may reference the same run and are not independent trial counts. Only records in this archive are visible; unarchived searches, data viewing, other CLI/MCP and external work are not covered. No known overlap does not prove independence."}))
     }
     pub fn backup(&self,id:&str)->Result<ExperimentBackup,String>{
         let plan=self.plan(id)?;let ledger=self.ledger(id)?;let data=self.data(&plan)?;
