@@ -1,0 +1,107 @@
+# Pipeline evidence and recovery
+
+CLI pipelines default to `data/research`; use `--archive-dir` to isolate studies.
+The printed **Pipeline checkpoint** is the start ID needed below. Fresh pipeline
+invocations have different attempt IDs even when all research inputs match.
+Repeated recovery of one start ID is not a new independent trial.
+
+```sh
+sqx-cli pipeline-history --archive-dir /path/to/archive --run-id START_ID
+sqx-cli replay-pipeline --archive-dir /path/to/archive --run-id START_ID --resume
+sqx-cli replay-pipeline --archive-dir /path/to/archive --run-id START_ID
+```
+
+Inspection checks content identities and ordered event links without executing
+calculations. It distinguishes an incomplete prefix from recorded completion;
+recorded completion can still contain simulation errors. Replay requires the
+exact original executable, and never launches a binary found inside an archive.
+Engine bytes are retained at creation but runtime dependencies are not packaged.
+Older executable builds without these commands cannot acquire recovery support
+by running a newer, different engine against their records.
+
+Resume recomputes the saved prefix, comparing every emitted event before adding
+missing work. It restarts deterministic calculation from the beginning, not a
+serialized in-memory simulator state. It preserves failed/rejected outcomes and
+stops on mismatches, missing/contradictory links or storage failures. A process
+lock prevents simultaneous writers/replayers for one start ID. Lock-file
+existence alone does not mean that a process is alive.
+
+The completion record references all event IDs. A backup must preserve the start,
+all events and completion (when present); exporting only one record is not a
+whole-search backup. Restore/replay tests cover source deletion and process kill,
+not arbitrary disk corruption or power loss. Optimization records each walk-forward family, candidate start/full execution
+outcome, and out-of-sample start/full execution outcome before proceeding. Resume
+still recomputes and verifies the prefix; it does not restore simulator memory.
+Individual Monte Carlo samples are not resumable units. Older engines retain
+their original family-level checkpoint coverage.
+
+Current tests compare a killed/restored/resumed search with a separate
+uninterrupted search, reject a changed event and wrong engine, verify lock
+exclusion, and ensure repeated replay adds no records. This is internal
+reproducibility evidence, not independent execution validation or untouched
+holdout certification. Data from the entire pipeline is prior exposure.
+
+## Portable whole-search backup
+
+```sh
+sqx-cli export-pipeline --archive-dir /path/to/archive --run-id START_ID > pipeline-backup.json
+sqx-cli import-pipeline --archive-dir /path/to/restored --input pipeline-backup.json
+```
+
+Export includes the frozen inputs once, all ordered events, and completion when
+present. Import checks the checksum, content identities and the combined incoming
+and existing event graph before publishing records. Repeat import is idempotent;
+completion is published last. A storage failure may leave a recoverable prefix.
+Neither operation installs or executes an engine. Keep the original executable
+and its runtime separately if replay is required. Checksums detect corruption,
+not an untrusted author's fabricated results. Exported JSON can contain private
+market data and strategy definitions; store it accordingly. Interrupted exports
+must be repeated; partial JSON is not a backup. Large-archive performance and
+power-loss recovery remain outside the tested coverage.
+
+## Walk-forward interruption evidence
+
+A separate-process fixture generates 100 candidates, selects one family, and
+runs 16 variants in each of three walk-forward windows. The test kills the CLI
+after a full training outcome is durably visible, exports the incomplete archive,
+deletes the original archive, imports twice to check idempotence, and resumes.
+All 48 training outcomes and the complete ordered event IDs match a separate
+uninterrupted execution; the final completion ID matches as well. This checks
+full archived executions rather than only aggregate profits. It does not cover
+power loss, disk-full interruption, large-search memory limits or broker parity.
+
+## Dashboard recovery
+
+Saved research groups a pipeline start and its linked events/completion into one
+card. Choose **Inspect pipeline** to check saved links and build compatibility;
+this does not run a strategy. A matching application build then offers **Resume
+pipeline** for incomplete work or **Verify pipeline replay** for a recorded
+completion. Execution errors stay visibly invalid even when replay matches.
+
+**Download whole pipeline backup** includes the linked records. The existing
+**Restore research backup** file picker recognizes this format and validates it
+before restoring; browser imports are limited to 100 MB. Backups preserve their
+original JSON bytes during browser transfer. Larger backups require the CLI.
+Neither restore nor inspection launches an archived executable. If a request is
+interrupted, inspect again: a still-running process holds the pipeline lock; an
+unfinished saved prefix remains recoverable. Dashboard and CLI share the same
+archive validation, writer lock and exact-engine recovery implementation.
+
+## Memory scope
+
+Structural validation and compact status retain ordered event identities rather
+than all execution payloads. Replay loads and hash-checks the recorded execution
+for the current event before comparing it, then drops it. Full inspection and
+JSON backup export still materialize their requested payloads; the final report,
+simulator state, input dataset and candidate family also remain in memory.
+This removes one archive-size-dependent retention path; it is not a general
+bounded-memory guarantee or a completed large-search performance validation.
+
+## Write-failure evidence
+
+On non-root Linux/macOS, the recovery test removes write permission from its own
+archive run directory while preserving read access. Resume returns the actual
+filesystem permission error, publishes no further event and remains incomplete.
+After permissions are restored, resume matches the uninterrupted reference. Root
+accounts bypass this permission fixture. This covers a real rejected write, not
+power-loss persistence or a disk-full filesystem.

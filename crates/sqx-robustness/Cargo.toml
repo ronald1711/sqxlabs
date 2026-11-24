@@ -11,3 +11,4 @@ sqx-core = { path = "../sqx-core" }
 sqx-strategy = { path = "../sqx-strategy" }
 sqx-metrics = { path = "../sqx-metrics" }
 rand.workspace = true
+serde.workspace = true

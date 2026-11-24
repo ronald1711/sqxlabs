@@ -13,3 +13,7 @@ sqx-metrics = { path = "../sqx-metrics" }
 sqx-optimizer = { path = "../sqx-optimizer" }
 sqx-robustness = { path = "../sqx-robustness" }
 rand.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

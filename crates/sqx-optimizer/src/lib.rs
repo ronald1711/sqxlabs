@@ -200,7 +200,7 @@ fn oscillator_level(rng: &mut impl Rng, name: &str) -> f64 {
 }
 
 /// Backtest a batch of strategies and return (strategy, metrics) pairs.
-#[derive(Debug,Clone)]
+#[derive(Debug,Clone,serde::Serialize)]
 pub struct BatchEvaluation {
     pub strategy:Strategy,
     pub metrics:Metrics,

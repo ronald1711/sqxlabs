@@ -6,6 +6,10 @@ requirements and evidence audit in [RELIABILITY.md](RELIABILITY.md).
 
 Local MT5 integration evidence and completion gates: [MT5_VALIDATION.md](MT5_VALIDATION.md).
 
+User priority (2026-11-24): temporarily defer further MT5 work. Continue research
+reproducibility, recovery, walk-forward/holdout and evidence visibility. Deferred
+MT5 checks remain incomplete; this changes work order, not validation claims.
+
 ## P0 — Independently validate execution
 
 - [ ] Resolve the observed USDJPY/EUR margin conversion-route discrepancy against
@@ -52,6 +56,27 @@ remaining execution assumptions and unsupported cases are visible.
 
 - [ ] Provide durable trial accounting on every research entry point, including
   CLI, MCP, pipelines, optimization and robustness operations.
+  CLI pipelines retain exact engine bytes, frozen inputs/configuration/seed,
+  a pre-execution start record, ordered stage/family events, per-build/retest
+  starts and outcomes, and the full returned report before reporting errors.
+  Storage failures stop further evaluation. A process-kill/source-deletion
+  restore test preserves the frozen family and completed build outcomes without
+  fabricating completion. Restored event/start/result records disclose holdout
+  exposure; counts are records, not independent trials. Optimization checkpoints
+  now include every walk-forward candidate and OOS start/full execution outcome. CLI `pipeline-history` checks
+  prefix links; `replay-pipeline --resume` replays the prefix with the exact
+  engine before adding missing events, under an exclusive process lock. A
+  separate-process kill/restore/resume fixture matches an uninterrupted search;
+  repeat recovery deduplicates and conflicting/tampered prefixes are rejected.
+  Whole-search JSON export/import now validates checksums, event links and the
+  merged destination graph before publication; repeat imports deduplicate.
+  Tests reject corruption, missing completion dependencies and conflicting
+  destination events. A separate process-kill test inside walk-forward restores through the public
+  backup commands and matches all 48 candidate outcomes and full event identities
+  against an uninterrupted run. Engine/runtime transport, bounded-scale
+  validation and power-loss validation remain open. Dashboard pipeline inspection,
+  whole-backup transfer and exact-build recovery now use the shared CLI archive
+  implementation; broader recovery UX and large archives remain open.
 - [x] Preserve MCP generation execution failures in responses, exclude failed candidates from ranking and mark partial searches as errors. Durable generation accounting is implemented below; other MCP routes remain open.
 - [x] Stop MCP portfolio selection on failed or missing candidate evaluations and preserve error/selection context.
 - [x] Persist MCP generation inputs, per-candidate checkpoints and full results before ranking; inspect interrupted searches after restart without original CSV files. Replay and resume are tracked below; other MCP routes remain open.
@@ -62,7 +87,11 @@ remaining execution assumptions and unsupported cases are visible.
 - [ ] Independently review walk-forward boundaries, warmup, capital continuity,
   minimum evidence thresholds and untouched-holdout handling across all routes.
   A separate integer-price SMA3 fixture now checks segmented selection, warmup,
-  costs and carried capital; broader configurations and holdout remain open.
+  costs and carried capital. A hand-calculated EURUSD/USD holdout fixture checks
+  SMA3 warmup, first-boundary fills, long/short spread and commission, fresh
+  holdout capital, future-data isolation and persisted commitment after restart.
+  Broader configurations, independent platform agreement and untouched-data
+  provenance beyond the local protocol remain open.
 - [x] Classify all MCP generation phases in holdout exposure audits, keep record counts separate from trial counts, and preserve committed exposure after restore.
 - [x] Include all markets from archived CLI crosschecks, including checkpoints and failures, in holdout exposure audits and restored commitment evidence.
 - [x] Audit complete declared candle intervals across experiment, crosscheck, backtest, comparison and evolution evidence; surface missing legacy durations and retain uncertainty through restore.
@@ -95,7 +124,10 @@ remaining execution assumptions and unsupported cases are visible.
   45364814462. Fixed in fdee568; replacement run 45365576256 for 68a1319 passed
   all four jobs and both profile comparisons.
 - [x] Verify history-availability retry commit 44992ab in run 45369266431; all four platform/profile jobs and both profile comparisons passed.
-- [ ] Configure successful checks as required branch protections/ruleset checks.
+- [x] Require Linux/macOS debug/release checks on `main`, bound to GitHub Actions
+  (app 15368), with strict up-to-date enforcement, administrator enforcement and
+  force pushes disabled. Repository protection API reverified on 2026-11-24.
+  Individual revisions still need successful checks before merging.
 - [x] Retain exact engine bytes before creating new CLI evolution jobs; refuse creation on corrupt retained bytes and test separate-process resume.
 - [ ] Establish a versioned release/artifact retention procedure: archive replay
   requires the exact recorded executable, not merely compatible source code.

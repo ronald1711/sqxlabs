@@ -13,7 +13,7 @@ use sqx_robustness::monte_carlo_trade_manipulation;
 use sqx_strategy::Strategy;
 
 /// One pipeline step.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TaskKind {
     Build { count: usize, keep: usize },
     Retest { mc_runs: usize, min_positive_pct: f64 },
@@ -22,20 +22,20 @@ pub enum TaskKind {
 }
 
 /// A named task.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Task {
     pub kind: TaskKind,
 }
 
 /// A custom project pipeline.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Pipeline {
     pub name: String,
     pub tasks: Vec<Task>,
 }
 
 /// The outcome of running a pipeline.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PipelineReport {
     pub retests: Vec<RetestEvaluation>,
     pub builds: Vec<BuildEvaluation>,
@@ -45,7 +45,7 @@ pub struct PipelineReport {
     pub log: Vec<String>,
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug,Clone,serde::Serialize)]
 pub struct BuildEvaluation {
     pub step: usize,
     pub candidate_index: usize,
@@ -53,7 +53,7 @@ pub struct BuildEvaluation {
     pub selected: bool,
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug,Clone,serde::Serialize)]
 pub struct RetestEvaluation {
     pub step:usize,
     pub strategy:Strategy,
@@ -66,7 +66,7 @@ pub struct RetestEvaluation {
 }
 
 /// Recorded family evaluation, including rejected/insufficient candidates.
-#[derive(Debug,Clone)]
+#[derive(Debug,Clone,serde::Serialize)]
 pub struct CandidateOptimization {
     pub original: Strategy,
     pub family: Vec<Strategy>,
@@ -83,7 +83,35 @@ pub fn run(
     gen: &GeneratorConfig,
     seed: u64,
 ) -> PipelineReport {
-    let failure=|error:String| PipelineReport{errors:vec![error],..Default::default()};
+    run_observed(pipeline,bars,instrument,config,periods_per_year,gen,seed,&mut |_|Ok(()))
+        .unwrap_or_else(|error|PipelineReport{errors:vec![error],..Default::default()})
+}
+
+/// Events precede execution/selection. Observer errors stop work immediately.
+/// Optimize events include each walk-forward trial and its full execution result.
+#[derive(Debug,serde::Serialize)]
+#[serde(tag="kind",rename_all="snake_case")]
+pub enum PipelineEvent<'a> {
+    StepStarted { step:usize, task_index:usize, task:&'a Task, inputs:&'a [Strategy] },
+    BuildFamily { step:usize, candidates:&'a [Strategy] },
+    BuildStarted { step:usize, candidate_index:usize, strategy:&'a Strategy },
+    BuildOutcome { step:usize, candidate_index:usize, evaluation:&'a sqx_optimizer::BatchEvaluation },
+    RetestStarted { step:usize, candidate_index:usize, strategy:&'a Strategy },
+    RetestOutcome { step:usize, candidate_index:usize, evaluation:&'a RetestEvaluation },
+    OptimizeFamily { step:usize, candidate_index:usize, original:&'a Strategy, family:&'a [Strategy] },
+    OptimizeFailure { step:usize, candidate_index:usize, original:&'a Strategy, error:&'a str },
+    WalkForward { step:usize, candidate_index:usize, event:sqx_optimizer::WalkForwardEvent<'a> },
+    OptimizeOutcome { step:usize, candidate_index:usize, evaluation:&'a CandidateOptimization },
+    StepSelected { step:usize, strategies:&'a [Strategy] },
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn run_observed(
+    pipeline:&Pipeline,bars:&[Bar],instrument:&Instrument,config:&BacktestConfig,
+    periods_per_year:f64,gen:&GeneratorConfig,seed:u64,
+    observer:&mut impl FnMut(PipelineEvent<'_>)->Result<(),String>,
+)->Result<PipelineReport,String> {
+    let failure=|error:String| Ok(PipelineReport{errors:vec![error],..Default::default()});
     if let Err(error)=gen.validate(){return failure(error);}
     if let Err(error)=sqx_backtest::validate_backtest_inputs(bars,instrument,config){return failure(error);}
     for task in &pipeline.tasks {
@@ -103,12 +131,20 @@ pub fn run(
     let mut steps = 0usize;
     while pc < pipeline.tasks.len() && steps < 200 {
         steps += 1;
+        observer(PipelineEvent::StepStarted{step:steps,task_index:pc,task:&pipeline.tasks[pc],inputs:&databank})?;
         match &pipeline.tasks[pc].kind {
             TaskKind::Build { count, keep } => {
                 let cands: Vec<Strategy> = (0..*count)
                     .map(|i| random_strategy(&mut rng, &format!("b{steps}-{i}"), gen))
                     .collect();
-                let evaluations = backtest_batch_detailed(&cands, bars, instrument, config, periods_per_year);
+                observer(PipelineEvent::BuildFamily{step:steps,candidates:&cands})?;
+                let mut evaluations=Vec::with_capacity(cands.len());
+                for (candidate_index,strategy) in cands.iter().enumerate() {
+                    observer(PipelineEvent::BuildStarted{step:steps,candidate_index,strategy})?;
+                    let evaluation=backtest_batch_detailed(std::slice::from_ref(strategy),bars,instrument,config,periods_per_year).remove(0);
+                    observer(PipelineEvent::BuildOutcome{step:steps,candidate_index,evaluation:&evaluation})?;
+                    evaluations.push(evaluation);
+                }
                 let mut scored=Vec::new();
                 for (index,evaluation) in evaluations.iter().enumerate(){
                     if !evaluation.errors.is_empty(){
@@ -126,16 +162,19 @@ pub fn run(
             }
             TaskKind::Retest { mc_runs, min_positive_pct } => {
                 let mut kept = Vec::new();
-                for s in databank.drain(..) {
+                for (candidate_index,s) in databank.drain(..).enumerate() {
+                    observer(PipelineEvent::RetestStarted{step:steps,candidate_index,strategy:&s})?;
                     let r = backtest(&s, bars, instrument, config);
                     if !r.errors.is_empty(){
                         retests.push(RetestEvaluation{step:steps,strategy:s,requested_runs:*mc_runs,seed,minimum_positive_pct:*min_positive_pct,errors:r.errors.clone(),report:None,selected:false});
+                        observer(PipelineEvent::RetestOutcome{step:steps,candidate_index,evaluation:retests.last().unwrap()})?;
                         errors.extend(r.errors);continue;
                     }
                     let mc = monte_carlo_trade_manipulation(&r.trades, *mc_runs, 0.1, seed);
                     if !mc.errors.is_empty(){let error=format!("Retest step {steps}, {} unavailable: {}",s.name,mc.errors.join("; "));log.push(error.clone());errors.push(error);}
                     let selected=mc.meets_positive_threshold(*min_positive_pct);
                     retests.push(RetestEvaluation{step:steps,strategy:s.clone(),requested_runs:*mc_runs,seed,minimum_positive_pct:*min_positive_pct,errors:mc.errors.clone(),report:Some(mc),selected});
+                    observer(PipelineEvent::RetestOutcome{step:steps,candidate_index,evaluation:retests.last().unwrap()})?;
                     if selected {kept.push(s);}
                 }
                 log.push(format!("Retest: {} survivors", kept.len()));
@@ -144,9 +183,10 @@ pub fn run(
             }
             TaskKind::Optimize { windows,candidates } => {
                 let mut kept=Vec::new();
-                for original in databank.drain(..) {
-                    let family=match sqx_optimizer::parameter_family(&original,*candidates,seed,&gen.param_ranges){Ok(family)=>family,Err(error)=>{errors.push(format!("{}: {error}",original.name));continue;}};
-                    let report=sqx_optimizer::walk_forward_candidates(bars,instrument,config,periods_per_year,&family,*windows,0.25,seed,&sqx_optimizer::WalkForwardCriteria::default());
+                for (candidate_index,original) in databank.drain(..).enumerate() {
+                    let family=match sqx_optimizer::parameter_family(&original,*candidates,seed,&gen.param_ranges){Ok(family)=>family,Err(error)=>{observer(PipelineEvent::OptimizeFailure{step:steps,candidate_index,original:&original,error:&error})?;errors.push(format!("{}: {error}",original.name));continue;}};
+                    observer(PipelineEvent::OptimizeFamily{step:steps,candidate_index,original:&original,family:&family})?;
+                    let report=sqx_optimizer::walk_forward_candidates_observed(bars,instrument,config,periods_per_year,&family,*windows,0.25,seed,&sqx_optimizer::WalkForwardCriteria::default(),&mut |event|observer(PipelineEvent::WalkForward{step:steps,candidate_index,event}))?;
                     errors.extend(report.errors.iter().map(|error|format!("{}: {error}",original.name)));
                     if report.evidence_sufficient && report.oos_net_profit>0.0 {
                         // Keep the last training-selected variant, never retrospectively
@@ -155,6 +195,7 @@ pub fn run(
                     }
                     log.push(format!("Optimize {}: {} frozen parameter/SL/PT variants; {} IS evaluations; OOS net {}; evidence sufficient {}. Full-data candidate discovery means this is exploratory, not an untouched holdout.",original.name,family.len(),report.candidates_attempted,report.oos_net_profit,report.evidence_sufficient));
                     optimizations.push(CandidateOptimization{original,family,report});
+                    observer(PipelineEvent::OptimizeOutcome{step:steps,candidate_index,evaluation:optimizations.last().unwrap()})?;
                 }
                 databank=kept;pc+=1;
             },
@@ -163,10 +204,11 @@ pub fn run(
                 pc = *index;
             }
         }
+        observer(PipelineEvent::StepSelected{step:steps,strategies:&databank})?;
     }
     log.push(format!("Pipeline {} after {} steps; {} strategies in databank",if pc<pipeline.tasks.len(){"stopped at its limit"}else{"finished"}, steps, databank.len()));
     if pc<pipeline.tasks.len(){errors.push("Pipeline step limit reached before completion".into());}
-    PipelineReport {errors,retests,builds,optimizations,databank, log }
+    Ok(PipelineReport {errors,retests,builds,optimizations,databank, log })
 }
 
 /// A default demo pipeline: Build -> Retest -> Optimize.
