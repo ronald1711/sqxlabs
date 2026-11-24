@@ -45,10 +45,9 @@ fn checksum(backup:&Backup)->Result<String,String>{
 
 pub fn export(archive:&Archive,id:&str)->Result<Value,String>{
     let _guard=lock(archive,id)?;let state=load(archive,id)?;
-    let mut events=Vec::new();
+    let mut events=Vec::new();let mut reader=archive.read_session();
     for event_id in &state.events {
-        let bundle=archive.load(event_id)?;
-        events.push(PortableRecord{run_id:bundle.run_id,run:bundle.run});
+        events.push(PortableRecord{run_id:event_id.clone(),run:reader.load_run(event_id)?});
     }
     let mut backup=Backup{schema:1,checksum:String::new(),start:state.root,events,
         completion:state.completion.map(|b|PortableRecord{run_id:b.run_id,run:b.run})};
@@ -130,9 +129,10 @@ fn load(archive:&Archive,id:&str)->Result<State,String>{
     if root.run.request["research_kind"]!="cli_pipeline_started" || root.run.result!=json!({"status":"execution_not_recorded"}){
         return Err("Expected a pipeline start record".into());
     }
-    let mut events=BTreeMap::new();let mut completion=None;
+    let mut events=BTreeMap::new();let mut completion=None;let mut reader=archive.read_session();
     for record_id in archive.list()?{
-        let record=archive.load(&record_id)?;
+        let run=reader.load_run(&record_id)?;
+        let record=PortableRecord{run_id:record_id,run};
         if record.run.request["started_run_id"]!=id {continue;}
         if record.run.engine_id!=root.run.engine_id || record.run.dataset_id!=root.run.dataset_id || record.run.strategy_id!=root.run.strategy_id{
             return Err("Pipeline record input/engine identities differ".into());
@@ -143,7 +143,7 @@ fn load(archive:&Archive,id:&str)->Result<State,String>{
                 if events.insert(sequence,(record.run_id,record.run.request)).is_some(){return Err("Conflicting pipeline events at the same sequence".into());}
             },
             Some("cli_pipeline")=>{
-                if record.run.request!=completion_request(&root) || completion.replace(record).is_some(){return Err("Conflicting pipeline completion records".into());}
+                if record.run.request!=completion_request(&root) || completion.replace(ResearchBundle{run_id:record.run_id,run:record.run,dataset:root.dataset.clone(),strategy:root.strategy.clone()}).is_some(){return Err("Conflicting pipeline completion records".into());}
             },
             _=>return Err("Unknown record refers to this pipeline".into()),
         }
@@ -175,8 +175,9 @@ pub fn summary(archive:&Archive,id:&str)->Result<Value,String>{
 
 pub fn inspect(archive:&Archive,id:&str)->Result<Value,String>{
     let _guard=lock(archive,id)?;let state=load(archive,id)?;
+    let mut reader=archive.read_session();
     let events:Vec<_>=state.events.iter().enumerate().map(|(sequence,id)|{
-        archive.load(id).map(|record|json!({"sequence":sequence,"run_id":id,"event":record.run.result}))
+        reader.load_run(id).map(|record|json!({"sequence":sequence,"run_id":id,"event":record.result}))
     }).collect::<Result<_,_>>()?;
     Ok(json!({"started_run_id":id,"status":if state.completion.is_some(){"completion_recorded"}else{"incomplete"},
         "completion_id":state.completion.as_ref().map(|r|&r.run_id),"event_count":state.events.len(),
@@ -200,12 +201,12 @@ pub fn recover(archive:&Archive,id:&str,resume:bool)->Result<Recovery,String>{
     let generator:sqx_optimizer::GeneratorConfig=serde_json::from_value(root.strategy["generator"].clone()).map_err(|e|e.to_string())?;
     let seed=root.run.request["seed"].as_u64().ok_or("Missing pipeline seed")?;
     let pyp=root.run.request["periods_per_year"].as_f64().filter(|n|n.is_finite() && *n>0.0).ok_or("Invalid periods per year")?;
-    let mut ids=Vec::new();let mut appended=0;
+    let mut ids=Vec::new();let mut appended=0;let mut reader=archive.read_session();
     let report=sqx_pipeline::run_observed(&pipeline,&bars,&instrument,&config,pyp,&generator,seed,&mut |event|{
         let value=serde_json::to_value(event).map_err(|e|e.to_string())?;
         let index=ids.len();
         let event_id=if let Some(event_id)=state.events.get(index){
-            let recorded=archive.load(event_id)?.run.result;
+            let recorded=reader.load_run(event_id)?.result;
             if recorded!=value{return Err(format!("Pipeline replay differs at event {index}; no further work accepted"));}
             event_id.clone()
         }else{
