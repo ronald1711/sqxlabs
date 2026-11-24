@@ -702,6 +702,7 @@ dependencies = [
  "sqx-data",
  "sqx-metrics",
  "sqx-optimizer",
+ "sqx-pipeline",
  "sqx-portfolio",
  "sqx-project",
  "sqx-robustness",

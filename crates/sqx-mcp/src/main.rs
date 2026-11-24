@@ -14,10 +14,10 @@ use sqx_core::{Bar, Instrument, Timeframe};
 use sqx_data::{read_csv_bars, DataStore, QuestdbClient, QuestdbConfig};
 use sqx_metrics::{compute as compute_metrics, Metrics};
 use sqx_optimizer::{rank, random_strategy, Fitness, GeneratorConfig};
-use sqx_robustness::{monte_carlo_retest, monte_carlo_trade_manipulation, what_if};
 use sqx_strategy::Strategy;
 
 mod generation_archive;
+mod robustness_archive;
 
 const PROTOCOL: &str = "2024-11-05";
 
@@ -126,7 +126,7 @@ fn tools_list() -> Vec<Value> {
         }),
         json!({
             "name": "robustness",
-            "description": "Run what-if, MC trade, MC retest and walk-forward of the supplied strategy and exit-distance variants on CSV or QuestDB data. This is not untouched-holdout or independent execution evidence.",
+            "description": "Run and durably record what-if, MC trade, MC retest and walk-forward of the supplied strategy and exit-distance variants. Use research_history after a lost response. This is not untouched-holdout or independent execution evidence.",
             "inputSchema": { "type": "object", "properties": { "source": {"type":"string","enum":["csv","questdb"],"description":"CSV when data is present; otherwise QuestDB. CSV requires explicit symbol and timeframe."}, "config": { "type": "object", "description": "BacktestConfig: initial_deposit, spread_points, slippage_points, commission_per_lot and account (currency, max_leverage, stop_out_ratio, financing and historical conversion_rates)." }, "data": { "type": "string" }, "symbol": { "type": "string" }, "timeframe": { "type": "string" }, "limit": { "type": "integer" }, "strategy": { "type": "object" } }, "required": ["strategy"] }
         }),
     ];
@@ -140,6 +140,7 @@ fn tools_list() -> Vec<Value> {
             schema["allOf"]=json!([{"if":{"required":["data"]},"then":{"required":["timeframe"]}}]);
         }
     }
+    tools.extend(robustness_archive::tools());
     tools
 }
 
@@ -155,6 +156,10 @@ fn call_tool(params: &Value) -> Value {
     let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
     match name {
+        "research_history"|"research_resume"|"research_export"|"research_import"=>match robustness_archive::call(name,&args,&generation_archive::configured_archive()){
+            Ok(value)=>{let mut response=text_result(value.to_string());if value["report"]["errors"].as_array().is_some_and(|errors|!errors.is_empty()){response["isError"]=json!(true);}response},
+            Err(error)=>err_result(error),
+        },
         "list_indicators" => {
             let names: Vec<String> = sqx_strategy::indicator_catalog().iter().map(|s| s.name.to_string()).collect();
             text_result(names.join(", "))
@@ -492,6 +497,10 @@ fn portfolio_result(strategies:&[Strategy],results:&[sqx_backtest::BacktestResul
 }
 
 fn tool_robustness(args: &Value) -> Value {
+    tool_robustness_archived(args,&generation_archive::configured_archive())
+}
+
+fn tool_robustness_archived(args:&Value,archive:&sqx_project::archive::Archive)->Value{
     let strat_val = match args.get("strategy") {
         Some(v) => v.clone(),
         None => return err_result("missing strategy".to_string()),
@@ -508,44 +517,55 @@ fn tool_robustness(args: &Value) -> Value {
     let pyp = pyp_for(&bars);
     let cfg=match simulation_config(args,timeframe){Ok(config)=>config,Err(error)=>return err_result(error)};
     if let Err(error)=sqx_backtest::validate_backtest_inputs(&bars,&inst,&cfg){return err_result(error);}
-    let base = backtest(&strategy, &bars, &inst, &cfg);
-    if !base.errors.is_empty(){return err_result(base.errors.join("; "));}
-    let base_m = compute_metrics(&base, bars.len(), pyp);
-    let mut lines = vec![format!("base: {}", metrics_summary(&base_m))];
-    let scenarios = [(1.0, 0.0, 0.0), (3.0, 1.0, 5.0), (5.0, 2.0, 10.0)];
-    let mut errors=Vec::new();
-    for (index,r) in what_if(&strategy, &bars, &inst, &cfg, &scenarios).into_iter().enumerate() {
-        errors.extend(r.errors.iter().map(|error|format!("What-if scenario {index}: {error}")));
-        if !r.errors.is_empty(){lines.push(format!("invalid what-if: {}",r.errors.join("; ")));continue;}
-        lines.push(format!("what-if spread={:.0} slip={:.0} comm={:.0} -> net {:.2}", r.spread, r.slippage, r.commission, r.net_profit));
+    let (report,start_id,completion_id)=match robustness_archive::execute(archive,&strategy,&bars,&inst,timeframe,&cfg,pyp,&quality){Ok(value)=>value,Err(error)=>return err_result(error)};
+    let mut lines=Vec::new();
+    if let Some(study)=&report.robustness{
+        lines.push(format!("base: {}",metrics_summary(&compute_metrics(&study.base,bars.len(),pyp))));
+        for row in &study.what_if{
+            if !row.errors.is_empty(){lines.push(format!("invalid what-if: {}",row.errors.join("; ")));continue;}
+            lines.push(format!("what-if spread={:.0} slip={:.0} comm={:.0} -> net {:.2}",row.spread,row.slippage,row.commission,row.net_profit));
+        }
+        if let Some(mc)=&study.monte_carlo{lines.push(sqx_robustness::render(mc));}
+        if let Some(rt)=&study.retest{
+            lines.push(format!("mc_retest assumptions: seed {}; {}",rt.seed,rt.warmup_policy));
+            lines.push(format!("mc_retest coverage: requested {}, skipped {}, invalid {}; issues: {:?}",rt.requested_runs,rt.skipped_runs,rt.invalid_runs,rt.errors));
+            lines.push(format!("mc_retest: median_net={:.2} losing={:.1}%",rt.net_profit_50pct,rt.losing_runs_pct));
+        }
+        if let Some(wf)=&study.walk_forward{lines.push(format!("walk_forward (supplied strategy and exit-distance variants; not untouched-holdout or independent execution evidence): {}",json!(wf)));}
     }
-    let mc = monte_carlo_trade_manipulation(&base.trades, 500, 0.1, 42);
-    lines.push(sqx_robustness::render(&mc));
-    let rt = monte_carlo_retest(&strategy, &bars, &inst, &cfg, 200, 7);
-    lines.push(format!("mc_retest assumptions: seed {}; {}",rt.seed,rt.warmup_policy));
-    lines.push(format!("mc_retest coverage: requested {}, skipped {}, invalid {}; issues: {:?}",rt.requested_runs,rt.skipped_runs,rt.invalid_runs,rt.errors));
-    lines.push(format!("mc_retest: median_net={:.2} losing={:.1}%", rt.net_profit_50pct, rt.losing_runs_pct));
-    let (wf,wf_errors)=match sqx_optimizer::exit_parameter_family(&strategy,20,42){
-        Ok(family)=>{
-            let report=sqx_optimizer::walk_forward_candidates(&bars,&inst,&cfg,pyp,&family,4,0.25,42,&sqx_optimizer::WalkForwardCriteria::default());
-            (json!(report),report.errors)
-        },
-        Err(error)=>(json!({"errors":[error.clone()]}),vec![error]),
-    };
-    lines.push(format!("walk_forward (supplied strategy and exit-distance variants; not untouched-holdout or independent execution evidence): {wf}"));
-    errors.extend(mc.errors.iter().map(|error|format!("Monte Carlo: {error}")));
-    errors.extend(rt.errors.iter().map(|error|format!("MC retest: {error}")));
-    errors.extend(wf_errors.iter().map(|error|format!("Walk-forward: {error}")));
-    let mut context=quality;
-    context["errors"]=json!(errors);
+    let mut context=quality;context["errors"]=json!(report.errors);
     let mut response=research_result(lines.join("\n"),context,&symbol,timeframe,&cfg);
-    if !errors.is_empty(){response["isError"]=json!(true);}
+    response["archive"]=json!({"started_run_id":start_id,"run_id":completion_id,"replay_available":true});
+    if !report.errors.is_empty(){response["isError"]=json!(true);}
     response
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn archived_robustness_fixture(args:&Value)->Value{
+        let root=std::env::temp_dir().join(format!("sqx-mcp-robustness-{:032x}",rand::random::<u128>()));
+        let archive=sqx_project::archive::Archive::new(&root);
+        let response=tool_robustness_archived(args,&archive);
+        let id=response["archive"]["run_id"].as_str().expect("completed study retained, even on calculation errors");
+        let saved=archive.load(id).unwrap();
+        let start=archive.load(response["archive"]["started_run_id"].as_str().unwrap()).unwrap();
+        let task=&start.strategy["pipeline"]["tasks"][0]["kind"];
+        assert_eq!(task["Robustness"]["mc_runs"],500);
+        let strategy:Strategy=serde_json::from_value(args["strategy"].clone()).unwrap();
+        let bars:Vec<Bar>=serde_json::from_value(start.dataset["bars"].clone()).unwrap();
+        let instrument:Instrument=serde_json::from_value(start.dataset["instrument"].clone()).unwrap();
+        let config:BacktestConfig=serde_json::from_value(start.run.request["config"].clone()).unwrap();
+        let base=backtest(&strategy,&bars,&instrument,&config);
+        let study=&saved.run.result["report"]["robustness"];
+        assert_eq!(study["base"],json!(base));
+        assert_eq!(study["monte_carlo"],json!(sqx_robustness::monte_carlo_trade_manipulation(&base.trades,500,0.1,42)));
+        assert_eq!(study["retest"],json!(sqx_robustness::monte_carlo_retest(&strategy,&bars,&instrument,&config,200,7)));
+        assert_eq!(study["what_if"],json!(sqx_robustness::what_if(&strategy,&bars,&instrument,&config,&[(1.0,0.0,0.0),(3.0,1.0,5.0),(5.0,2.0,10.0)])));
+
+        assert_eq!(saved.run.result["report"]["errors"].as_array().unwrap().is_empty(),response["isError"]!=true);
+        std::fs::remove_dir_all(root).unwrap();response
+    }
     #[test]
     fn trial_recovery_rejects_ambiguous_modes_and_input_overrides(){
         for arguments in [json!({"run_id":"unused","restart":"true"}),json!({"run_id":"unused","config":{}}),json!({"restart":true})] {
@@ -610,6 +630,22 @@ mod tests {
         assert_eq!(failed["isError"],true);assert!(failed.to_string().contains("eligible for ranking: 0"));
     }
     #[test]
+    fn invalid_robustness_base_is_retained_and_stays_invalid_after_resume(){
+        let root=std::env::temp_dir().join(format!("sqx-mcp-invalid-study-{:032x}",rand::random::<u128>()));std::fs::create_dir_all(&root).unwrap();
+        let path=root.join("bars.csv");std::fs::write(&path,"timestamp,open,high,low,close,volume\n1700000000,1.1,1.101,1.099,1.1,1\n1700000060,1.1,1.101,1.099,1.1,1\n").unwrap();
+        let archive=sqx_project::archive::Archive::new(root.join("archive"));
+        let mut strategy=Strategy::new("invalid stop");strategy.stop_loss=Some(sqx_strategy::StopLoss::Points(-1.0));
+        let response=tool_robustness_archived(&json!({"data":path,"symbol":"EURUSD","timeframe":"M1","strategy":strategy}),&archive);
+        assert_eq!(response["isError"],true,"{response}");
+        let id=response["archive"]["started_run_id"].as_str().expect("invalid base checkpoint");
+        std::fs::remove_file(path).unwrap();
+        let resumed=robustness_archive::call("research_resume",&json!({"run_id":id}),&archive).unwrap();
+        assert_eq!(resumed["completion_id"],response["archive"]["run_id"]);assert_eq!(resumed["appended_events"],0);
+        assert!(!resumed["report"]["errors"].as_array().unwrap().is_empty());assert!(resumed["report"]["robustness"]["monte_carlo"].is_null());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn robustness_walkforward_keeps_the_supplied_rule_tree(){
         let path=std::env::temp_dir().join(format!("sqx-mcp-family-{:032x}.csv",rand::random::<u128>()));
         let mut csv="timestamp,open,high,low,close,volume\n".to_string();
@@ -618,7 +654,7 @@ mod tests {
         strategy.stop_loss=Some(sqx_strategy::StopLoss::Points(20.0));strategy.profit_target=Some(sqx_strategy::ProfitTarget::Points(30.0));
         strategy.signals.push(sqx_strategy::Signal::new(sqx_strategy::SignalKind::LongEntry,vec![sqx_strategy::Condition::new(sqx_strategy::Operand::Const(1.0),sqx_strategy::Comparator::Gt,sqx_strategy::Operand::Const(0.0))],sqx_strategy::Join::And));
         let original=json!(strategy);
-        let response=call_tool(&json!({"name":"robustness","arguments":{"data":path,"symbol":"EURUSD","timeframe":"M1","strategy":strategy}}));std::fs::remove_file(path).unwrap();
+        let response=archived_robustness_fixture(&json!({"data":path,"symbol":"EURUSD","timeframe":"M1","strategy":strategy}));std::fs::remove_file(path).unwrap();
         let text=response["content"][0]["text"].as_str().unwrap();
         let line=text.lines().find(|line|line.starts_with("walk_forward (")).expect("walk-forward report retained");
         let report:Value=serde_json::from_str(line.split_once(": ").unwrap().1).unwrap();
@@ -634,7 +670,7 @@ mod tests {
     fn failed_robustness_stages_are_protocol_errors_with_context(){
         let path=std::env::temp_dir().join(format!("sqx-mcp-stress-{}-{}.csv",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         std::fs::write(&path,"timestamp,open,high,low,close,volume\n1700000000,1,1,1,1,1\n1700000060,1,1,1,1,1\n").unwrap();
-        let response=call_tool(&json!({"name":"robustness","arguments":{"data":path,"symbol":"EURUSD","timeframe":"M1","strategy":Strategy::new("no trades")}}));
+        let response=archived_robustness_fixture(&json!({"data":path,"symbol":"EURUSD","timeframe":"M1","strategy":Strategy::new("no trades")}));
         std::fs::remove_file(path).unwrap();
         assert_eq!(response["isError"],true,"{response}");
         let text=response["content"][0]["text"].as_str().unwrap();

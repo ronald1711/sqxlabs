@@ -238,7 +238,9 @@ See [README.md](README.md) for operation and [ci/README.md](ci/README.md) for ch
 - [x] Keep MCP robustness walk-forward candidates within the supplied strategy's
   exit-distance family, with the original strategy first in every window.
   A regression reproduces the former unrelated-control failure; all 17 MCP tests
-  pass. Durable checkpoints for MCP robustness remain outstanding.
+  pass. MCP robustness now uses the shared durable pipeline journal and exposes
+  history, resume and portable export/import through MCP. Other unarchived MCP
+  entry points, large-study performance and power-loss evidence remain open.
 
 - [x] Journal build-pipeline retest base executions and individual Monte Carlo
   paths, including ordered trade selections and failures, before survivor selection.

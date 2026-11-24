@@ -379,9 +379,20 @@ These checks do not establish broker execution parity or an untouched holdout.
 
 MCP `robustness` uses the supplied strategy as its walk-forward control and
 varies only exit distances within the same rule family. It no longer substitutes
-unrelated generated strategies. This route still lacks durable study checkpoints;
-its walk-forward results are neither untouched-holdout nor independent execution
-evidence.
+unrelated generated strategies. Before calculation it now freezes the inputs,
+account settings, engine identity and fixed study settings in the operator's
+`SQX_MCP_RESEARCH_DIR` archive (default `data/research`). It preserves base results,
+cost scenarios, all 500 trade-resampling paths, 200 retest attempts and four
+walk-forward windows through the shared pipeline journal, including failures.
+Use `research_history` to locate a study after a lost response; `research_resume`
+accepts only its `run_id`, verifies the recorded prefix with the original engine,
+and finishes missing work. `research_export` and `research_import` carry complete
+or partial studies without engine binaries. They never execute archived programs.
+Calculation errors remain errors after successful recovery. Fresh `robustness`
+calls are distinct attempts: inspect history before retrying an uncertain request.
+These operations are synchronous; large backups and responsive cancellation
+remain open. Walk-forward results are neither untouched-holdout nor independent
+execution evidence.
 
 MCP `generate` automatically retains its engine, frozen candidate family and input
 data, per-candidate checkpoints and full results before ranking. Storage defaults
