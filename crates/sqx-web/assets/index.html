@@ -366,6 +366,13 @@
         <div id="dm-list" class="muted">Loading…</div><h3>Selected dataset quality</h3><pre id="data-quality-output">Select a dataset to inspect quality.</pre>
       </div>
       <div class="card" style="margin-top:18px">
+        <h2>Saved imports · survives restarts</h2>
+        <p>Choose a saved version to load its candles, calendar and normalization evidence. Loading replaces the currently loaded dataset for that symbol and timeframe. Saved versions remain available.</p>
+        <button id="dm-saved-refresh" class="secondary">Refresh saved imports</button>
+        <div id="dm-saved" class="muted">Loading saved imports…</div>
+        <p id="dm-saved-status" role="status"></p>
+      </div>
+      <div class="card" style="margin-top:18px">
         <h2>Import CSV</h2>
         <div class="row">
           <label class="muted">Symbol</label>
@@ -1469,7 +1476,35 @@ async function runRobustness() {
 }
 document.getElementById("btn-robust").onclick = runRobustness;
 
+let savedImportLoading=false;
+async function refreshSavedImports() {
+  const box=document.getElementById("dm-saved");box.replaceChildren();
+  try {
+    const response=await getJSON("/api/data/saved");if(response.error)throw new Error(response.error);
+    if(!response.datasets.length){box.textContent="No saved imports yet.";return;}
+    for(const item of response.datasets) {
+      const row=document.createElement("p"),label=document.createElement("span"),button=document.createElement("button");
+      label.textContent=item.symbol+" · "+item.timeframe+" · "+item.bars+" bars · "+new Date(item.first).toISOString()+" → "+new Date(item.last).toISOString()+" · version "+item.id.slice(0,12)+" · "+(item.normalization_supplied?"normalization evidence retained":"normalization evidence not supplied")+" ";
+      button.textContent="Load this version";button.disabled=savedImportLoading;
+      button.onclick=async()=>{
+        if(savedImportLoading)return;savedImportLoading=true;
+        box.querySelectorAll("button").forEach(b=>b.disabled=true);
+        const status=document.getElementById("dm-saved-status");status.textContent="Loading saved dataset…";
+        try {
+          const loaded=await postJSON("/api/data/load",JSON.stringify({id:item.id}));if(loaded.error)throw new Error(loaded.error);
+          await loadInfo();document.getElementById("symbol-select").value=loaded.key;await refreshDataInfo();
+          status.textContent="Loaded "+loaded.bars+" bars from saved version "+item.id.slice(0,12)+".";
+        }catch(error){status.textContent="Load could not be confirmed: "+error.message+". Inspect the loaded dataset before retrying.";}
+        finally{savedImportLoading=false;await refreshDataManager();}
+      };
+      row.append(label,button);box.append(row);
+    }
+  }catch(error){box.textContent="Saved imports unavailable: "+error.message;}
+}
+document.getElementById("dm-saved-refresh").onclick=refreshSavedImports;
+
 async function refreshDataManager() {
+  await refreshSavedImports();
   const ds = await getJSON("/api/datasources");
   const box = document.getElementById("dm-list");
   if (!(ds.symbols || []).length) { box.innerHTML = "<p class=\"muted\">No symbols yet. Paste a CSV below to import one.</p>"; return; }
@@ -1556,7 +1591,7 @@ document.getElementById("dm-import").onclick = async function() {
   try { d = await postJSON("/api/data/import", JSON.stringify({ symbol, csv, timeframe:document.getElementById("dm-timeframe").value, calendar, normalization_bundle })); }
   catch(e) { st.textContent="Import response unavailable: "+e.message+". Inspect the dataset before retrying.";return; }
   if (d.error) { st.textContent = d.error; return; }
-  st.textContent = "Imported " + (d.bars || 0) + " bars";
+  st.textContent = "Imported and saved " + (d.bars || 0) + " bars · version " + d.snapshot_id.slice(0,12);
   await refreshDataManager();
   await loadInfo();
   document.getElementById("symbol-select").value=d.key;await refreshDataInfo();

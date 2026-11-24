@@ -12,7 +12,8 @@ pub mod quality;
 pub use questdb::{QuestdbClient, QuestdbConfig};
 
 /// One symbol/timeframe bar series.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SymbolSeries {
     pub symbol: String,
     pub timeframe: Timeframe,

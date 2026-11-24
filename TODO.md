@@ -47,7 +47,8 @@ remaining execution assumptions and unsupported cases are visible.
 ## P1 — Make research provenance complete
 
 - [x] Preserve and reverify optional clock-normalization bundles for browser CSV imports and archived web backtests. Display missing evidence and the limited verification scope.
-- [ ] Carry full recording and conversion-source provenance through every research route and persist imported datasets across dashboard restarts.
+- [x] Persist browser CSV imports as immutable versions and provide explicit reload after dashboard restart, including optional calendar and normalization evidence.
+- [ ] Carry full recording and conversion-source provenance through every research route.
 
 - [ ] Provide durable trial accounting on every research entry point, including
   CLI, MCP, pipelines, optimization and robustness operations.

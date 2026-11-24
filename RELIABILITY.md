@@ -3725,3 +3725,35 @@ The frozen-input correction passed both full local debug and release gates:
 workspace tests/builds, frontend checks, 37 Python tests, and independent reference,
 archive replay and future-price-mutation checks. This extends structural binding
 of checkpoints; it does not replace full transition replay or broker evidence.
+
+### Durable browser imports and explicit reload after restart
+
+CSV import now saves an immutable, content-addressed dataset version before
+replacing loaded data. Versions include symbol/timeframe, candles, calendar and
+optional exact normalization bundle. The Data Manager lists saved versions and
+loads a selected version after rechecking its hash, structural data quality and
+normalization/candle agreement. Listing retains summaries rather than all source
+payloads in memory. Loading replaces the active symbol/timeframe only when the
+saved version passes validation; older saved versions remain available.
+
+Storage failure and corrupted snapshot tests preserve previously loaded data.
+Other tests cover deduplication, separate versions, reopening, path traversal
+rejection and exact normalization retention. A browser smoke test imported a
+synthetic two-bar dataset, stopped and restarted the isolated server, then loaded
+the same saved version and observed the selected dataset and success message.
+Screenshot: local saved-import-restart.jpg (not broker evidence).
+
+Saved imports live under the research archive's `imports` directory. Copy the
+complete research directory for a filesystem backup. Existing per-run JSON
+backups do not automatically include the saved-import catalog. Startup does not
+silently choose a version over CLI/QuestDB input: users explicitly load a version
+in the Data Manager. QuestDB loads and CLI sources are not automatically captured
+by this CSV-import mechanism. This proves process-restart recovery for the tested
+fixture, not arbitrary power-loss, storage-device or large-catalog performance.
+
+Both complete local profile gates passed for durable imports: workspace tests and
+builds, frontend checks, 37 Python tests and the independent eight-case reference
+fixture with archive replay and future-price invariance. GitHub run 45380020385
+for the preceding frozen-input commit 12c4185 passed all four Linux/macOS profile
+jobs and both debug/release trace comparisons; this is not CI evidence for the
+later durable-import change.

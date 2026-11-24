@@ -93,6 +93,7 @@ pub fn load(path: &str) -> Result<Project, String> {
 }
 
 pub mod archive;
+pub mod datasets;
 
 pub mod experiment;
 

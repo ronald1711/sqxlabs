@@ -538,6 +538,24 @@ mod tests {
     }
 
     #[test]
+    fn saved_import_failures_preserve_loaded_data(){
+        let state=research_state();let before=state.store.read().unwrap().series[0].bars.clone();
+        std::fs::write(state.archive.root(),b"blocked storage").unwrap();
+        let request=json!({"symbol":"EURUSD","timeframe":"M1","csv":"timestamp,open,high,low,close,volume\n1700000040,1,1.1,0.9,1,1\n"});
+        let failed:serde_json::Value=serde_json::from_str(&import_json(&request.to_string(),&state)).unwrap();
+        assert!(failed["error"].as_str().unwrap().contains("could not be saved"));
+        assert_eq!(state.store.read().unwrap().series[0].bars,before);
+        std::fs::remove_file(state.archive.root()).unwrap();
+        let good:serde_json::Value=serde_json::from_str(&import_json(&request.to_string(),&state)).unwrap();
+        let id=good["snapshot_id"].as_str().unwrap();let current=state.store.read().unwrap().series[0].bars.clone();
+        std::fs::write(state.archive.root().join("imports").join(format!("{id}.json")),b"{}").unwrap();
+        let failed:serde_json::Value=serde_json::from_str(&saved_datasets_json("load",&json!({"id":id}).to_string(),&state)).unwrap();
+        assert!(failed["error"].as_str().unwrap().contains("integrity"));
+        assert_eq!(state.store.read().unwrap().series[0].bars,current);
+        std::fs::remove_dir_all(state.archive.root()).unwrap();
+    }
+
+    #[test]
     fn normalized_import_is_bound_to_candles_and_survives_archive_replay() {
         let state=research_state();
         let raw="timestamp_broker,open,high,low,close,volume\n1700000040,1,1.1,0.9,1,1\n1700000100,1,1.1,0.9,1,1\n";
@@ -548,7 +566,13 @@ mod tests {
         let bundle=sqx_data::normalization::Bundle{manifest_json:manifest,policy_json:policy,raw_csv:raw.into(),utc_csv:utc.clone()};
         let request=json!({"symbol":"EURUSD","timeframe":"M1","csv":utc,"normalization_bundle":bundle});
         let import=|v:&serde_json::Value|serde_json::from_str::<serde_json::Value>(&import_json(&v.to_string(),&state)).unwrap();
-        assert_eq!(import(&request)["ok"],true);
+        let imported=import(&request);assert_eq!(imported["ok"],true);
+        let saved_id=imported["snapshot_id"].as_str().unwrap();
+        let mut reopened=research_state();reopened.archive=state.archive.clone();reopened.store.write().unwrap().series.clear();
+        let loaded:serde_json::Value=serde_json::from_str(&saved_datasets_json("load",&json!({"id":saved_id}).to_string(),&reopened)).unwrap();
+        assert_eq!(loaded["ok"],true);assert_eq!(loaded["bars"],2);
+        assert_eq!(serde_json::to_value(reopened.store.read().unwrap().series[0].normalization.as_ref().unwrap()).unwrap(),json!(bundle));
+
         let info:serde_json::Value=serde_json::from_str(&data_json(&state,"EURUSD")).unwrap();
         assert_eq!(info["normalization"]["status"],"verified_transformation");
         for altered in [
@@ -909,6 +933,8 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("POST", "/api/pipeline") => ("200 OK", "application/json", pipeline_json(body, state)),
         ("POST", "/api/export") => ("200 OK", "application/json", export_json(body)),
         ("POST", "/api/analyze") => ("200 OK", "application/json", analyze_json(body, state)),
+        ("GET", "/api/data/saved") => ("200 OK", "application/json", saved_datasets_json("list","{}",state)),
+        ("POST", "/api/data/load") => ("200 OK", "application/json", saved_datasets_json("load",body,state)),
         ("POST", "/api/data/import") => ("200 OK", "application/json", import_json(body, state)),
         ("POST", "/api/data/delete") => ("200 OK", "application/json", delete_json(body, state)),
         ("POST", "/api/assistant") => ("200 OK", "application/json", assistant_json(body, state)),
@@ -1535,10 +1561,26 @@ fn import_json(body: &str, state: &State) -> String {
     let quality=sqx_data::quality::audit(&bars,timeframe,sqx_data::quality::now_ms(),calendar.as_ref());
     if !quality.errors.is_empty(){return json!({"error":quality.errors.join("; "),"data_quality":quality}).to_string();}
     let n = bars.len();
-    let mut store=state.store.write().unwrap();store.add(&symbol,timeframe,bars);
-    let series=store.series.iter_mut().find(|s|s.symbol==symbol && s.timeframe==timeframe).unwrap();
-    series.calendar=calendar;series.normalization=normalization;
-    json!({ "ok": true, "symbol": symbol, "key":series_key(&symbol,timeframe.label()), "bars": n, "data_quality":quality }).to_string()
+    let series=SymbolSeries{symbol:symbol.clone(),timeframe,calendar,normalization,bars};
+    let snapshot_id=match sqx_project::datasets::Datasets::new(state.archive.root()).save(&series) {
+        Ok(id)=>id,Err(error)=>return json!({"error":format!("Dataset could not be saved: {error}")}).to_string(),
+    };
+    let mut store=state.store.write().unwrap();store.series.retain(|s|!(s.symbol==symbol && s.timeframe==timeframe));store.series.push(series);
+    json!({ "ok": true, "symbol": symbol, "key":series_key(&symbol,timeframe.label()), "bars": n, "snapshot_id":snapshot_id, "data_quality":quality }).to_string()
+}
+
+fn saved_datasets_json(action:&str,body:&str,state:&State)->String{
+    let run=||->Result<serde_json::Value,String>{
+        let saved=sqx_project::datasets::Datasets::new(state.archive.root());
+        if action=="list" {return Ok(json!({"datasets":saved.list()?}));}
+        let input:serde_json::Value=serde_json::from_str(body).map_err(|e|e.to_string())?;
+        let id=input["id"].as_str().ok_or("saved dataset id is required")?;
+        let series=saved.load(id)?;
+        let response=json!({"ok":true,"snapshot_id":id,"symbol":series.symbol,"bars":series.bars.len(),"key":series_key(&series.symbol,series.timeframe.label())});
+        let mut store=state.store.write().unwrap();store.series.retain(|s|!(s.symbol==series.symbol && s.timeframe==series.timeframe));store.series.push(series);
+        Ok(response)
+    };
+    run().unwrap_or_else(|error|json!({"error":error})).to_string()
 }
 
 fn delete_json(body: &str, state: &State) -> String {
