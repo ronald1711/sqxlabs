@@ -45,6 +45,9 @@ remaining execution assumptions and unsupported cases are visible.
   do not imply that candle data determines the true intrabar sequence.
 - [ ] Maintain a coverage matrix for every advertised indicator, warmup/seed
   convention and supported execution feature, backed by independent references.
+  [Indicator evidence index](INDICATOR_EVIDENCE.md) lists every registered name
+  and conservatively links reviewed partial references. Unindexed entries and
+  unchecked conventions remain open; the index is not a validation percentage.
 - [ ] Extend causal/future-perturbation and deterministic replay fixtures to the
   remaining supported combinations.
 
