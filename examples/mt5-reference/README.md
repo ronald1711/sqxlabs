@@ -65,3 +65,23 @@ The generated two-sided fixture was run locally through SqxLabs and its archived
 trade prices, timestamps, exit reasons and balances matched the hand calculation.
 **The corresponding MT5 market-mode comparison remains unexecuted.** The baseline
 does not cover third-currency conversion, nonzero costs or dynamic exits.
+
+## Checking a captured tester journal
+
+After an actual run, extract exactly that run's journal into a separate file and
+run `python3 scripts/mt5_tester_log_check.py <log>` (add `--short` for the short
+case). UTF-8 and BOM-marked UTF-16 are supported. The checker rejects missing,
+duplicate, reordered or mixed reference records; it checks the fixed baseline's
+account currency, deposit, leverage, contract and currency specification, entry
+and exit times, bid/ask requests, successful full fills, deal identities,
+directions, volume, zero costs, profit and final balance/equity. It uses Decimal
+arithmetic and fails on non-finite numeric values. This deliberately narrow
+zero-cost baseline expects exact logged values, not configurable tolerances.
+
+Success is named `reported_baseline_values_match`. It explicitly leaves
+`tick_provenance_verified` and `sqxlabs_parity_verified` false. A journal can be
+edited, and the printed records do not prove tester model, complete tick input,
+all symbol settings or the source/binary that produced them. Retain the original
+full log, report, exact input/configuration/source/binary hashes and independent
+SqxLabs results before assessing parity. The checker prints the input log hash.
+Its unit tests use synthetic journals and do not count as an executed MT5 test.
