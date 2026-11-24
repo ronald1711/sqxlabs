@@ -724,3 +724,25 @@ Recording status now reports `account_binding` as `not_observed`,
 `legacy_settings_only` or `server_login_fingerprint`; malformed fingerprint fields
 are rejected. Actual status checks distinguished the two-window new journal from
 the concurrently running legacy fifteen-window probe. All 44 Python tests passed.
+
+## Completed fifteen-window read-only probe
+
+The recorder completed successfully with 15 contiguous, integrity-verified windows
+covering broker seconds [1795527300,1795528200), for EURUSD, USDJPY and EURJPY.
+The final exported capture hash is
+`eb1994a4bf2d8694f38e4ad81487288e6b3c1c6bf3c12001fe9443edd1bf00d3`.
+All 45 bid OHLC candles matched the observed ticks exactly. Tick counts and bar
+tick volumes differ in some windows; OHLC agreement does not certify completeness.
+
+Across 1,330 USDJPY event ticks, EURUSD conversion quotes exceeded the unchanged
+10,000 ms age limit at 13 events (maximum 12,896 ms). EURJPY had no stale events
+(maximum 4,200 ms); neither route lacked a prior quote. The final quality result
+remains `discrepancies`, not a passing strategy comparison. The first five-window
+engine rejection above remains the separately observed execution evidence.
+
+An initially unavailable EURJPY bar recovered through the recorder's bounded
+retry and the window committed once. This is a short live recovery observation,
+not proof of prolonged-outage or power-loss recovery. Account binding remains
+`legacy_settings_only` because this process started before fingerprint support.
+Private status and quality reports remain under `work/mt5-validation/`; no raw
+account history or market capture is published. No broker orders were sent.
