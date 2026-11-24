@@ -292,3 +292,13 @@ See [README.md](README.md) for operation and [ci/README.md](ci/README.md) for ch
   its backup and completes all 40 candidates/10 subsets with the exact completion
   identity of an uninterrupted run. Repeated replay adds no records. This covers
   the CLI process boundary, not power loss or independent execution correctness.
+
+- [x] Journal generated dashboard portfolio candidates and subset decisions;
+  freeze source/calendar/normalization, execution and selection settings. A
+  40-candidate/10-subset fixture restores and replays exactly without the live
+  dataset. Request identities survive restore and reject changed inputs or reuse
+  by another workflow. Frontend tests cover a lost response, unchanged retry
+  payload, duplicate-click exclusion and explicit new-study selection; the test
+  is included in CI. Rendered browser review and process-kill coverage of this
+  HTTP route remain open. Selected/databank portfolio composition is still not
+  journaled and must preserve the explicit selection when migrated.

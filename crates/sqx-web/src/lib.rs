@@ -908,6 +908,26 @@ mod tests {
     }
 
     #[test]
+    fn generated_portfolio_freezes_all_trials_and_request_identity_through_restore(){
+        let state=research_state();state.store.write().unwrap().series[0].bars=(0..1500).map(|i|{let p=1.1+(i as f64*0.07).sin()*0.01;Bar::new((1700000000+i*60)*1000,p,p+0.001,p-0.001,p,1.0)}).collect();
+        let mut request=json!({"symbol":"EURUSD","count":40,"seed":123,"top":4,"min_k":2,"max_k":3,"allow_data_gaps":true,"request_key":"portfolio-request-1"});
+        let response:serde_json::Value=serde_json::from_str(&portfolio_json(&request.to_string(),&state)).unwrap();assert!(response.get("error").is_none(),"{response}");
+        let id=response["archive"]["started_run_id"].as_str().unwrap();let completion=response["archive"]["run_id"].as_str().unwrap();
+        let done=state.archive.load(completion).unwrap();let study=&done.run.result["report"]["portfolio"];
+        assert_eq!(study["candidates"].as_array().unwrap().len(),40);assert_eq!(study["subset"]["attempted"],10);
+        assert_eq!(state.archive.load(id).unwrap().run.request["origin"],"web_portfolio");
+        let backup=sqx_project::pipeline_archive::export(&state.archive,id).unwrap();
+        state.store.write().unwrap().series.clear();let before=state.archive.list().unwrap();
+        let repeated:serde_json::Value=serde_json::from_str(&portfolio_json(&request.to_string(),&state)).unwrap();assert_eq!(repeated["recovery_required"],true);assert_eq!(repeated["archive"]["started_run_id"],id);assert_eq!(state.archive.list().unwrap(),before);
+        let restored=research_state();restored.store.write().unwrap().series.clear();sqx_project::pipeline_archive::import(&restored.archive,backup).unwrap();std::fs::remove_dir_all(state.archive.root()).unwrap();
+        let repeated:serde_json::Value=serde_json::from_str(&portfolio_json(&request.to_string(),&restored)).unwrap();assert_eq!(repeated["archive"]["started_run_id"],id);
+        let replay=sqx_project::pipeline_archive::recover(&restored.archive,id,true).unwrap();assert_eq!(replay.completion_id,completion);assert_eq!(json!(replay.report),done.run.result["report"]);assert_eq!(replay.appended,0);
+        request["seed"]=json!(124);assert!(reserve_web_research_request("web_portfolio",&request,&restored).unwrap_err().contains("different inputs"));
+        request["seed"]=json!(123);assert!(reserve_web_research_request("web_robustness",&request,&restored).unwrap_err().contains("different inputs"));
+        std::fs::remove_dir_all(restored.archive.root()).unwrap();
+    }
+
+    #[test]
     fn selected_portfolio_uses_explicit_strategies_without_databank_rows() {
         let state = research_state();
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
@@ -1823,8 +1843,8 @@ fn research_data_quality(series:&SymbolSeries, request:&serde_json::Value, as_of
 fn research_restore_json(body:&str,state:&State)->String {
     let result=(||->Result<String,String>{
         let bundle:sqx_project::archive::ResearchBundle=serde_json::from_str(body).map_err(|e|e.to_string())?;
-        let _request_guard=if bundle.run.request["research_kind"]=="cli_pipeline_started" && bundle.run.request["origin"]=="web_robustness" {
-            let (guard,existing)=reserve_stress_request(&bundle.run.request["web_request"],state)?;
+        let _request_guard=if bundle.run.request["research_kind"]=="cli_pipeline_started" && matches!(bundle.run.request["origin"].as_str(),Some("web_robustness"|"web_portfolio")) {
+            let (guard,existing)=reserve_web_research_request(bundle.run.request["origin"].as_str().unwrap(),&bundle.run.request["web_request"],state)?;
             if existing.is_some_and(|id|id!=bundle.run_id){return Err("Restored stress-test request key conflicts with an existing study".into());}
             guard
         }else{None};
@@ -1836,14 +1856,17 @@ fn research_restore_json(body:&str,state:&State)->String {
 // Serialize creation for a caller-supplied request identity. The identity is
 // carried inside the immutable start record, so backup/restore retains it.
 fn reserve_stress_request(value:&serde_json::Value,state:&State)->Result<(Option<std::fs::File>,Option<String>),String>{
+    reserve_web_research_request("web_robustness",value,state)
+}
+fn reserve_web_research_request(origin:&str,value:&serde_json::Value,state:&State)->Result<(Option<std::fs::File>,Option<String>),String>{
     let Some(key)=value.get("request_key") else{return Ok((None,None));};
     let key=key.as_str().ok_or("Invalid stress-test request key")?;
     let file=sqx_project::pipeline_archive::stress_request_lock(&state.archive,key)?;
     let mut existing=None;
     for id in state.archive.list()? {
         let record=state.archive.load(&id)?;
-        if record.run.request["research_kind"]=="cli_pipeline_started" && record.run.request["origin"]=="web_robustness" && record.run.request["web_request"]["request_key"]==key {
-            if record.run.request["web_request"]!=*value{return Err("Stress-test request key already belongs to different inputs".into());}
+        if record.run.request["research_kind"]=="cli_pipeline_started" && matches!(record.run.request["origin"].as_str(),Some("web_robustness"|"web_portfolio")) && record.run.request["web_request"]["request_key"]==key {
+            if record.run.request["origin"]!=origin || record.run.request["web_request"]!=*value{return Err("Research request key already belongs to different inputs or workflow".into());}
             if existing.replace(id).is_some(){return Err("Conflicting studies share this stress-test request key".into());}
         }
     }
@@ -2592,11 +2615,16 @@ fn portfolio_json(body: &str, state: &State) -> String {
         Ok(r) => r,
         Err(e) => return json!({ "error": format!("{e}") }).to_string(),
     };
+    let val:serde_json::Value=serde_json::from_str(body).expect("request already parsed");
+    if !(10..=2000).contains(&req.count) || !(2..=12).contains(&req.top) || req.min_k<2 || req.min_k>req.max_k || req.max_k>req.top {
+        return json!({"error":"Portfolio requires 10..2000 candidates, a shortlist of 2..12, and 2 <= min_k <= max_k <= top"}).to_string();
+    }
+    let (creation_guard,existing)=match reserve_web_research_request("web_portfolio",&val,state){Ok(result)=>result,Err(error)=>return json!({"error":error}).to_string()};
+    if let Some(id)=existing{return json!({"recovery_required":true,"message":"This request already has a saved portfolio study. Inspect Saved research before retrying.","archive":{"started_run_id":id}}).to_string();}
     let series = match find_series(state, &req.symbol) {
         Some(s) => s,
         None => return json!({ "error": "no data" }).to_string(),
     };
-    let val:serde_json::Value=serde_json::from_str(body).expect("request already parsed");
     let quality=match research_data_quality(&series,&val,sqx_data::quality::now_ms()) {Ok(quality)=>quality,Err(error)=>return error.to_string()};
     let inst = instrument_for(&series.symbol);
     let pyp = pyp_for(&series.bars);
@@ -2609,32 +2637,21 @@ fn portfolio_json(body: &str, state: &State) -> String {
     let strategies: Vec<Strategy> = (0..count)
         .map(|i| random_strategy(&mut rng, &format!("p{i:04}"), &gen))
         .collect();
-    let names: Vec<String> = strategies.iter().map(|s| s.name.clone()).collect();
-
-    let results = sqx_portfolio::backtest_all(&strategies, &series.bars, &inst, &cfg);
-    let failures:Vec<_>=results.iter().enumerate().filter(|(_,run)|!run.errors.is_empty()).map(|(index,run)|json!({"strategy":names[index],"errors":run.errors})).collect();
-    if !failures.is_empty(){return json!({"error":"Portfolio contains invalid component simulations","components":failures}).to_string();}
-    let mets: Vec<Metrics> = results
-        .iter()
-        .map(|r| compute_metrics(r, series.bars.len(), pyp))
-        .collect();
-    let mut order: Vec<usize> = (0..results.len()).collect();
-    order.sort_by(|&a, &b| {
-        mets[b].profit_factor.partial_cmp(&mets[a].profit_factor).unwrap_or(std::cmp::Ordering::Equal)
-    });
-    order.retain(|&i| mets[i].number_of_trades >= 5.0 && mets[i].profit_factor.is_finite());
-    order.truncate(req.top.clamp(2, 15));
-    if order.len() < 2 {
-        return json!({ "error": "not enough qualifying strategies" }).to_string();
-    }
-    let sel: Vec<sqx_backtest::BacktestResult> = order.iter().map(|&i| results[i].clone()).collect();
-    let sel_names: Vec<String> = order.iter().map(|&i| names[i].clone()).collect();
-    let subset = sqx_portfolio::best_subset(&sel, req.min_k, req.max_k, cfg.initial_deposit);
-    let comp: Vec<sqx_backtest::BacktestResult> = subset.iter().map(|&i| sel[i].clone()).collect();
-    let comp_names: Vec<String> = subset.iter().map(|&i| sel_names[i].clone()).collect();
-    let weights = sqx_portfolio::equal_weights(comp.len());
-    let pf = sqx_portfolio::combine(&comp_names, &comp, &weights, cfg.initial_deposit, series.bars.len(), pyp);
-    if !pf.errors.is_empty(){return json!({"error":pf.errors.join("; ")}).to_string();}
+    let pipeline=sqx_pipeline::Pipeline{name:"Dashboard portfolio search".into(),tasks:vec![sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::Portfolio{
+        strategies,selection:sqx_portfolio::SearchConfig{min_trades:5,shortlist_limit:req.top,min_subset:req.min_k,max_subset:req.max_k},
+    }}]};
+    let request=json!({"research_kind":"cli_pipeline_started","origin":"web_portfolio","attempt_id":format!("{:032x}",rand::random::<u128>()),"web_request":val,"config":cfg,"seed":req.seed,"periods_per_year":pyp});
+    let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,"normalization":series.normalization,"bars":series.bars,"source_context":research_context});
+    let specification=json!({"pipeline":pipeline,"generator":gen});
+    let started=match retained_engine_identity(state).and_then(|engine|state.archive.save(engine,dataset,specification,request,json!({"status":"execution_not_recorded"}))){
+        Ok(id)=>id,Err(error)=>return json!({"error":format!("Portfolio could not be archived: {error}")}).to_string()
+    };
+    drop(creation_guard);
+    let recovered=match sqx_project::pipeline_archive::recover(&state.archive,&started,true){Ok(result)=>result,Err(error)=>return json!({"error":format!("Portfolio stopped: {error}. Inspect Saved research before retrying."),"archive":{"started_run_id":started}}).to_string()};
+    let receipt=json!({"started_run_id":started,"run_id":recovered.completion_id});
+    let study=match recovered.report.portfolio{Some(study)=>study,None=>return json!({"error":recovered.report.errors.join("; "),"archive":receipt}).to_string()};
+    if !study.errors.is_empty(){return json!({"error":study.errors.join("; "),"research_context":research_context,"archive":receipt}).to_string();}
+    let pf=match study.combined{Some(pf)=>pf,None=>return json!({"error":"Portfolio has no combined result","archive":receipt}).to_string()};
     let comps: Vec<_> = pf
         .components
         .iter()
@@ -2649,6 +2666,7 @@ fn portfolio_json(body: &str, state: &State) -> String {
         })
         .collect();
     json!({
+        "archive":receipt,
         "research_context":research_context,
         "account_currency":pf.account_currency,
         "metrics": metrics_json(&pf.metrics),

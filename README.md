@@ -402,7 +402,11 @@ CLI requests accept 1–2000 candidates, a shortlist of 2–12, and subset bound
 Insufficient qualifying candidates produce a failed study with retained evidence.
 A successful replay confirms repeatability; its `execution_valid` field separately
 reports whether the recorded calculation was valid.
-Web portfolio entry points do not yet share this full journal.
+Generated dashboard portfolios also retain the full journal. The browser keeps a
+pending request identity after a lost response; retrying locates the same study,
+including after backup/restore and loss of the loaded dataset. Starting a new
+study with current settings is an explicit action and does not cancel prior work.
+Portfolios built from selected/databank strategies still need this journal.
 
 MCP `robustness` uses the supplied strategy as its walk-forward control and
 varies only exit distances within the same rule family. It no longer substitutes
