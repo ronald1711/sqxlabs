@@ -13,7 +13,7 @@ use sqx_backtest::{backtest, BacktestConfig};
 use sqx_core::{Bar, Instrument, Timeframe};
 use sqx_data::{read_csv_bars, DataStore, QuestdbClient, QuestdbConfig};
 use sqx_metrics::{compute as compute_metrics, Metrics};
-use sqx_optimizer::{backtest_batch, rank, random_strategy, walk_forward, Fitness, GeneratorConfig};
+use sqx_optimizer::{backtest_batch_detailed, rank, random_strategy, walk_forward, Fitness, GeneratorConfig};
 use sqx_robustness::{monte_carlo_retest, monte_carlo_trade_manipulation, what_if};
 use sqx_strategy::Strategy;
 
@@ -355,14 +355,29 @@ fn tool_generate(args: &Value) -> Value {
     let pyp = pyp_for(&bars);
     let cfg=match simulation_config(args,timeframe){Ok(config)=>config,Err(error)=>return err_result(error)};
     if let Err(error)=sqx_backtest::validate_backtest_inputs(&bars,&inst,&cfg){return err_result(error);}
-    let scored = backtest_batch(&strategies, &bars, &inst, &cfg, pyp);
-    let ranked = rank(scored, Fitness::ProfitFactor, 5);
-    let mut lines = Vec::new();
-    for (i, (s, m)) in ranked.iter().take(10).enumerate() {
-        lines.push(format!("{}. {} net={:.2} pf={:.2} trades={:.0}", i + 1, s.name, m.net_profit, m.profit_factor, m.number_of_trades));
+    let evaluations = backtest_batch_detailed(&strategies, &bars, &inst, &cfg, pyp);
+    generation_result(evaluations,seed,quality,&symbol,timeframe,&cfg)
+}
+
+fn generation_result(evaluations:Vec<sqx_optimizer::BatchEvaluation>,seed:u64,mut context:Value,symbol:&str,timeframe:Timeframe,cfg:&BacktestConfig)->Value {
+    let attempted=evaluations.len();
+    let mut failures=Vec::new();let mut scored=Vec::new();
+    for (candidate_index,evaluation) in evaluations.into_iter().enumerate() {
+        if !evaluation.errors.is_empty() {
+            failures.push(json!({"candidate_index":candidate_index,"strategy":evaluation.strategy,"errors":evaluation.errors}));
+        } else {scored.push((evaluation.strategy,evaluation.metrics));}
     }
-    research_result(lines.join("
-"),quality,&symbol,timeframe,&cfg)
+    let ranked=rank(scored,Fitness::ProfitFactor,5);
+    let invalid=failures.len();let eligible=ranked.len();
+    let mut lines=vec![format!("Evaluation attempts: {attempted}; invalid: {invalid}; eligible for ranking: {eligible}; below ranking criteria: {}. These counts are not independent trials.",attempted-invalid-eligible)];
+    if invalid>0 {lines.push("Search incomplete: candidate execution failed. Any displayed ranking includes valid candidates only and is not a successful complete search.".into());}
+    for (i,(s,m)) in ranked.iter().take(10).enumerate() {
+        lines.push(format!("{}. {} net={:.2} pf={:.2} trades={:.0}",i+1,s.name,m.net_profit,m.profit_factor,m.number_of_trades));
+    }
+    context["generation"]=json!({"seed":seed,"attempted":attempted,"invalid":invalid,"eligible":eligible,"below_ranking_criteria":attempted-invalid-eligible,"min_trades":5,"fitness":"ProfitFactor","candidate_failures":failures,"scope":"Returned execution diagnostics, not a durable trial ledger. Successful non-selected candidate records and interrupted work are not archived by this tool."});
+    let mut response=research_result(lines.join("\n"),context,symbol,timeframe,cfg);
+    if invalid>0 {response["isError"]=json!(true);}
+    response
 }
 
 fn tool_portfolio(args: &Value) -> Value {
@@ -455,6 +470,34 @@ fn tool_robustness(args: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn generation_failures_cannot_rank_or_disappear_as_low_fitness() {
+        let evaluation=|name:&str,trades:f64,pf:f64,errors:Vec<String>|sqx_optimizer::BatchEvaluation {
+            strategy:Strategy::new(name),metrics:Metrics{number_of_trades:trades,profit_factor:pf,..Default::default()},errors,
+        };
+        let response=generation_result(vec![
+            evaluation("invalid-but-profitable",20.0,99.0,vec!["execution fixture failed".into()]),
+            evaluation("valid-selected",10.0,2.0,vec![]),
+            evaluation("too-few-trades",4.0,5.0,vec![]),
+            evaluation("undefined-ratio",10.0,f64::NAN,vec![]),
+        ],42,json!({}),"EURUSD",Timeframe::M1,&BacktestConfig::default());
+        assert_eq!(response["isError"],true);
+        let text=response["content"][0]["text"].as_str().unwrap();
+        let (summary,context)=text.split_once("research_context: ").unwrap();
+        assert!(summary.contains("Search incomplete"));assert!(summary.contains("1. valid-selected"));
+        assert!(!summary.contains("invalid-but-profitable"));
+        let context:Value=serde_json::from_str(context).unwrap();let evidence=&context["generation"];
+        assert_eq!(evidence["attempted"],4);assert_eq!(evidence["invalid"],1);
+        assert_eq!(evidence["eligible"],1);assert_eq!(evidence["below_ranking_criteria"],2);
+        assert_eq!(evidence["candidate_failures"][0]["candidate_index"],0);
+        assert_eq!(evidence["candidate_failures"][0]["strategy"]["name"],"invalid-but-profitable");
+        assert_eq!(evidence["candidate_failures"][0]["errors"][0],"execution fixture failed");
+        assert_eq!(evidence["seed"],42);
+        let valid=generation_result(vec![evaluation("below-threshold",0.0,f64::NAN,vec![])],7,json!({}),"EURUSD",Timeframe::M1,&BacktestConfig::default());
+        assert!(valid.get("isError").is_none(),"valid no-trade result is not an execution failure");
+        let failed=generation_result(vec![evaluation("failed",10.0,3.0,vec!["failed".into()])],7,json!({}),"EURUSD",Timeframe::M1,&BacktestConfig::default());
+        assert_eq!(failed["isError"],true);assert!(failed.to_string().contains("eligible for ranking: 0"));
+    }
     #[test]
     fn failed_robustness_stages_are_protocol_errors_with_context(){
         let path=std::env::temp_dir().join(format!("sqx-mcp-stress-{}-{}.csv",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));

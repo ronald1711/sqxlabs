@@ -3901,3 +3901,25 @@ Validation for engine inspection: `cargo test --workspace` and
 `cargo build --workspace` passed locally. Evolution report, recovery and restore
 JavaScript checks passed. This is automated rendering coverage; no new browser
 interaction or cross-platform CI pass is claimed for this increment yet.
+
+### Preserve MCP generation execution failures in the response
+
+The MCP `generate` tool previously used the optimizer's metrics-only compatibility
+view, losing candidate execution diagnostics before ranking. It now consumes
+detailed evaluations, excludes every failed execution from ranking, returns all
+failed candidate identities/rules/errors in research context, and sets the MCP
+error flag when any candidate failed. Valid partial rankings are explicitly
+labelled incomplete. Counts distinguish attempted, invalid, eligible and valid
+but below ranking criteria; seed, objective and minimum trades are explicit.
+
+A valid no-trade or undefined-ratio evaluation is not itself an execution failure.
+The regression includes a failed candidate with apparently excellent metrics, a
+valid eligible candidate, too few trades, a nonfinite ratio and an all-failed
+batch. This is response evidence only: successful non-selected candidates and
+interrupted work are not durably archived by the tool. Full MCP trial accounting
+and portfolio-route failure accounting remain open.
+
+Validation: all five MCP tests passed in debug and release; the workspace build
+passed. Earlier publication 5a911a8 completed all four Linux/macOS CI jobs and
+release-profile comparisons successfully (run 45387699788). That run predates
+the subsequent engine-retention/inspection and MCP changes.
