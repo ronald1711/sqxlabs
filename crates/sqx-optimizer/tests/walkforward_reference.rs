@@ -121,3 +121,36 @@ fn observed_walk_forward_records_every_execution_and_stops_on_storage_failure(){
         assert_eq!(result.unwrap_err(),"storage unavailable");assert_eq!(seen,stop+1);
     }
 }
+
+#[test]
+fn generated_observer_preserves_per_window_families_and_aborts_on_failed_checkpoint(){
+    use sqx_optimizer::{walk_forward_generated_observed,walk_forward_with_criteria,GeneratorConfig};
+    let bars:Vec<_>=(0..180).map(|i|{let p=1.1+(i as f64*0.4).sin()*0.01;Bar::new(i*60000,p,p+0.002,p-0.002,p,1.0)}).collect();
+    let instrument=Instrument::fx("EURUSD");let config=BacktestConfig::default();let generator=GeneratorConfig::default();
+    let criteria=WalkForwardCriteria{min_is_trades:1,min_oos_trades_per_window:1};
+    let mut events=Vec::new();
+    let observed=walk_forward_generated_observed(&bars,&instrument,&config,525600.0,&generator,2,0.3,3,731,&criteria,&mut |event|{
+        events.push(serde_json::to_value(event).unwrap());Ok(())
+    }).unwrap();
+    let plain=walk_forward_with_criteria(&bars,&instrument,&config,525600.0,&generator,2,0.3,3,731,&criteria);
+    assert_eq!(serde_json::to_value(observed).unwrap(),serde_json::to_value(plain).unwrap());
+    let families:Vec<_>=events.iter().filter(|e|e["kind"]=="family").collect();
+    assert_eq!(families.len(),2);
+    assert_ne!(families[0]["candidates"],families[1]["candidates"]);
+    for (window,family) in families.iter().enumerate(){
+        assert_eq!(family["window"],window);
+        assert_eq!(family["candidates"].as_array().unwrap().len(),3);
+        for candidate in 0..3 {
+            assert!(events.iter().any(|e|e["kind"]=="candidate_started" && e["window"]==window && e["candidate_index"]==candidate && e["strategy"]==family["candidates"][candidate]));
+            assert!(events.iter().any(|e|e["kind"]=="candidate_outcome" && e["window"]==window && e["evaluation"]["candidate_index"]==candidate && e["execution"].is_object()));
+        }
+    }
+    for stop in 0..events.len(){
+        let mut seen=0;
+        let result=walk_forward_generated_observed(&bars,&instrument,&config,525600.0,&generator,2,0.3,3,731,&criteria,&mut |event|{
+            assert_eq!(serde_json::to_value(event).unwrap(),events[seen]);seen+=1;
+            if seen==stop+1{Err("checkpoint write failed".into())}else{Ok(())}
+        });
+        assert_eq!(result.unwrap_err(),"checkpoint write failed");assert_eq!(seen,stop+1);
+    }
+}

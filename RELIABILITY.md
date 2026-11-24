@@ -45,12 +45,13 @@ resolved by a later increment. The numbered requirements above remain unchanged.
 | 5. Research validity | Walk-forward warms from history, carries capital and records candidate outcomes/selection; an independent integer-price SMA fixture checks segmented selection and capital. Holdout audits include declared candle extents, assistant/crosscheck/comparison/evolution exposure and MCP generation phases; record counts remain distinct from independent trial counts. Commitment evidence survives experiment restore. | Complete durable trial accounting across every entry point and independent boundary/evidence review. Search-history completeness and no-known-overlap labels do not establish untouched data outside the registry. |
 | 6. Operational workspace | Resumable evolution and MCP generation, raw backups, saved comparisons and bounded assistant tools have tests. UI trade explanations show protection, financing, stop-out and settlement; overview explains limited evidence. A 15-window read-only live capture matched all 45 bid candles but failed the declared conversion freshness limit at 13 USDJPY events; it retained legacy account binding. A separate fingerprint-bound recording resumed across processes. A prospective five-window capture passed observed OHLC/freshness checks; seven execution cases matched independent arithmetic, while one absent SMA signal left execution coverage incomplete. HTTP remote addresses are rejected. | Broader live recording/outage/power-loss validation, complete evidence/recovery UI, AI provider-conversation recovery, known-strategy paper reconciliation and export parity. Remote authenticated service is not supported. |
 
-### In-review recovery evidence (2026-11-24)
+### Recovery integration evidence (2026-11-24)
 
-The following increments are being consolidated into integration PR #1, retaining
-all commits originally reviewed separately in PRs #2–#5. The earlier draft PRs
-are superseded, not shipped. These are not claims that `main` or a released binary
-contains the changes:
+Integration PR #1 merged into `main` as `072f4f7`, retaining all commits originally
+reviewed separately in PRs #2–#5. All four required platform/profile checks passed
+on its head `027a048`; the post-merge main run is a separate verification step.
+The earlier draft PRs are superseded. This establishes source integration, not
+a packaged release or broad trading validation:
 
 - PR #1 freezes complete CLI pipeline inputs and ordered events, supports exact-
   engine replay/resume and portable whole-search backup validation. Source-deletion
@@ -76,6 +77,15 @@ These strengthen requirements 4–6 but do not close them. Large-search memory,
 power loss/disk-full interruption, runtime packaging, all-route trial accounting,
 independent broker execution and real paper reconciliation remain unproven.
 Further MT5 work is temporarily deferred at the user's request, not completed.
+
+Standalone optimization and generation recovery are separate follow-ups in PRs
+#6 and #7. Optimization passed 430 local workspace tests and four remote checks
+at `f9bffe9`; its merge with current main requires its own checks. Generation's
+64-candidate process-kill/restore comparison passed, but a subsequent workspace
+run exposed colliding timestamp-based test directories under parallel execution.
+Route-specific random directory identities fix that isolation defect, and the
+two parallel recovery tests pass after the fix. Full replacement workspace and
+remote runs are required before that increment is accepted.
 
 The successful nonselected walk-forward candidate gap found during this audit has
 now been addressed in the report (see the later verification entry). Remaining

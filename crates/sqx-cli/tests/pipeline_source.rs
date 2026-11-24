@@ -64,8 +64,19 @@ fn pipeline_binds_seed_and_settings_and_assistant_checks_data_before_provider_ac
 
 #[test]
 fn interrupted_pipeline_retains_frozen_family_and_completed_candidate() {
+    interrupted_generation_recovery(false);
+}
+
+#[test]
+fn interrupted_standalone_generation_preserves_all_trials_and_recovers() {
+    interrupted_generation_recovery(true);
+}
+
+fn interrupted_generation_recovery(standalone:bool) {
     use std::process::Stdio;
-    let root=std::env::temp_dir().join(format!("sqx-pipeline-kill-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    // Parallel cases can observe the same clock tick in the same test process.
+    // Include the route and a random identity instead of using time as uniqueness.
+    let root=std::env::temp_dir().join(format!("sqx-pipeline-kill-{}-{:032x}",if standalone{"generate"}else{"pipeline"},rand::random::<u128>()));
     fs::create_dir_all(&root).unwrap();
     let csv=root.join("bars.csv");
     let mut data="timestamp,open,high,low,close,volume\n".to_string();
@@ -73,10 +84,14 @@ fn interrupted_pipeline_retains_frozen_family_and_completed_candidate() {
     fs::write(&csv,&data).unwrap();
     struct Child(std::process::Child);
     impl Drop for Child {fn drop(&mut self){let _=self.0.kill();let _=self.0.wait();}}
-    let mut child=Child(Command::new(env!("CARGO_BIN_EXE_sqx-cli"))
-        .args(["pipeline","--data"]).arg(&csv)
-        .args(["--symbol","EURUSD","--timeframe","M1","--count","64","--keep","1","--archive-dir"])
-        .arg(root.join("archive")).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
+    let generate=|directory:&str|{
+        let mut command=Command::new(env!("CARGO_BIN_EXE_sqx-cli"));
+        command.args([if standalone{"generate"}else{"pipeline"},"--data"]).arg(&csv)
+            .args(["--symbol","EURUSD","--timeframe","M1","--count","64","--archive-dir"]).arg(root.join(directory));
+        if !standalone{command.args(["--keep","1"]);}
+        command
+    };
+    let mut child=Child(generate("archive").stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
     let archive=sqx_project::archive::Archive::new(root.join("archive"));
     let deadline=std::time::Instant::now()+std::time::Duration::from_secs(60);
     loop {
@@ -142,12 +157,12 @@ fn interrupted_pipeline_retains_frozen_family_and_completed_candidate() {
     assert_eq!(serde_json::from_slice::<Value>(&replay.stdout).unwrap()["appended_events"],0);
     assert_eq!(restored.list().unwrap().len(),count);
     fs::write(&csv,&data).unwrap();
-    let reference=Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["pipeline","--data"]).arg(&csv)
-        .args(["--symbol","EURUSD","--timeframe","M1","--count","64","--keep","1","--archive-dir"])
-        .arg(root.join("reference")).output().unwrap();
-    let receipt:Value=serde_json::from_str(String::from_utf8_lossy(&reference.stdout).lines().find_map(|l|l.strip_prefix("Pipeline archive: ")).unwrap()).unwrap();
+    let reference=generate("reference").output().unwrap();
+    assert!(reference.status.success(),"{}",String::from_utf8_lossy(&reference.stderr));
+    let receipt:Value=serde_json::from_str(String::from_utf8_lossy(&reference.stdout).lines().find_map(|l|l.strip_prefix(if standalone{"Generation archive: "}else{"Pipeline archive: "})).unwrap()).unwrap();
     let expected=sqx_project::archive::Archive::new(root.join("reference")).load(receipt["run_id"].as_str().unwrap()).unwrap();
     assert_eq!(completed.run.result["report"],expected.run.result["report"]);
+    assert_eq!(completed.run.result["report"]["builds"].as_array().unwrap().len(),64);
     assert_ne!(completed.run.request["started_run_id"],expected.run.request["started_run_id"],"fresh attempts need distinct identities");
     let altered=sqx_project::archive::Archive::new(root.join("altered"));
     altered.restore(started).unwrap();
@@ -263,4 +278,39 @@ fn killed_walkforward_restores_full_trial_evidence_and_matches_uninterrupted_run
         event.run.result["kind"]=="walk_forward" && event.run.result["event"]["kind"]=="candidate_outcome"
     }).count();
     assert_eq!(outcomes,48);
+}
+
+#[test]
+fn standalone_optimization_survives_kill_backup_and_source_deletion(){
+    use sqx_project::archive::Archive;
+    use std::process::Stdio;
+    let root=std::env::temp_dir().join(format!("sqx-optimize-recovery-{:032x}",rand::random::<u128>()));
+    struct Cleanup(std::path::PathBuf);impl Drop for Cleanup{fn drop(&mut self){let _=fs::remove_dir_all(&self.0);}}
+    let _cleanup=Cleanup(root.clone());fs::create_dir_all(&root).unwrap();
+    let data=root.join("bars.csv");let mut csv="timestamp,open,high,low,close,volume\n".to_owned();
+    let bars:Vec<_>=(0..600).map(|i|{let p=1.1+(i as f64*0.3).sin()*0.01;csv.push_str(&format!("{},{},{},{},{},1\n",1700000000+i*60,p,p+0.002,p-0.002,p));sqx_core::Bar::new((1700000000+i*60)*1000,p,p+0.002,p-0.002,p,1.0)}).collect();
+    fs::write(&data,csv).unwrap();
+    struct Child(std::process::Child);impl Drop for Child{fn drop(&mut self){let _=self.0.kill();let _=self.0.wait();}}
+    let mut child=Child(Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["optimize","--data"]).arg(&data).args(["--symbol","EURUSD","--timeframe","M1","--windows","2","--oos","0.3","--candidates","16","--seed","731","--archive-dir"]).arg(root.join("archive")).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
+    let archive=Archive::new(root.join("archive"));let deadline=std::time::Instant::now()+std::time::Duration::from_secs(60);
+    let start_id=loop{
+        let found=archive.list().unwrap_or_default().into_iter().find_map(|id|{let b=archive.load(&id).ok()?;(b.run.result["kind"]=="walk_forward" && b.run.result["event"]["kind"]=="candidate_outcome").then(||b.run.request["started_run_id"].as_str().unwrap().to_owned())});
+        if let Some(id)=found{break id;}
+        assert!(child.0.try_wait().unwrap().is_none(),"optimization finished before interruption");
+        assert!(std::time::Instant::now()<deadline,"no optimization checkpoint");std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    child.0.kill().unwrap();child.0.wait().unwrap();
+    let start=archive.load(&start_id).unwrap();
+    fs::remove_file(data).unwrap();portable_restore(&root,&start_id);
+    let restored=Archive::new(root.join("restored"));
+    let replay=|directory:&str|Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["replay-pipeline","--run-id",&start_id,"--resume","--archive-dir"]).arg(root.join(directory)).output().unwrap();
+    let out=replay("restored");assert!(out.status.success(),"{}",String::from_utf8_lossy(&out.stderr));
+    let receipt:Value=serde_json::from_slice(&out.stdout).unwrap();assert!(receipt["appended_events"].as_u64().unwrap()>0);
+    let done=restored.load(receipt["completion_id"].as_str().unwrap()).unwrap();
+    let plain=sqx_optimizer::walk_forward(&bars,&serde_json::from_value(start.dataset["instrument"].clone()).unwrap(),&serde_json::from_value(start.run.request["config"].clone()).unwrap(),start.run.request["periods_per_year"].as_f64().unwrap(),&sqx_optimizer::GeneratorConfig::default(),2,0.3,16,731);
+    assert_eq!(done.run.result["report"]["discovery"],serde_json::to_value(plain).unwrap());
+    let fresh=Archive::new(root.join("fresh"));fresh.restore(&start).unwrap();let out=replay("fresh");assert!(out.status.success());
+    let receipt:Value=serde_json::from_slice(&out.stdout).unwrap();assert_eq!(receipt["completion_id"],done.run_id);
+    let before=restored.list().unwrap();let out=replay("restored");assert!(out.status.success());assert_eq!(restored.list().unwrap(),before);
+    let count=done.run.result["event_ids"].as_array().unwrap().iter().filter(|id|restored.load(id.as_str().unwrap()).unwrap().run.result["event"]["kind"]=="candidate_outcome").count();assert_eq!(count,32);
 }

@@ -10,7 +10,7 @@ use sqx_backtest::{backtest, backtest_ticks, BacktestConfig, BacktestResult};
 use sqx_core::{Bar, Instrument, Timeframe};
 use sqx_data::{DataStore, QuestdbClient, QuestdbConfig};
 use sqx_metrics::{compute as compute_metrics, render as render_metrics};
-use sqx_optimizer::{backtest_batch, genetic_evolve_observed, rank, random_strategy, walk_forward, Fitness, GeneticConfig, GeneratorConfig};
+use sqx_optimizer::{genetic_evolve_observed, rank, random_strategy, walk_forward, Fitness, GeneticConfig, GeneratorConfig};
 use sqx_project::{Databank, MetricSummary, Project, StrategyRecord};
 use sqx_export::{export_report as export_strategy, Engine};
 use sqx_portfolio::{backtest_all, best_subset, combine, equal_weights};
@@ -293,6 +293,8 @@ enum Cmd {
     },
     /// Generate random strategies, backtest and rank them.
     Generate {
+        #[arg(long, default_value = "data/research")]
+        archive_dir: PathBuf,
         #[command(flatten)]
         research:ResearchOptions,
         #[arg(long)]
@@ -400,6 +402,9 @@ enum Cmd {
     },
     /// Run walk-forward optimization.
     Optimize {
+        /// Immutable inputs, per-trial checkpoints and replayable completion.
+        #[arg(long, default_value = "data/research")]
+        archive_dir: PathBuf,
         #[command(flatten)]
         research:ResearchOptions,
         #[arg(long)]
@@ -788,16 +793,24 @@ fn main() -> Result<()> {
                 Err(e) => Err(anyhow::anyhow!(e)),
             }
         }
-        Cmd::Generate { data, research, count, seed, top, min_trades, out } => {
+        Cmd::Generate { archive_dir, data, research, count, seed, top, min_trades, out } => {
             let bars = load_bars(&data)?;
             let (instrument,config,mut context)=research.prepare(&bars)?;
             let pyp = resolve_periods_per_year(bars.len(), 0.0, &bars);
             let gen = GeneratorConfig::default();
-            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-            let strategies: Vec<Strategy> = (0..count)
-                .map(|i| random_strategy(&mut rng, &format!("s{i:04}"), &gen))
-                .collect();
-            let scored = backtest_batch(&strategies, &bars, &instrument, &config, pyp);
+            let pipeline=sqx_pipeline::Pipeline{name:"Standalone random generation".into(),tasks:vec![sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::Generate{count,min_trades}}]};
+            let archive=sqx_project::archive::Archive::new(&archive_dir);
+            let engine=archive.retain_current_engine().map_err(anyhow::Error::msg)?;
+            let dataset=serde_json::json!({"bars":bars,"instrument":instrument,"timeframe":context["timeframe"],"source_context":context});
+            let specification=serde_json::json!({"pipeline":pipeline,"generator":gen});
+            let request=serde_json::json!({"research_kind":"cli_pipeline_started","attempt_id":format!("{:032x}",rand::random::<u128>()),"config":config,"seed":seed,"periods_per_year":pyp});
+            let started=archive.save(engine,dataset,specification,request,serde_json::json!({"status":"execution_not_recorded"})).map_err(anyhow::Error::msg)?;
+            println!("Generation checkpoint: {}",serde_json::json!({"run_id":started,"root":archive_dir}));
+            std::io::Write::flush(&mut std::io::stdout())?;
+            let recovered=pipeline_archive::recover(&archive,&started,true).map_err(|e|anyhow!("Generation stopped; inspect or resume checkpoint {started}: {e}"))?;
+            println!("Generation archive: {}",serde_json::json!({"run_id":recovered.completion_id,"started_run_id":started,"root":archive_dir}));
+            if !recovered.report.errors.is_empty(){anyhow::bail!("Generation contains invalid evaluations: {}",recovered.report.errors.join("; "));}
+            let scored=recovered.report.builds.into_iter().map(|b|(b.evaluation.strategy,b.evaluation.metrics)).collect();
             let ranked = rank(scored, Fitness::ProfitFactor, min_trades);
             let top_n = ranked.iter().take(top).collect::<Vec<_>>();
             for (i, (s, m)) in top_n.iter().enumerate() {
@@ -923,12 +936,23 @@ fn main() -> Result<()> {
             if !report.errors.is_empty(){anyhow::bail!(report.errors.join("; "));}
             Ok(())
         }
-        Cmd::Optimize { data, research, windows, oos, candidates, seed } => {
+        Cmd::Optimize { archive_dir, data, research, windows, oos, candidates, seed } => {
             let bars = load_bars(&data)?;
             let (inst,config,mut context)=research.prepare(&bars)?;
             let pyp = resolve_periods_per_year(bars.len(), 0.0, &bars);
             let gen = GeneratorConfig::default();
-            let report = walk_forward(&bars, &inst, &config, pyp, &gen, windows, oos, candidates, seed);
+            let pipeline=sqx_pipeline::Pipeline{name:"Standalone walk-forward discovery".into(),tasks:vec![sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::DiscoverWalkForward{windows,candidates,oos_fraction:oos}}]};
+            let archive=sqx_project::archive::Archive::new(&archive_dir);
+            let engine=archive.retain_current_engine().map_err(anyhow::Error::msg)?;
+            let dataset=serde_json::json!({"bars":bars,"instrument":inst,"timeframe":context["timeframe"],"source_context":context});
+            let specification=serde_json::json!({"pipeline":pipeline,"generator":gen});
+            let request=serde_json::json!({"research_kind":"cli_pipeline_started","attempt_id":format!("{:032x}",rand::random::<u128>()),"config":config,"seed":seed,"periods_per_year":pyp});
+            let started=archive.save(engine,dataset,specification,request,serde_json::json!({"status":"execution_not_recorded"})).map_err(anyhow::Error::msg)?;
+            println!("Optimization checkpoint: {}",serde_json::json!({"run_id":started,"root":archive_dir}));
+            std::io::Write::flush(&mut std::io::stdout())?;
+            let recovered=pipeline_archive::recover(&archive,&started,true).map_err(|e|anyhow!("Optimization stopped; use pipeline-history or replay-pipeline --resume with its checkpoint: {e}"))?;
+            println!("Optimization archive: {}",serde_json::json!({"run_id":recovered.completion_id,"started_run_id":started,"root":archive_dir,"replay_available":true}));
+            let report=recovered.report.discovery.ok_or_else(||anyhow!("Standalone walk-forward did not execute: {}",recovered.report.errors.join("; ")))?;
             println!("Walk-forward optimization ({} windows)", report.windows);
             println!("  Candidates tried  : {}", report.candidates_attempted);
             println!("  Trade evidence    : {} (not a robustness certificate)", report.evidence_sufficient);

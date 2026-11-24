@@ -2147,10 +2147,18 @@ fn research_list_json(state:&State)->String{
             let bundle=state.archive.load(id)?;
             let kind=bundle.run.request.get("research_kind").and_then(|v|v.as_str()).unwrap_or("backtest");
             let pipeline=matches!(kind,"cli_pipeline_started"|"cli_pipeline_event"|"cli_pipeline");
-            let name=if pipeline{json!("CLI pipeline")}else{bundle.strategy["name"].clone()};
+            let tasks=bundle.strategy["pipeline"]["tasks"].as_array();
+            let workflow_kind=if pipeline {
+                match tasks.filter(|tasks|tasks.len()==1).and_then(|tasks|tasks.first()).map(|task|&task["kind"]) {
+                    Some(task) if task.get("Generate").is_some()=>"generation",
+                    Some(task) if task.get("DiscoverWalkForward").is_some()=>"walk_forward",
+                    _=>"pipeline",
+                }
+            }else{""};
+            let name=if pipeline{json!(bundle.strategy["pipeline"]["name"].as_str().filter(|s|!s.trim().is_empty()).unwrap_or("CLI pipeline"))}else{bundle.strategy["name"].clone()};
             let symbol=bundle.dataset.get("symbol").filter(|v|v.is_string()).cloned()
                 .unwrap_or_else(||bundle.dataset["instrument"]["name"].clone());
-            Ok(json!({"run_id":id,"name":name,"symbol":symbol,"started_run_id":bundle.run.request["started_run_id"],"dataset_id":bundle.run.dataset_id,"engine_id":bundle.run.engine_id,"metrics":bundle.run.result["metrics"],"kind":bundle.run.request.get("research_kind").and_then(|v|v.as_str()).unwrap_or("backtest")}))
+            Ok(json!({"run_id":id,"name":name,"workflow_kind":workflow_kind,"symbol":symbol,"started_run_id":bundle.run.request["started_run_id"],"dataset_id":bundle.run.dataset_id,"engine_id":bundle.run.engine_id,"metrics":bundle.run.result["metrics"],"kind":bundle.run.request.get("research_kind").and_then(|v|v.as_str()).unwrap_or("backtest")}))
         }).collect()
     };
     match list(){Ok(runs)=>json!({"runs":runs}).to_string(),Err(e)=>json!({"error":e}).to_string()}

@@ -124,6 +124,8 @@ result backups can be replayed without the original checkpoint or source CSV.
 
 ```bash
 # generate 300 random strategies, backtest, rank, print top 10
+# All candidate outcomes are archived, including those excluded from ranking.
+# Failed evaluations stop publication of a ranked databank and return a nonzero exit.
 cargo run -q -p sqx-cli -- generate --symbol EURUSD --timeframe M1 --data data/eurusd_sample.csv --count 300 --top 10
 
 # genetic evolution
@@ -143,6 +145,13 @@ cargo run -q -p sqx-cli -- robustness --symbol EURUSD --timeframe M1 --strategy 
 # walk-forward optimization
 # Nonzero exit on invalid computation; exit 0 alone does not certify sufficient trade evidence.
 cargo run -q -p sqx-cli -- optimize --symbol EURUSD --timeframe M1 --data data/eurusd_sample.csv --windows 6 --oos 0.25
+
+# generate and optimize archive their inputs and executions in data/research.
+# Use the printed Optimization checkpoint run_id with the shared recovery commands:
+cargo run -q -p sqx-cli -- pipeline-history --run-id <checkpoint-id>
+cargo run -q -p sqx-cli -- replay-pipeline --run-id <checkpoint-id> --resume
+# Recovery requires the exact original executable; rebuilding can change its identity.
+# export-pipeline / import-pipeline also support these standalone optimization archives.
 
 # portfolio: best subset of generated strategies (equal weights + correlation)
 cargo run -q -p sqx-cli -- portfolio --symbol EURUSD --timeframe M1 --data data/eurusd_sample.csv --count 300 --top 12

@@ -8,7 +8,7 @@ fn generator_and_walk_forward_bind_instrument_costs_and_quality(){
     fs::write(&config,json!({"initial_deposit":25000,"spread_points":7,"commission_per_lot":5,"account":{"currency":"JPY"}}).to_string()).unwrap();
     let run=|name:&str,args:&[&str]|{
         let mut cmd=Command::new(env!("CARGO_BIN_EXE_sqx-cli"));cmd.arg(name).arg("--data").arg(&data);
-        if name=="generate"{cmd.args(["--count","2"]);}else{cmd.args(["--windows","2","--candidates","1"]);}
+        if name=="generate"{cmd.args(["--count","2","--archive-dir"]).arg(root.join("archive"));}else{cmd.args(["--windows","2","--candidates","1","--archive-dir"]).arg(root.join("archive"));}
         cmd.args(args).output().unwrap()
     };
     for name in ["generate","optimize"] {
@@ -36,7 +36,7 @@ fn invalid_walk_forward_returns_failure_with_preserved_context(){
     fs::write(&data,csv).unwrap();
     let output=Command::new(env!("CARGO_BIN_EXE_sqx-cli"))
         .args(["optimize","--symbol","EURUSD","--timeframe","M1","--windows","0"])
-        .arg("--data").arg(&data).output().unwrap();
+        .arg("--data").arg(&data).arg("--archive-dir").arg(root.join("archive")).output().unwrap();
     fs::remove_dir_all(root).unwrap();
     let stdout=String::from_utf8(output.stdout).unwrap();
     let context:Value=serde_json::from_str(stdout.lines().find_map(|line|line.strip_prefix("Research context: ")).expect("invalid report must retain research context")).unwrap();
@@ -44,4 +44,20 @@ fn invalid_walk_forward_returns_failure_with_preserved_context(){
     assert!(!context["walk_forward"]["errors"].as_array().unwrap().is_empty());
     assert!(!output.status.success(),"invalid walk-forward must fail for automation");
     assert!(String::from_utf8_lossy(&output.stderr).contains("invalid walk-forward"));
+}
+
+#[test]
+fn invalid_generation_is_archived_without_publishing_a_databank(){
+    let root=std::env::temp_dir().join(format!("sqx-invalid-generation-{:032x}",rand::random::<u128>()));
+    struct Cleanup(std::path::PathBuf);impl Drop for Cleanup{fn drop(&mut self){let _=fs::remove_dir_all(&self.0);}}
+    let _cleanup=Cleanup(root.clone());fs::create_dir_all(&root).unwrap();
+    let data=root.join("bars.csv");let output_file=root.join("results.json");
+    fs::write(&data,"timestamp,open,high,low,close,volume\n1700000000,1,1,1,1,1\n1700000060,1,1,1,1,1\n").unwrap();
+    let output=Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["generate","--symbol","EURUSD","--timeframe","M1","--count","0","--data"]).arg(&data)
+        .arg("--out").arg(&output_file).arg("--archive-dir").arg(root.join("archive")).output().unwrap();
+    assert!(!output.status.success());assert!(!output_file.exists());
+    let text=String::from_utf8(output.stdout).unwrap();let receipt:Value=serde_json::from_str(text.lines().find_map(|line|line.strip_prefix("Generation archive: ")).unwrap()).unwrap();
+    let archive=sqx_project::archive::Archive::new(root.join("archive"));let bundle=archive.load(receipt["run_id"].as_str().unwrap()).unwrap();
+    assert!(!bundle.run.result["report"]["errors"].as_array().unwrap().is_empty());assert!(bundle.run.result["report"]["builds"].as_array().unwrap().is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid evaluations"));
 }

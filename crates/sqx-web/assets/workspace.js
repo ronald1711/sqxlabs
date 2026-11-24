@@ -484,12 +484,14 @@ async function refreshResearchRuns() {
       const name=document.createElement('strong');name.textContent=run.name+' · '+run.symbol;
       const mcpGeneration=['mcp_generation','mcp_generation_started','mcp_generation_trial','mcp_generation_trial_started'].includes(run.kind);
       const cliPipeline=['cli_pipeline_started','cli_pipeline_event','cli_pipeline'].includes(run.kind);
-      const pipelineLabel=run.kind==='cli_pipeline_started'?'Pipeline input checkpoint':run.kind==='cli_pipeline_event'?'Pipeline step record':'Pipeline completion record';
+      const researchNoun=run.workflow_kind==='generation'?'search':run.workflow_kind==='walk_forward'?'walk-forward study':'pipeline';
+      const researchTitle=researchNoun[0].toUpperCase()+researchNoun.slice(1);
+      const pipelineLabel=researchTitle+(run.kind==='cli_pipeline_started'?' input checkpoint':run.kind==='cli_pipeline_event'?' step record':' completion record');
       const metadata=document.createElement('p');metadata.textContent='Run '+run.run_id.slice(0,12)+' · Dataset '+run.dataset_id.slice(0,12)+' · '+(cliPipeline?pipelineLabel:mcpGeneration?'MCP generation evidence ('+run.kind+')':run.kind==='cli_backtest_started'?'CLI input checkpoint':run.kind==='cli_backtest'?'CLI execution record':run.kind==='assistant_trial_started'?'AI trial input checkpoint':run.kind==='assistant_trial'?'AI trial execution':run.kind==='assistant_candidates'?'AI session evidence':run.kind==='pipeline'?'Pipeline report':run.kind==='robustness'?'Stress-test report':'Net '+fmt(run.metrics?.net_profit,2))+' · Not independently validated';
       const download=document.createElement('button');download.className='secondary';download.textContent='Download complete backup';
       const pipelineRoot=run.kind==='cli_pipeline_started';
       if(mcpGeneration||cliPipeline)download.textContent='Download this record (not whole search)';
-      if(pipelineRoot)download.textContent='Download whole pipeline backup';
+      if(pipelineRoot)download.textContent='Download whole '+researchNoun+' backup';
       download.onclick=async()=>{try{const raw=await rawBackup((pipelineRoot?'/api/pipeline/backup?id=':'/api/research/run?id=')+encodeURIComponent(run.run_id));downloadRawJson('sqxlabs-research-'+run.run_id+'.json',raw);}catch(e){announce(e.message);}};
       const replay=document.createElement('button');replay.className='secondary';replay.textContent='Verify replay';
       if(run.kind==='cli_backtest'||run.kind==='cli_backtest_started'){replay.disabled=true;replay.textContent='Dashboard replay unavailable for CLI records';}
@@ -516,7 +518,7 @@ async function refreshResearchRuns() {
       };
       if(pipelineRoot){
         let inspected=null;
-        replay.disabled=false;replay.textContent='Inspect pipeline';replay.title='Check saved progress before choosing replay or recovery.';
+        replay.disabled=false;replay.textContent='Inspect '+researchNoun;replay.title='Check saved progress before choosing replay or recovery.';
         replay.onclick=async()=>{
           replay.disabled=true;
           try{
@@ -525,19 +527,19 @@ async function refreshResearchRuns() {
               if(status.error)throw new Error(status.error);
               if(!['incomplete','completion_recorded'].includes(status.status)||typeof status.engine_matches!=='boolean')throw new Error('Missing pipeline status confirmation.');
               inspected=status;
-              metadata.textContent='Pipeline '+run.run_id.slice(0,12)+' · '+status.event_count+' saved steps · '+(status.status==='incomplete'?'Incomplete':status.execution_valid===true?'Completion recorded':'Completion recorded with errors')+' · Not independently validated';
-              replay.textContent=status.engine_matches?(status.status==='incomplete'?'Resume pipeline':'Verify pipeline replay'):'Original application build required';
+              metadata.textContent=researchTitle+' '+run.run_id.slice(0,12)+' · '+status.event_count+' saved steps · '+(status.status==='incomplete'?'Incomplete':status.execution_valid===true?'Completion recorded':'Completion recorded with errors')+' · Not independently validated';
+              replay.textContent=status.engine_matches?(status.status==='incomplete'?'Resume '+researchNoun:'Verify '+researchNoun+' replay'):'Original application build required';
               $('research-status').textContent=status.engine_matches?'Saved links checked. Replay recomputes saved work and compares it before continuing; this can take several minutes.':'Saved links checked. Download and inspection are available, but replay requires the original application build. A backup does not install that build.';
               return;
             }
             if(!inspected.engine_matches)return;
-            $('research-status').textContent='Recomputing the saved pipeline. If this connection is lost, inspect it again before recovery…';
+            $('research-status').textContent='Recomputing the saved '+researchNoun+'. If this connection is lost, inspect it again before recovery…';
             const result=await postJSON('/api/pipeline/replay',JSON.stringify({run_id:run.run_id,resume:inspected.status==='incomplete'}));
             if(result.error)throw new Error(result.error);
-            if(result.matches!==true||!result.completion_id)throw new Error('Pipeline completion was not confirmed.');
+            if(result.matches!==true||!result.completion_id)throw new Error(researchTitle+' completion was not confirmed.');
             await refreshResearchRuns();
-            $('research-status').textContent=result.execution_valid===true?'Pipeline reproduced and saved. This verifies repeatability, not strategy robustness.':'Pipeline reproduced with execution errors. Treat this result as invalid.';
-          }catch(error){inspected=null;replay.textContent='Inspect pipeline';$('research-status').textContent='Pipeline action incomplete: '+error.message;}
+            $('research-status').textContent=result.execution_valid===true?researchTitle+' reproduced and saved. This verifies repeatability, not strategy robustness.':researchTitle+' reproduced with execution errors. Treat this result as invalid.';
+          }catch(error){inspected=null;replay.textContent='Inspect '+researchNoun;$('research-status').textContent=researchTitle+' action incomplete: '+error.message;}
           finally{replay.disabled=inspected?.engine_matches===false;}
         };
       }
