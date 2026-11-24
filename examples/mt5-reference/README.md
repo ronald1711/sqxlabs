@@ -133,7 +133,12 @@ python3 scripts/mt5_tester_log_check.py short.log --symbol SQX_EURUSD_V2 --short
 ```
 
 The added gate checks explicit report account/input settings and rejects pips
-mode, missing/duplicate settings and unsupported layouts. It does not inspect
-HTML deals or prove that the report and journal came from the same execution.
-Those limitations remain explicit; `report_settings_match` is false when no
-report is supplied, and SqxLabs parity and tick provenance remain unverified.
+mode, missing/duplicate settings and unsupported layouts. It also checks the
+deposit, both deals (time, direction, volume, price, commission, swap, PnL and
+balance), totals and matching journal deal tickets. The strict English layout
+currently supports the baseline report format; other layouts fail closed.
+Matching content/tickets cannot prove the files came from the same execution.
+`report_settings_match` is false when no report is supplied, and SqxLabs parity
+and tick provenance remain unverified. HTML does not expose every execution
+setting, final equity or separate fee field; the journal and provenance checks
+remain necessary.

@@ -14,7 +14,7 @@ import re
 from html.parser import HTMLParser
 
 
-def check_report_settings(text, short=False, symbol="SQX_EURUSD"):
+def check_report_settings(text, short=False, symbol="SQX_EURUSD", require_deals=False):
     """Check the English HTML report's explicit settings, not its provenance.
 
     A matching journal alone cannot establish that profit-in-pips was disabled.
@@ -64,7 +64,43 @@ def check_report_settings(text, short=False, symbol="SQX_EURUSD"):
     inputs = [r[1] for r in parser.rows if len(r) == 2 and r[0] == '' and '=' in r[1]]
     if inputs != ['SignalBar=1767571200', 'Lots=0.1']:
         raise ValueError('Report input settings differ from baseline')
-    return {'report_settings_match': True, 'report_deals_checked': False}
+    result = {'report_settings_match': True, 'report_deals_checked': False}
+    if not require_deals:
+        return result
+    headers = ['Time', 'Deal', 'Symbol', 'Type', 'Direction', 'Volume', 'Price',
+               'Order', 'Commission', 'Swap', 'Profit', 'Balance', 'Comment']
+    sections = [i for i, row in enumerate(parser.rows) if row == ['Deals']]
+    if len(sections) != 1 or parser.rows[sections[0] + 1:sections[0] + 2] != [headers]:
+        raise ValueError('Missing, duplicate or unsupported report Deals section')
+    rows = [r for r in parser.rows[sections[0] + 2:] if any(r)]
+    if len(rows) != 4 or any(len(r) != 13 for r in rows[:3]):
+        raise ValueError('Expected deposit, two deals and one total row')
+    net = '-3.00' if short else '-1.00'
+    balance = '9 997.00' if short else '9 999.00'
+    entry, exit_price = ('1.10010', '1.10040') if short else ('1.10030', '1.10020')
+    types = ('sell', 'buy') if short else ('buy', 'sell')
+    expected_rows = [
+        ['2026.01.05 00:00:00', '', '', 'balance', '', '', '', '', '0.00', '0.00', '10 000.00', '10 000.00', ''],
+        ['2026.01.05 00:01:00', '', symbol, types[0], 'in', '0.1', entry, '', '0.00', '0.00', '0.00', '10 000.00', 'Sqx tester reference'],
+        ['2026.01.05 00:02:00', '', symbol, types[1], 'out', '0.1', exit_price, '', '0.00', '0.00', net, balance, 'Sqx tester reference'],
+    ]
+    tickets = []
+    for index, (row, expected_row) in enumerate(zip(rows[:3], expected_rows)):
+        ticket = row[1]
+        if not ticket.isdigit() or int(ticket) <= 0 or ticket in tickets:
+            raise ValueError('Invalid or duplicate HTML deal ticket')
+        tickets.append(ticket)
+        expected_row[1] = ticket
+        if index:
+            if not row[7].isdigit() or int(row[7]) <= 0:
+                raise ValueError('Invalid HTML order ticket')
+            expected_row[7] = row[7]
+        if row != expected_row:
+            raise ValueError('HTML deposit/deal differs from baseline at row ' + str(index))
+    if rows[3] != ['', '0.00', '0.00', net, balance, '']:
+        raise ValueError('HTML deal totals differ from baseline')
+    result.update(report_deals_checked=True, report_deal_tickets=tickets)
+    return result
 
 
 def check(text, short=False, symbol="SQX_EURUSD"):
@@ -141,6 +177,7 @@ def check(text, short=False, symbol="SQX_EURUSD"):
     require(rows['RECONCILIATION'][0], market_deals=2, net=net, residual=0)
     require(rows['COMPLETE'][0], ok=1, balance=10000 + net, equity=10000 + net)
     return {'status': 'reported_baseline_values_match', 'side': 'short' if short else 'long',
+            'log_deal_tickets': tickets,
             'tick_provenance_verified': False, 'sqxlabs_parity_verified': False}
 
 
@@ -159,7 +196,9 @@ def main():
         if args.report:
             report = args.report.read_bytes()
             report_text = report.decode('utf-16' if report.startswith((b'\xff\xfe', b'\xfe\xff')) else 'utf-8-sig')
-            result.update(check_report_settings(report_text, args.short, args.symbol))
+            result.update(check_report_settings(report_text, args.short, args.symbol, require_deals=True))
+            if result['report_deal_tickets'] != result['log_deal_tickets']:
+                raise ValueError('HTML and journal deal tickets differ')
             result['report_sha256'] = hashlib.sha256(report).hexdigest()
     except (ValueError, UnicodeError, OSError) as error:
         result = {'status': 'rejected', 'reason': str(error)}

@@ -17,7 +17,19 @@ def report(currency='USD', short=False):
             ('Currency:', currency), ('Initial Deposit:', '10 000.00'),
             ('Leverage:', '1:30'), ('Inputs:', 'ShortSide=' + str(short).lower()),
             ('', 'SignalBar=1767571200'), ('', 'Lots=0.1')]
-    return '<table>' + ''.join('<tr><td>' + a + '</td><td><b>' + b + '</b></td></tr>' for a, b in rows) + '</table>'
+    net, balance = ('-3.00', '9 997.00') if short else ('-1.00', '9 999.00')
+    entry, exit_price = ('1.10010', '1.10040') if short else ('1.10030', '1.10020')
+    types = ('sell', 'buy') if short else ('buy', 'sell')
+    deals = [
+        ['Deals'],
+        ['Time', 'Deal', 'Symbol', 'Type', 'Direction', 'Volume', 'Price', 'Order', 'Commission', 'Swap', 'Profit', 'Balance', 'Comment'],
+        ['2026.01.05 00:00:00', '1', '', 'balance', '', '', '', '', '0.00', '0.00', '10 000.00', '10 000.00', ''],
+        ['2026.01.05 00:01:00', '2', 'SQX_EURUSD_V2', types[0], 'in', '0.1', entry, '2', '0.00', '0.00', '0.00', '10 000.00', 'Sqx tester reference'],
+        ['2026.01.05 00:02:00', '3', 'SQX_EURUSD_V2', types[1], 'out', '0.1', exit_price, '3', '0.00', '0.00', net, balance, 'Sqx tester reference'],
+        ['', '0.00', '0.00', net, balance, ''],
+    ]
+    deal_html = ''.join('<tr>' + ''.join('<td>' + cell + '</td>' for cell in row) + '</tr>' for row in deals)
+    return '<table>' + ''.join('<tr><td>' + a + '</td><td><b>' + b + '</b></td></tr>' for a, b in rows) + deal_html + '</table>'
 
 LONG = '''SQX_REFERENCE_INIT symbol=SQX_EURUSD short=0 signal_bar=1767571200 lots=0.10
 SQX_REFERENCE_ACCOUNT currency=USD balance=10000.00000000 leverage=30 margin_mode=2
@@ -33,6 +45,17 @@ SQX_REFERENCE_COMPLETE ok=1 balance=9999 equity=9999
 
 
 class TesterLogCheck(unittest.TestCase):
+    def test_html_deals_and_totals(self):
+        for short in (False, True):
+            result = check_report_settings(report(short=short), short, 'SQX_EURUSD_V2', require_deals=True)
+            self.assertTrue(result['report_deals_checked'])
+        for before, after in [('1.10030', '1.10031'), ('00:01:00', '00:01:01'),
+                              ('<td>in</td>', '<td>out</td>'), ('<td>0.1</td>', '<td>1.0</td>'),
+                              ('<td>0.00</td>', '<td>-0.35</td>'), ('9 999.00', '9 998.00'),
+                              ('<td>3</td>', '<td>2</td>'), ('<td>Deals</td>', '<td>Other</td>')]:
+            with self.subTest(change=(before, after)), self.assertRaises(ValueError):
+                check_report_settings(report().replace(before, after), symbol='SQX_EURUSD_V2', require_deals=True)
+
     def test_html_account_settings_fail_closed(self):
         for short in (False, True):
             self.assertTrue(check_report_settings(report(short=short), short, 'SQX_EURUSD_V2')['report_settings_match'])
@@ -58,7 +81,7 @@ class TesterLogCheck(unittest.TestCase):
                     self.assertEqual(result['status'], 'rejected')
                 else:
                     self.assertTrue(result['report_settings_match'])
-                    self.assertFalse(result['report_deals_checked'])
+                    self.assertTrue(result['report_deals_checked'])
                     self.assertFalse(result['sqxlabs_parity_verified'])
 
     def test_reported_long_and_short_arithmetic(self):
