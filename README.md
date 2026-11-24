@@ -276,6 +276,16 @@ The walk-forward stage searches fresh generated candidates; it does not validate
 the supplied strategy out of sample. Standalone `montecarlo` and other entry
 points do not inherit this archival coverage automatically.
 
+Web stress tests now use the same checkpoint/recovery protocol for their six
+cost scenarios and 1,000 trade-resampling paths. They save inputs before running,
+and preserve completed steps if execution stops. In **Saved research runs**,
+inspect the robustness study before retrying a request whose response was lost;
+it may still be running. The whole-study backup includes the ordered journal.
+Recovery requires the matching application build and repeats the recorded prefix
+before continuing. Earlier single-report backups retain their original replay
+route. This adds interruption evidence, not independent execution validation;
+power-loss and large-study performance remain open.
+
 CLI `crosscheck` uses `--manifest` instead of inferring instruments from a folder.
 The schema-1 manifest contains a `markets` array with explicit `symbol`, `data`
 and `timeframe` per entry; optional `calendar`, `config` paths and

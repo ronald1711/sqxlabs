@@ -24,6 +24,9 @@ pub enum TaskKind {
     Robustness { strategy: Strategy, scenarios: Vec<(f64,f64,f64)>, mc_runs: usize,
         mc_seed:u64, skip_probability:f64, retest_runs:usize, retest_seed:u64,
         windows:usize, candidates:usize, oos_fraction:f64 },
+    /// Cost sensitivity and trade resampling, without unrelated generated searches.
+    Sensitivity { strategy: Strategy, scenarios: Vec<(f64,f64,f64)>, mc_runs:usize,
+        mc_seed:u64, skip_probability:f64 },
     GoToTask { index: usize },
 }
 
@@ -134,7 +137,7 @@ pub fn run_observed(
     observer:&mut impl FnMut(PipelineEvent<'_>)->Result<(),String>,
 )->Result<PipelineReport,String> {
     let failure=|error:String| Ok(PipelineReport{errors:vec![error],..Default::default()});
-    if pipeline.tasks.iter().any(|t|matches!(t.kind,TaskKind::Robustness{..})) && pipeline.tasks.len()!=1 {
+    if pipeline.tasks.iter().any(|t|matches!(t.kind,TaskKind::Robustness{..}|TaskKind::Sensitivity{..})) && pipeline.tasks.len()!=1 {
         return failure("Robustness studies must be standalone tasks; they do not select a deployable strategy".into());
     }
     if pipeline.tasks.iter().any(|t|matches!(t.kind,TaskKind::DiscoverWalkForward{..})) && pipeline.tasks.len()!=1 {
@@ -162,7 +165,8 @@ pub fn run_observed(
         steps += 1;
         observer(PipelineEvent::StepStarted{step:steps,task_index:pc,task:&pipeline.tasks[pc],inputs:&databank})?;
         match &pipeline.tasks[pc].kind {
-            TaskKind::Robustness{strategy,scenarios,mc_runs,mc_seed,skip_probability,retest_runs,retest_seed,windows,candidates,oos_fraction}=>{
+            TaskKind::Robustness{strategy,scenarios,mc_runs,mc_seed,skip_probability,..} |
+            TaskKind::Sensitivity{strategy,scenarios,mc_runs,mc_seed,skip_probability}=>{
                 observer(PipelineEvent::RobustnessBaseStarted{step:steps,strategy})?;
                 let base=backtest(strategy,bars,instrument,config);
                 observer(PipelineEvent::RobustnessBaseOutcome{step:steps,result:&base})?;
@@ -172,13 +176,16 @@ pub fn run_observed(
                 }else{
                     let what_if=sqx_robustness::what_if_observed(strategy,bars,instrument,config,scenarios,&mut |event|observer(PipelineEvent::RobustnessScenario{step:steps,event}))?;
                     let mc=sqx_robustness::monte_carlo_trade_manipulation_observed(&base.trades,*mc_runs,*skip_probability,*mc_seed,&mut |event|observer(PipelineEvent::RobustnessScenario{step:steps,event}))?;
-                    let retest=sqx_robustness::monte_carlo_retest_observed(strategy,bars,instrument,config,*retest_runs,*retest_seed,&mut |event|observer(PipelineEvent::RobustnessScenario{step:steps,event}))?;
-                    let wf=sqx_optimizer::walk_forward_generated_observed(bars,instrument,config,periods_per_year,gen,*windows,*oos_fraction,*candidates,seed,&sqx_optimizer::WalkForwardCriteria::default(),&mut |event|observer(PipelineEvent::WalkForward{step:steps,candidate_index:0,event}))?;
+                    let (retest,wf)=if let TaskKind::Robustness{retest_runs,retest_seed,windows,candidates,oos_fraction,..}=&pipeline.tasks[pc].kind {
+                        let retest=sqx_robustness::monte_carlo_retest_observed(strategy,bars,instrument,config,*retest_runs,*retest_seed,&mut |event|observer(PipelineEvent::RobustnessScenario{step:steps,event}))?;
+                        let wf=sqx_optimizer::walk_forward_generated_observed(bars,instrument,config,periods_per_year,gen,*windows,*oos_fraction,*candidates,seed,&sqx_optimizer::WalkForwardCriteria::default(),&mut |event|observer(PipelineEvent::WalkForward{step:steps,candidate_index:0,event}))?;
+                        (Some(retest),Some(wf))
+                    }else{(None,None)};
                     for (index,row) in what_if.iter().enumerate(){errors.extend(row.errors.iter().map(|e|format!("What-if scenario {index}: {e}")));}
                     errors.extend(mc.errors.iter().map(|e|format!("Monte Carlo: {e}")));
-                    errors.extend(retest.errors.iter().map(|e|format!("MC retest: {e}")));
-                    errors.extend(wf.errors.iter().map(|e|format!("Walk-forward: {e}")));
-                    robustness=Some(RobustnessStudy{base,what_if,monte_carlo:Some(mc),retest:Some(retest),walk_forward:Some(wf)});
+                    if let Some(report)=&retest{errors.extend(report.errors.iter().map(|e|format!("MC retest: {e}")));}
+                    if let Some(report)=&wf{errors.extend(report.errors.iter().map(|e|format!("Walk-forward: {e}")));}
+                    robustness=Some(RobustnessStudy{base,what_if,monte_carlo:Some(mc),retest,walk_forward:wf});
                 }
                 log.push("Robustness study completed; inspect errors and scenario evidence before use".into());
                 pc+=1;

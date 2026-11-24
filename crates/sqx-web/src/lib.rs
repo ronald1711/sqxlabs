@@ -768,14 +768,35 @@ mod tests {
         assert!(response.get("error").is_none(),"{response}");
         assert_eq!(response["mc"]["samples"].as_array().unwrap().len(),1000);
         let id=response["archive"]["run_id"].as_str().unwrap();
-        let bundle=state.archive.load(id).unwrap();assert_eq!(bundle.run.request["research_kind"],"robustness");
-        let backup=serde_json::to_vec(&bundle).unwrap();
-        let restored=research_state();restored.archive.restore(&serde_json::from_slice(&backup).unwrap()).unwrap();
+        let bundle=state.archive.load(id).unwrap();assert_eq!(bundle.run.request["research_kind"],"cli_pipeline");
+        let started=response["archive"]["started_run_id"].as_str().unwrap();
+        let backup:serde_json::Value=serde_json::from_str(&pipeline_action_json("backup",&json!({"run_id":started}).to_string(),&state)).unwrap();
+        assert_eq!(backup["events"].as_array().unwrap().len(),2016); // step start, base pair, 6 cost pairs, 1000 MC pairs, selection.
+        let restored=research_state();
+        let imported:serde_json::Value=serde_json::from_str(&pipeline_action_json("restore",&backup.to_string(),&restored)).unwrap();assert!(imported.get("error").is_none(),"{imported}");
+        std::fs::remove_dir_all(state.archive.root()).unwrap();
         restored.store.write().unwrap().series.clear();
-        let replay:serde_json::Value=serde_json::from_str(&research_replay_json(&json!({"run_id":id}).to_string(),&restored)).unwrap();
-        assert_eq!(replay["matches"],true,"{replay}");assert_eq!(replay["replayed"],bundle.run.result);
+        let replay:serde_json::Value=serde_json::from_str(&pipeline_action_json("replay",&json!({"run_id":started}).to_string(),&restored)).unwrap();
+        assert_eq!(replay["matches"],true,"{replay}");assert_eq!(replay["completion_id"],id);
+        assert_eq!(restored.archive.load(id).unwrap().run.result,bundle.run.result);
+        let listing:serde_json::Value=serde_json::from_str(&research_list_json(&restored)).unwrap();
+        assert!(listing["runs"].as_array().unwrap().iter().all(|r|r["workflow_kind"]=="robustness"));
         assert!(restored.databank.read().unwrap().is_empty());
-        std::fs::remove_dir_all(restored.archive.root()).unwrap();std::fs::remove_dir_all(state.archive.root()).unwrap();
+        std::fs::remove_dir_all(restored.archive.root()).unwrap();
+    }
+
+    #[test]
+    fn legacy_robustness_report_remains_replayable() {
+        let state=research_state();let series=state.store.read().unwrap().series[0].clone();
+        let instrument=instrument_for(&series.symbol);let strategy=Strategy::new("legacy stress report");
+        let spec=RobustnessSpec{config:BacktestConfig::default(),scenarios:vec![(0.0,0.0,0.0)],runs:2,skip_probability:0.1,seed:42,context:json!({})};
+        let result=compute_robustness_report(&strategy,&series,&instrument,&spec);
+        let dataset=json!(ArchivedDataset{symbol:series.symbol,timeframe:series.timeframe,instrument,calendar:series.calendar,normalization:series.normalization,bars:series.bars});
+        let id=state.archive.save(engine_identity().unwrap(),dataset,json!(strategy),json!({"research_kind":"robustness","spec":spec}),result.clone()).unwrap();
+        state.store.write().unwrap().series.clear();
+        let replay:serde_json::Value=serde_json::from_str(&research_replay_json(&json!({"run_id":id}).to_string(),&state)).unwrap();
+        assert_eq!(replay["matches"],true,"{replay}");assert_eq!(replay["replayed"],result);
+        std::fs::remove_dir_all(state.archive.root()).unwrap();
     }
 
     #[test]
@@ -1782,13 +1803,28 @@ fn robustness_json(body: &str, state: &State) -> String {
     let inst = instrument_for(&series.symbol);
     let base = match config_for_series(&val,&series){Ok(config)=>config,Err(error)=>return json!({"error":error}).to_string()};
     let spec=RobustnessSpec{config:base,scenarios:vec![(0.0,0.0,0.0),(10.0,0.0,0.0),(0.0,5.0,0.0),(10.0,5.0,0.0),(10.0,5.0,7.0),(20.0,10.0,10.0)],runs:1000,skip_probability:0.1,seed:42,context:json!({"data_quality":quality,"data_gaps_acknowledged":val.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false)})};
-    let report=compute_robustness_report(&s,&series,&inst,&spec);
-    let request=json!({"research_kind":"robustness","spec":spec});
-    let dataset=json!(ArchivedDataset{symbol:series.symbol.clone(),timeframe:series.timeframe,instrument:inst,calendar:series.calendar.clone(),normalization:series.normalization.clone(),bars:series.bars});
-    let id=match retained_engine_identity(state).and_then(|engine|state.archive.save(engine,dataset,json!(s),request,report.clone())) {
-        Ok(id)=>id,Err(error)=>return json!({"error":format!("Robustness report could not be archived: {error}")}).to_string()
+    let pipeline=sqx_pipeline::Pipeline{name:format!("{} — stress test",s.name),tasks:vec![sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::Sensitivity{
+        strategy:s,scenarios:spec.scenarios.clone(),mc_runs:spec.runs,mc_seed:spec.seed,skip_probability:spec.skip_probability,
+    }}]};
+    let request=json!({"research_kind":"cli_pipeline_started","origin":"web_robustness","attempt_id":format!("{:032x}",rand::random::<u128>()),
+        "config":spec.config,"seed":spec.seed,"periods_per_year":pyp_for(&series.bars)});
+    let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,
+        "normalization":series.normalization,"bars":series.bars,"source_context":spec.context});
+    let specification=json!({"pipeline":pipeline,"generator":GeneratorConfig::default()});
+    let started=match retained_engine_identity(state).and_then(|engine|state.archive.save(engine,dataset,specification,request,json!({"status":"execution_not_recorded"}))) {
+        Ok(id)=>id,Err(error)=>return json!({"error":format!("Stress test could not be started in the research archive: {error}")}).to_string()
     };
-    let mut response=report;response["archive"]=json!({"run_id":id});response.to_string()
+    let recovered=match sqx_project::pipeline_archive::recover(&state.archive,&started,true){
+        Ok(result)=>result,Err(error)=>return json!({"error":format!("Stress test stopped: {error}. Inspect Saved research before retrying."),"archive":{"started_run_id":started}}).to_string()
+    };
+    let mut response=match &recovered.report.robustness {
+        Some(study)=>match &study.monte_carlo {
+            Some(mc)=>render_robustness_report(&study.base,&study.what_if,mc,&spec),
+            None=>json!({"error":study.base.errors.join("; ")}),
+        },
+        None=>json!({"error":recovered.report.errors.join("; ")}),
+    };
+    response["archive"]=json!({"run_id":recovered.completion_id,"started_run_id":started});response.to_string()
 }
 
 #[derive(serde::Serialize,serde::Deserialize)]
@@ -1806,6 +1842,10 @@ fn compute_robustness_report(s:&Strategy,series:&SymbolSeries,inst:&Instrument,s
     if !r.errors.is_empty(){return json!({"error":r.errors.join("; ")});}
     let rows = what_if(s, &series.bars, inst, &spec.config, &spec.scenarios);
     let mc = monte_carlo_trade_manipulation(&r.trades, spec.runs, spec.skip_probability, spec.seed);
+    render_robustness_report(&r,&rows,&mc,spec)
+}
+
+fn render_robustness_report(r:&BacktestResult,rows:&[sqx_robustness::WhatIfRow],mc:&sqx_robustness::MonteCarloReport,spec:&RobustnessSpec)->serde_json::Value {
     json!({
         "data_quality":spec.context["data_quality"],
         "data_gaps_acknowledged":spec.context["data_gaps_acknowledged"],
@@ -2152,7 +2192,7 @@ fn research_list_json(state:&State)->String{
                 match tasks.filter(|tasks|tasks.len()==1).and_then(|tasks|tasks.first()).map(|task|&task["kind"]) {
                     Some(task) if task.get("Generate").is_some()=>"generation",
                     Some(task) if task.get("DiscoverWalkForward").is_some()=>"walk_forward",
-                    Some(task) if task.get("Robustness").is_some()=>"robustness",
+                    Some(task) if task.get("Robustness").is_some() || task.get("Sensitivity").is_some()=>"robustness",
                     _=>"pipeline",
                 }
             }else{""};

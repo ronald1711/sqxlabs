@@ -37,3 +37,25 @@ fn robustness_pipeline_preserves_reports_and_every_scenario_checkpoint(){
     let report=run_observed(&mixed,&bars,&instrument,&config,525600.0,&generator,42,&mut |_|{calls+=1;Ok(())}).unwrap();
     assert_eq!(calls,0);assert!(!report.errors.is_empty());
 }
+
+#[test]
+fn sensitivity_preserves_only_requested_stages_and_stops_at_every_boundary(){
+    let bars:Vec<_>=(0..60).map(|i|sqx_core::Bar::new(i*60000,1.0,1.001,0.999,1.0,1.0)).collect();
+    let mut strategy=Strategy::new("web sensitivity");
+    strategy.signals.push(Signal::new(SignalKind::LongEntry,vec![Condition::new(Operand::Const(1.0),Comparator::Gt,Operand::Const(0.0))],Join::And));
+    let pipeline=Pipeline{name:"sensitivity".into(),tasks:vec![Task{kind:TaskKind::Sensitivity{strategy,scenarios:vec![(0.0,0.0,0.0)],mc_runs:2,mc_seed:42,skip_probability:0.0}}]};
+    let instrument=Instrument::fx("EURUSD");let config=BacktestConfig::default();let generator=GeneratorConfig::default();
+    let mut events=Vec::new();
+    let report=run_observed(&pipeline,&bars,&instrument,&config,525600.0,&generator,42,&mut |event|{events.push(serde_json::to_value(event).unwrap());Ok(())}).unwrap();
+    let study=report.robustness.unwrap();assert!(study.retest.is_none());assert!(study.walk_forward.is_none());
+    assert_eq!(study.what_if.len(),1);assert_eq!(study.monte_carlo.unwrap().samples.len(),2);
+    assert!(!events.iter().any(|e|e["kind"]=="walk_forward"));
+    for boundary in 0..events.len(){
+        let mut observed=0;
+        let result=run_observed(&pipeline,&bars,&instrument,&config,525600.0,&generator,42,&mut |event|{
+            assert_eq!(serde_json::to_value(event).unwrap(),events[observed]);
+            let stop=observed==boundary;observed+=1;if stop{Err("storage failed".into())}else{Ok(())}
+        });
+        assert_eq!(result.unwrap_err(),"storage failed");assert_eq!(observed,boundary+1);
+    }
+}

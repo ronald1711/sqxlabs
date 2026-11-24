@@ -69,6 +69,11 @@ remaining execution assumptions and unsupported cases are visible.
   Disk/power-loss, scale and other entry points remain open. Trade-manipulation checkpoints also
   expose selected ordered input indices and each outcome/overflow, preserving
   the previous seeded sampling sequence even with duplicate trade IDs.
+  The web stress-test route now uses the same journal for its existing cost and
+  resampling stages. A full 2,016-event backup restores and replays without the
+  original archive or live data. The UI identifies partial studies after lost
+  responses; legacy report replay is retained. A real web-process-kill test and
+  responsive progress/cancellation for long studies still need verification.
   CLI pipelines retain exact engine bytes, frozen inputs/configuration/seed,
   a pre-execution start record, ordered stage/family events, per-build/retest
   starts and outcomes, and the full returned report before reporting errors.
