@@ -170,3 +170,18 @@ fn standalone_backtest_retains_full_execution_and_stops_at_every_failed_checkpoi
   let report=run(&mixed,&bars,&instrument,&config,525600.0,&generator,42);assert!(!report.errors.is_empty());assert!(report.backtest.is_none());
  }
 }
+
+#[test]
+fn portfolio_rejections_remain_evidence_and_mixed_tasks_never_start(){
+ let bars:Vec<_>=(0..20).map(|i|Bar::new(i*60000,1.1,1.101,1.099,1.1,1.0)).collect();
+ let instrument=Instrument::fx("EURUSD");let config=BacktestConfig::default();let generator=GeneratorConfig::default();
+ let task=Task{kind:TaskKind::Portfolio{strategies:vec![sqx_strategy::Strategy::new("no signals")],selection:Default::default()}};
+ let pipeline=Pipeline{name:"insufficient portfolio".into(),tasks:vec![task.clone()]};let mut events=Vec::new();
+ let report=sqx_pipeline::run_observed(&pipeline,&bars,&instrument,&config,252.0,&generator,42,&mut |event|{events.push(serde_json::to_value(event).unwrap());Ok(())}).unwrap();
+ assert!(!report.errors.is_empty());assert!(report.databank.is_empty());
+ let study=report.portfolio.unwrap();assert_eq!(study.candidates.len(),1);assert!(study.selected.is_empty());assert!(study.combined.is_none());
+ assert_eq!(events[1]["event"]["kind"],"candidate_started");assert_eq!(events[2]["event"]["kind"],"candidate_outcome");assert_eq!(events[3]["event"]["kind"],"shortlist");
+ for failure in 0..events.len(){let mut seen=0;let result=sqx_pipeline::run_observed(&pipeline,&bars,&instrument,&config,252.0,&generator,42,&mut |_|{seen+=1;if seen==failure+1{Err("disk failure".into())}else{Ok(())}});assert_eq!(result.unwrap_err(),"disk failure");assert_eq!(seen,failure+1);}
+ let mixed=Pipeline{name:"mixed".into(),tasks:vec![task,Task{kind:TaskKind::Build{count:1,keep:1}}]};
+ let result=sqx_pipeline::run_observed(&mixed,&bars,&instrument,&config,252.0,&generator,42,&mut |_|panic!("invalid workflow must not start")).unwrap();assert!(!result.errors.is_empty());assert!(result.portfolio.is_none());
+}

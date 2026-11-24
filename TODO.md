@@ -263,11 +263,24 @@ See [README.md](README.md) for operation and [ci/README.md](ci/README.md) for ch
   calculation errors through the shared pipeline history/recovery/backup tools.
   Checkpoint-only and completed backups recover without source files; failed
   calculations stay invalid. This route reruns a single backtest from the start.
-  MCP portfolio trial accounting and other remaining routes are still open.
+  Other remaining entry points still need the same trial-accounting contract.
 
 - [x] Expose ordered portfolio-subset start/outcome checkpoints, explicit finite
   and zero-drawdown score conventions, and failed-combination diagnostics.
   Hand-calculated pair scores and every observer failure boundary are tested.
   Nonfinite aggregate equity or subset arithmetic cannot select a portfolio.
-  These library checkpoints still need wiring into durable portfolio entry points;
-  this does not close the portfolio trial-accounting requirement.
+  MCP portfolio now journals all generated candidates, shortlist decisions, subset
+  attempts and the final combination through the shared research archive.
+  Observer failure boundaries and rejected-candidate retention are tested.
+  A 100-candidate/781-subset fixture survives original source/archive deletion,
+  portable restore and checkpoint-only replay with identical full reports and
+  completion IDs. A rejected search stays invalid after restore. CLI/web portfolio
+  routes, process-kill coverage for this route, power-loss durability and
+  large-study performance remain open.
+
+- [x] Reuse validated shared inputs within one pipeline archive operation when
+  reading, importing or appending records. Every run keeps its own content check;
+  validation sets are discarded between operations. Project tests cover corrupt
+  and missing inputs, failed checks, invalid record identities and unchanged IDs
+  compared with the original save path. Large backup transport and power-loss
+  durability remain open; no cross-request validation cache is used.

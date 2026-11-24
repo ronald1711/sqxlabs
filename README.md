@@ -387,6 +387,15 @@ resume. Failed calculations remain invalid after recovery. Fresh calls create
 distinct attempts, so inspect history after an uncertain response. This adds
 provenance and repeatability, not independent execution validation.
 
+MCP `portfolio` freezes its generated candidates and seed before evaluation.
+Its research archive retains every candidate execution, including candidates
+below the five-trade threshold, the profit-factor shortlist, every tested subset
+and the final equal-weight combination. Failed calculations remain explicit and
+prevent selection. The same research history, backup and replay tools apply;
+replay verifies the recorded prefix rather than resuming inside a calculation.
+This remains exploratory selection on the supplied data, not independent
+validation. CLI/web portfolio entry points do not yet share this full journal.
+
 MCP `robustness` uses the supplied strategy as its walk-forward control and
 varies only exit distances within the same rule family. It no longer substitutes
 unrelated generated strategies. Before calculation it now freezes the inputs,

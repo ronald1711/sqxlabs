@@ -4,6 +4,9 @@
 //! curves with weights, report portfolio metrics and the pairwise correlation
 //! of component returns, and search for the best subset by return/drawdown.
 
+mod search;
+pub use search::*;
+
 use sqx_backtest::{backtest, BacktestConfig, BacktestResult, Trade};
 use sqx_core::{Bar, Instrument};
 use sqx_metrics::{compute, Metrics};
