@@ -14,6 +14,7 @@ use sqx_strategy::Strategy;
 /// One pipeline step.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TaskKind {
+    EvaluateDatabank,
     WalkForwardStudy { studies:Vec<WalkForwardSpec> },
     PortfolioCombination { names:Vec<String>, strategies:Vec<Strategy> },
     Portfolio { strategies:Vec<Strategy>, selection:sqx_portfolio::SearchConfig },
@@ -47,6 +48,17 @@ pub struct WalkForwardStudyResult {
     pub report:sqx_optimizer::WalkForwardReport,
 }
 
+/// Final full-data executions for presentation; these are not untouched holdouts.
+#[derive(Debug,Clone,serde::Serialize)]
+pub struct FinalEvaluation {
+    pub errors:Vec<String>,
+    pub step:usize,
+    pub candidate_index:usize,
+    pub strategy:Strategy,
+    pub execution:sqx_backtest::BacktestResult,
+    pub metrics:sqx_metrics::Metrics,
+}
+
 /// A named task.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Task {
@@ -63,6 +75,8 @@ pub struct Pipeline {
 /// The outcome of running a pipeline.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PipelineReport {
+    #[serde(skip_serializing_if="Vec::is_empty")]
+    pub final_evaluations:Vec<FinalEvaluation>,
     #[serde(skip_serializing_if="Vec::is_empty")]
     pub walk_forward_studies:Vec<WalkForwardStudyResult>,
     #[serde(skip_serializing_if="Option::is_none")]
@@ -139,6 +153,8 @@ pub fn run(
 #[derive(Debug,serde::Serialize)]
 #[serde(tag="kind",rename_all="snake_case")]
 pub enum PipelineEvent<'a> {
+    FinalEvaluationStarted { step:usize, candidate_index:usize, strategy:&'a Strategy },
+    FinalEvaluationOutcome { evaluation:&'a FinalEvaluation },
     WalkForwardStudyStarted { step:usize, study_index:usize, specification:&'a WalkForwardSpec },
     WalkForwardStudyOutcome { step:usize, study_index:usize, result:&'a WalkForwardStudyResult },
     PortfolioCombination { step:usize, event:sqx_portfolio::SearchEvent<'a> },
@@ -207,6 +223,7 @@ pub fn run_observed(
             _=>{}
         }
     }
+    let mut final_evaluations=Vec::new();
     let mut walk_forward_studies=Vec::new();
     let mut retests=Vec::new();let mut builds=Vec::new();let mut optimizations=Vec::new();let mut errors=Vec::new();let mut discovery=None;let mut robustness=None;let mut backtest_result=None;let mut portfolio=None;let mut portfolio_combination=None;
     let mut rng = StdRng::seed_from_u64(seed);
@@ -263,6 +280,20 @@ pub fn run_observed(
                     robustness=Some(RobustnessStudy{base,what_if,monte_carlo:Some(mc),retest,walk_forward:wf});
                 }
                 log.push("Robustness study completed; inspect errors and scenario evidence before use".into());
+                pc+=1;
+            },
+            TaskKind::EvaluateDatabank=>{
+                for (candidate_index,strategy) in databank.iter().enumerate(){
+                    observer(PipelineEvent::FinalEvaluationStarted{step:steps,candidate_index,strategy})?;
+                    let execution=backtest(strategy,bars,instrument,config);
+                    let metrics=sqx_metrics::compute(&execution,bars.len(),periods_per_year);
+                    let mut evaluation_errors=execution.errors.clone();
+                    if let Err(error)=sqx_metrics::validate_observations(&execution){evaluation_errors.push(error);}
+                    errors.extend(evaluation_errors.iter().map(|e|format!("Final evaluation {}: {e}",strategy.name)));
+                    final_evaluations.push(FinalEvaluation{errors:evaluation_errors,step:steps,candidate_index,strategy:strategy.clone(),execution,metrics});
+                    observer(PipelineEvent::FinalEvaluationOutcome{evaluation:final_evaluations.last().unwrap()})?;
+                }
+                log.push(format!("Recorded {} final full-data executions; exploratory, not untouched holdout results",databank.len()));
                 pc+=1;
             },
             TaskKind::WalkForwardStudy{studies}=>{
@@ -366,7 +397,7 @@ pub fn run_observed(
     }
     log.push(format!("Pipeline {} after {} steps; {} strategies in databank",if pc<pipeline.tasks.len(){"stopped at its limit"}else{"finished"}, steps, databank.len()));
     if pc<pipeline.tasks.len(){errors.push("Pipeline step limit reached before completion".into());}
-    Ok(PipelineReport {walk_forward_studies,portfolio_combination,portfolio,backtest:backtest_result,errors,retests,builds,optimizations,discovery,robustness,databank, log })
+    Ok(PipelineReport {final_evaluations,walk_forward_studies,portfolio_combination,portfolio,backtest:backtest_result,errors,retests,builds,optimizations,discovery,robustness,databank, log })
 }
 
 /// A default demo pipeline: Build -> Retest -> Optimize.
