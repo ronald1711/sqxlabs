@@ -127,7 +127,7 @@ fn load_data_manifest(path:&std::path::Path)->Result<DataStore>{
         let quality=sqx_data::quality::audit(&bars,entry.timeframe,cutoff,calendar.as_ref());
         if !quality.errors.is_empty(){anyhow::bail!("{symbol} {}: {}",entry.timeframe,quality.errors.join("; "));}
         // Gaps remain inspectable in Data Manager; research still requires its own disclosure.
-        staged.push(sqx_data::SymbolSeries{symbol,timeframe:entry.timeframe,calendar,bars});
+        staged.push(sqx_data::SymbolSeries{symbol,timeframe:entry.timeframe,calendar,normalization:None,bars});
     }
     Ok(DataStore{series:staged})
 }

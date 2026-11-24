@@ -1,0 +1,22 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const vm=require('node:vm');
+const source=fs.readFileSync('crates/sqx-web/assets/workspace.js','utf8');
+const helpers=source.slice(source.indexOf('async function readNormalizationFiles('),source.indexOf('refreshDataInfo = async function()'));
+const context=vm.createContext({});vm.runInContext(helpers,context);
+(async()=>{
+  const read=context.readNormalizationFiles;
+  const files=['raw.csv','manifest.json','utc.csv','policy.json'].map(name=>({name,size:3,text:async()=>name+'\nexact\r\n'}));
+  assert.equal(await read([]),null);
+  const bundle=await read(files);
+  assert.equal(bundle.raw_csv,'raw.csv\nexact\r\n');assert.equal(bundle.policy_json,'policy.json\nexact\r\n');
+  await assert.rejects(read(files.slice(1)),/exactly/);
+  await assert.rejects(read([...files.slice(1),files[1]]),/exactly/);
+  await assert.rejects(read(files.map((f,i)=>i?f:{...f,name:'other.csv'})),/exactly/);
+  await assert.rejects(read(files.map((f,i)=>i?f:{...f,size:21*1024*1024})),/20 MB/);
+  await assert.rejects(read(files.map((f,i)=>i?f:{...f,text:async()=>{throw new Error('file unreadable')}})),/unreadable/);
+  assert.match(context.normalizationSummary(null),/not supplied/);
+  assert.match(context.normalizationSummary({status:'invalid',error:'mismatch'}),/Invalid.*mismatch/);
+  assert.match(context.normalizationSummary({status:'verified_transformation',verification:{bundle_id:'fixture',scope:'Not authenticated'}}),/Not authenticated/);
+  console.log('Normalization file import: exact bytes, bounded selection, read errors and limited evidence labels passed.');
+})().catch(error=>{console.error(error);process.exitCode=1;});

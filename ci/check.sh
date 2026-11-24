@@ -17,6 +17,7 @@ rustup run 1.100.0 cargo test "${cargo_args[@]}"
 rustup run 1.100.0 cargo build "${cargo_args[@]}"
 node --check crates/sqx-web/assets/workspace.js
 node ci/check-inline-js.cjs
+node crates/sqx-web/tests/normalization_import.cjs
 node crates/sqx-web/tests/backup_wire.cjs
 node crates/sqx-web/tests/search_recovery.cjs
 node crates/sqx-web/tests/generator_inputs.cjs

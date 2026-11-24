@@ -582,3 +582,33 @@ stored configuration before range arithmetic; a zero window width now fails with
 a configuration error rather than division by zero. Tests confirm rejection
 without output publication or cursor changes. All 31 Python tests pass
 (recording-range-tests.log). This is validation coverage, not a scale guarantee.
+
+## Dashboard clock-evidence import and archive binding
+
+The CSV importer accepts the four exact files from one normalization bundle
+(manifest.json, policy.json, raw.csv, utc.csv), totaling at most 20 MB in the
+browser. The submitted UTC candles must exactly match the bundle and the selected
+candle duration. Validation happens before replacing an existing dataset. A plain
+CSV replacement clears earlier normalization evidence rather than carrying it
+forward to unrelated data.
+
+Data Manager distinguishes missing evidence, invalid evidence and a verified clock
+transformation. This is not authentication of the declared broker or symbol, an
+independent check of the clock policy, or proof that market history is complete.
+The source bundle has no authenticated symbol identity.
+
+Web backtest archives retain the full bundle with the frozen candles; replay
+rechecks the transformation and candle binding even if archive hashes were
+recomputed. Backtest reports retain the verification identifier and scope.
+Other web archives using ArchivedDataset also retain this optional bundle, but
+all research routes, conversion series, restartable Data Manager persistence and
+recorder-dashboard integration are not yet covered. CLI server dataset manifests
+currently supply no normalization evidence; use the browser bundle import or the
+existing CLI backtest normalization options.
+
+Validation includes failed import atomicity (wrong candles, timeframe and policy),
+source-free backtest replay, rejection of a newly hashed archive containing
+changed candles, and clearing evidence on plain replacement. Browser checks on
+an isolated localhost server imported a synthetic two-candle bundle and visibly
+confirmed its limited verification status. The file-reader checks preserve exact
+bytes, reject missing/duplicate/oversized selections and propagate read failures.

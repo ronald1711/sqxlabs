@@ -375,6 +375,7 @@
           <span id="dm-status" class="muted"></span>
         </div>
         <details><summary>Explicit UTC trading calendar (optional)</summary><p>Use weekly sessions and date overrides for holidays or daylight-saving changes. No calendar means gaps remain unclassified. Timestamps must be UTC candle-open times in Unix seconds.</p><textarea id="dm-calendar" aria-label="UTC calendar JSON" placeholder='{"name":"My broker UTC","weekly":[{"weekday":0,"start_minute":0,"end_minute":1440}],"date_overrides":{}}'></textarea></details>
+        <details><summary>Broker-time normalization evidence (optional)</summary><p>Select all four files from one normalization folder: manifest.json, policy.json, raw.csv and utc.csv. Paste or select its utc.csv below before importing. The server checks the time conversion against the imported candles. This does not authenticate the broker, symbol or completeness of its history.</p><label for="dm-normalization">Normalization files</label><input id="dm-normalization" type="file" multiple accept=".json,.csv"><p>Clear this selection when importing a different dataset without normalization evidence.</p></details>
         <label for="dm-file">Choose a CSV file or paste its contents below</label><input type="file" id="dm-file" accept=".csv,text/csv"><pre id="csv-preview" hidden></pre><textarea id="dm-csv" placeholder="timestamp,open,high,low,close,volume&#10;1700000000,1.10,1.11,1.09,1.105,100"></textarea>
       </div>
       <div class="card" style="margin-top:18px">
@@ -1548,7 +1549,12 @@ document.getElementById("dm-import").onclick = async function() {
   const st = document.getElementById("dm-status");
   st.textContent = "Importing...";
   let calendar=null;try{const raw=document.getElementById("dm-calendar").value.trim();if(raw)calendar=JSON.parse(raw);}catch(e){st.textContent="Invalid calendar JSON: "+e.message;return;}
-  const d = await postJSON("/api/data/import", JSON.stringify({ symbol: symbol, csv: csv, timeframe:document.getElementById("dm-timeframe").value, calendar }));
+  let normalization_bundle=null;
+  try { normalization_bundle=await readNormalizationFiles(document.getElementById("dm-normalization").files); }
+  catch(e) { st.textContent=e.message;return; }
+  let d;
+  try { d = await postJSON("/api/data/import", JSON.stringify({ symbol, csv, timeframe:document.getElementById("dm-timeframe").value, calendar, normalization_bundle })); }
+  catch(e) { st.textContent="Import response unavailable: "+e.message+". Inspect the dataset before retrying.";return; }
   if (d.error) { st.textContent = d.error; return; }
   st.textContent = "Imported " + (d.bars || 0) + " bars";
   await refreshDataManager();

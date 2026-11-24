@@ -84,7 +84,7 @@ function commitVisual(render = true) {
 function markStrategySaved(saved) { savedStrategy=JSON.stringify(saved); $('draft-status').textContent=JSON.stringify(strategyModel)===savedStrategy?'Saved strategy':'Draft changed since save'; }
 function readStrategy() { if (editorView==='visual' && Array.from($('visual-editor').querySelectorAll('input[type=number]')).some(el=>!el.value || !el.checkValidity())) throw new Error('Complete the numeric fields with valid values.'); const s=JSON.parse($('strategy').value); strategyShape(s); return s; }
 function day(t) { return t ? new Date(t).toISOString().slice(0,10) : '—'; }
-function contextKey() { try { return JSON.stringify({strategy:readStrategy(),symbol:selectedSymbol(),costs:settings(),fingerprint:dataContext && dataContext.fingerprint,calendar:dataContext && dataContext.calendar || null,timeframe:dataContext && dataContext.timeframe}); } catch { return ''; } }
+function contextKey() { try { return JSON.stringify({strategy:readStrategy(),symbol:selectedSymbol(),costs:settings(),fingerprint:dataContext && dataContext.fingerprint,calendar:dataContext && dataContext.calendar || null,timeframe:dataContext && dataContext.timeframe,normalization:dataContext && dataContext.normalization}); } catch { return ''; } }
 function updateContext() {
   let costs; try { costs=settings(); } catch { announce('Correct the conversion-rate JSON before running.'); return; }
   const name=strategyModel ? strategyModel.name : 'Loading strategy';
@@ -92,13 +92,28 @@ function updateContext() {
   $('research-context').innerHTML=`<div><span>Current strategy</span><strong>${escapeHtml(name)}</strong></div><div><span>${escapeHtml(dataContext ? dataContext.symbol : "Selected dataset")} · full loaded dataset</span><strong>${escapeHtml(coverage)}</strong></div><div><span>Simulation costs</span><strong>Spread ${costs.spread} FX pips · Slippage ${costs.slippage} FX pips · Commission ${costs.commission}/lot · ${escapeHtml(costs.account.currency)} · Max leverage ${costs.account.max_leverage}:1</strong></div><button class="secondary" data-go="settings">Edit assumptions</button>`;
   if (lastRun) $('run-summary').textContent=(lastRun.key===contextKey() ? 'Latest run matches the current draft and costs. ' : 'Stale result — strategy, symbol or costs have changed. Run again. ')+lastRun.label;
 }
+async function readNormalizationFiles(files) {
+  const selected=Array.from(files || []);
+  if (!selected.length) return null;
+  const names={'manifest.json':'manifest_json','policy.json':'policy_json','raw.csv':'raw_csv','utc.csv':'utc_csv'};
+  if (selected.length!==4 || new Set(selected.map(f=>f.name)).size!==4 || selected.some(f=>!Object.hasOwn(names,f.name))) throw new Error('Select exactly manifest.json, policy.json, raw.csv and utc.csv from one normalization folder.');
+  if (selected.reduce((sum,f)=>sum+f.size,0)>20*1024*1024) throw new Error('Normalization files must total at most 20 MB for this importer.');
+  const bundle={};
+  for (const file of selected) bundle[names[file.name]]=await file.text();
+  return bundle;
+}
+function normalizationSummary(value) {
+  if (value?.status==='verified_transformation') return 'Clock transformation checked · '+value.verification.bundle_id+'\n'+value.verification.scope;
+  if (value?.status==='invalid') return 'Invalid normalization evidence: '+value.error;
+  return 'Clock evidence: not supplied. UTC timestamps are user-declared.';
+}
 refreshDataInfo = async function() {
   const symbol=selectedSymbol();
   const d=await getJSON('/api/data?symbol='+encodeURIComponent(symbol));
   if (symbol!==selectedSymbol()) return;
   dataContext=d.error ? null : d;
   const quality=d.data_quality;
-  $('data-quality-output').textContent=d.error || (quality ? ['Calendar: '+(quality.calendar || 'Not specified'), 'Bars: '+quality.bars, 'Missing open intervals: '+quality.missing_open_intervals, 'Scheduled closed intervals: '+quality.scheduled_closed_intervals, 'Unclassified intervals: '+quality.unclassified_intervals, 'Irregular steps: '+quality.irregular_steps, 'Incomplete candles: '+quality.incomplete_bars, ...quality.errors].join('\n') : 'Quality report unavailable');
+  $('data-quality-output').textContent=d.error || (quality ? [normalizationSummary(d.normalization), 'Calendar: '+(quality.calendar || 'Not specified'), 'Bars: '+quality.bars, 'Missing open intervals: '+quality.missing_open_intervals, 'Scheduled closed intervals: '+quality.scheduled_closed_intervals, 'Unclassified intervals: '+quality.unclassified_intervals, 'Irregular steps: '+quality.irregular_steps, 'Incomplete candles: '+quality.incomplete_bars, ...quality.errors].join('\n') : 'Quality report unavailable');
   $('data-info').textContent=d.error || `${d.bars.toLocaleString()} bars`;
   updateContext();
 };

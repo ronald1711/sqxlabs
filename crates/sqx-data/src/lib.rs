@@ -17,6 +17,8 @@ pub struct SymbolSeries {
     pub symbol: String,
     pub timeframe: Timeframe,
     pub calendar: Option<quality::MarketCalendar>,
+    /// Exact clock-normalization evidence, when supplied; callers must verify against bars.
+    pub normalization: Option<normalization::Bundle>,
     pub bars: Vec<Bar>,
 }
 
@@ -44,7 +46,7 @@ impl DataStore {
     /// Add or replace a series.
     pub fn add(&mut self, symbol: &str, timeframe: Timeframe, bars: Vec<Bar>) {
         self.series.retain(|s| !(s.symbol == symbol && s.timeframe == timeframe));
-        self.series.push(SymbolSeries { symbol: symbol.to_string(), timeframe, calendar: None, bars });
+        self.series.push(SymbolSeries { symbol: symbol.to_string(), timeframe, calendar: None, normalization: None, bars });
     }
 
     /// Import a CSV file as a symbol series.
