@@ -191,11 +191,51 @@ fn random_condition(rng: &mut impl Rng, catalog: &[BlockSpec], config: &Generato
 fn oscillator_level(rng: &mut impl Rng, name: &str) -> f64 {
     match name {
         "CCI" => (rng.gen_range(-150.0..150.0) as f64).round(),
-        "DeMarker" | "RSI" | "StochK" | "StochD" | "WilliamsR" => {
+        "WilliamsR" => -(rng.gen_range(20.0..80.0) as f64).round(),
+        "DeMarker" => (rng.gen_range(20.0..80.0) as f64).round() / 100.0,
+        "RSI" | "StochK" | "StochD" => {
             (rng.gen_range(20.0..80.0) as f64).round()
         }
         "AroonUp" | "AroonDown" => (rng.gen_range(20.0..80.0) as f64).round(),
         _ => 0.0,
+    }
+}
+
+#[cfg(test)]
+mod oscillator_level_tests {
+    use super::*;
+
+    #[test]
+    fn williams_levels_are_reachable_between_independent_extremes() {
+        // With HH=10 and LL=0, closes 1,9,1 give %R=-90,-10,-90.
+        // Valid interior levels must permit both crossings on this sequence.
+        let bars: Vec<_> = [1.0,9.0,1.0].into_iter().enumerate()
+            .map(|(i,c)|Bar::new(i as i64*60_000,c,10.0,0.0,c,1.0)).collect();
+        let series=sqx_backtest::compute("WilliamsR", &[Param::new("period",1.0)], &bars).unwrap();
+        assert_eq!(series,vec![-90.0,-10.0,-90.0]);
+        let mut rng=StdRng::seed_from_u64(91);
+        for _ in 0..128 {
+            let level=oscillator_level(&mut rng,"WilliamsR");
+            assert!((-80.0..=-20.0).contains(&level),"unreachable Williams threshold {level}");
+            assert!(series[0]<level && series[1]>level && series[2]<level);
+        }
+    }
+
+    #[test]
+    fn demarker_levels_use_unit_interval_not_percentages() {
+        // Alternating exclusive higher highs/lower lows make one-period
+        // DeMarker exactly 1,0,1 after the initial observation.
+        let bars: Vec<_> = [(10.0,0.0),(12.0,0.0),(12.0,-2.0),(14.0,-2.0)]
+            .into_iter().enumerate().map(|(i,(h,l))|
+                Bar::new(i as i64*60_000,5.0,h,l,5.0,1.0)).collect();
+        let series=sqx_backtest::compute("DeMarker", &[Param::new("period",1.0)], &bars).unwrap();
+        assert_eq!(&series[1..],&[1.0,0.0,1.0]);
+        let mut rng=StdRng::seed_from_u64(91);
+        for _ in 0..128 {
+            let level=oscillator_level(&mut rng,"DeMarker");
+            assert!((0.2..=0.8).contains(&level),"unreachable DeMarker threshold {level}");
+            assert!(series[1]>level && series[2]<level && series[3]>level);
+        }
     }
 }
 

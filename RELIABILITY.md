@@ -118,6 +118,22 @@ TA-Lib/MT5 seed parity, all periods, missing-value behavior, or all indicators.
 
 ## Execution contract migration
 
+### Generator threshold ranges
+
+The generator previously sampled positive 20..80 thresholds for Williams %R
+(engine range -100..0) and DeMarker (engine range 0..1). These could produce
+impossible crossings or constant comparisons. New searches use -80..-20 and
+0.2..0.8 respectively. Arithmetic fixtures exercise both crossing directions
+against the actual registry output. The Williams regression failed before repair;
+all 23 optimizer tests pass afterward, including deterministic checkpoint resume
+and independent walk-forward reference cases. This does not prove suitable
+threshold selection for all remaining catalog entries.
+
+This intentionally changes generated strategies for affected random draws.
+Existing saved strategies are not rewritten. Reproducing searches from earlier
+versions still requires their recorded exact engine; a seed alone does not imply
+cross-version identity. The earlier 437-test workspace result predates this fix.
+
 Pine StochD parameter mapping was found to change the backtested rule: the engine
 uses fixed K14 followed by SMA(period), whereas the exporter emitted K(period)
 followed by SMA3. Pine now preserves K14 and uses the rounded/defaulted smoothing
