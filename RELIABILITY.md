@@ -3861,3 +3861,21 @@ simulation, and is **not** independent signal/fill/account validation. Local
 agents were explicitly enabled and remote/cloud agents disabled. No shared
 terminal settings or broker account were changed.
 Reference: https://www.metatrader5.com/en/terminal/help/algotrading/tick_generation
+
+### Retain the engine before creating CLI evolution jobs
+
+`start-evolution` now retains the exact current executable in the selected store
+before publishing the frozen job. Previously it saved only its hash, leaving
+resume dependent on a manually preserved executable after an update. A corrupt
+existing engine object aborts creation and is never replaced. The CLI integration
+regression verifies byte equality and matching job identity, refusal without a
+published job on corruption, and subsequent generation-boundary resume in
+separate processes after the original input files are removed or changed.
+
+This covers new CLI evolution jobs only. Existing jobs cannot recover an engine
+that was never retained. JSON backups still omit executable bytes, and retaining
+a binary neither packages its runtime dependencies nor certifies strategy results.
+
+Validation: the CLI evolution integration test passed in debug and release;
+`cargo build --workspace` passed. This increment does not claim a new full
+workspace test run or a completed remote CI run.

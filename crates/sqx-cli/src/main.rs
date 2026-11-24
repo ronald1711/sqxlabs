@@ -835,7 +835,8 @@ fn main() -> Result<()> {
             let (instrument,config,mut context)=research.prepare_frozen(&bars)?;context["source"]=serde_json::json!("cli");context["seed"]=serde_json::json!(seed);
             let ga=GeneticConfig{population_size:population,generations,min_trades,..Default::default()};
             let state=sqx_optimizer::EvolutionState::new(seed,&GeneratorConfig::default(),&ga,Fitness::ProfitFactor,&bars,&instrument,&config,pyp).map_err(anyhow::Error::msg)?;
-            let engine=sqx_project::archive::content_id(&std::fs::read(std::env::current_exe()?)?);
+            let engine=sqx_project::archive::Archive::new(&store).retain_current_engine()
+                .map_err(|e|anyhow!("Research engine could not be archived: {e}"))?;
             let jobs=sqx_project::evolution::EvolutionJobs::new(store);
             let id=jobs.create_with_context(&engine,&request_key,&state,context).map_err(anyhow::Error::msg)?;
             println!("{}",serde_json::to_string(&jobs.status(&id).map_err(anyhow::Error::msg)?)?);Ok(())

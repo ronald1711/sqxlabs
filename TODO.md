@@ -78,6 +78,7 @@ remaining execution assumptions and unsupported cases are visible.
   all four jobs and both profile comparisons.
 - [x] Verify history-availability retry commit 44992ab in run 45369266431; all four platform/profile jobs and both profile comparisons passed.
 - [ ] Configure successful checks as required branch protections/ruleset checks.
+- [x] Retain exact engine bytes before creating new CLI evolution jobs; refuse creation on corrupt retained bytes and test separate-process resume.
 - [ ] Establish a versioned release/artifact retention procedure: archive replay
   requires the exact recorded executable, not merely compatible source code.
   `scripts/retain_engine.py` now provides hash-checked local byte retention;
