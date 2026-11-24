@@ -4434,6 +4434,11 @@ uses the same seed, candidate names and fitness rules. The pipeline test suite
 passes, including direct full-execution comparison for all 100 generated
 candidates (selected and rejected), and existing seed/ranking and write-failure
 checks. Legacy records are not backfilled; replay still requires their exact
-recorded engine. The real HTTP pipeline crash/portable-restore check is running.
+recorded engine. The real HTTP pipeline crash/portable-restore check passed: all 40 build
+candidates retain full executions after source/archive deletion and restore;
+the stored event prefix is unchanged and the completion identity equals an
+uninterrupted frozen-input replay. A repeat recovery appends nothing. The five
+web pipeline tests, all 24 frontend scripts and cross-workflow request-import
+conflict checks also pass. Full workspace and platform integration remain open.
 Retaining full results increases archive and memory requirements; scale limits
 remain an explicit unresolved requirement.
