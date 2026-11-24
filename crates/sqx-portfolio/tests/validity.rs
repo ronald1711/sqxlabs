@@ -136,3 +136,26 @@ fn subset_errors_are_explicit_and_invalid_inputs_never_start_trials(){
   assert_eq!(row["score"],"Unavailable");assert!(!row["errors"].as_array().unwrap().is_empty());assert!(row["net_profit"].is_null());
  }
 }
+
+#[test]
+fn explicit_composition_keeps_all_twenty_components_and_stops_on_storage_failure(){
+ let bars:Vec<_>=(0..4).map(|i|Bar::new(i*60000,1.0,1.1,0.9,1.0,1.0)).collect();
+ let names:Vec<_>=(0..20).map(|i|format!("Display {i}")).collect();let strategies:Vec<_>=(0..20).map(|i|Strategy::new(&format!("Rule {i}"))).collect();
+ let mut events=Vec::new();let config=BacktestConfig::default();let instrument=Instrument::fx("EURUSD");
+ let report=sqx_portfolio::combine_observed(&names,&strategies,&bars,&instrument,&config,252.0,&mut |event|{events.push(serde_json::to_value(event).unwrap());Ok(())}).unwrap();
+ assert!(report.errors.is_empty());assert_eq!(report.names,names);assert_eq!(report.weights,vec![0.05;20]);assert_eq!(report.components.len(),20);
+ assert!(report.components.iter().all(|row|row.result.trades.is_empty()));let combined=report.combined.unwrap();assert_eq!(combined.components.len(),20);
+ assert_eq!(combined.components.iter().map(|row|&row.name).collect::<Vec<_>>(),names.iter().collect::<Vec<_>>());assert!(combined.equity.iter().all(|row|row.1==10000.0));
+ assert_eq!(events.len(),42);assert_eq!(events[40]["kind"],"combination_started");assert_eq!(events[40]["indices"],serde_json::json!((0..20).collect::<Vec<_>>()));assert_eq!(events[41]["kind"],"combination_outcome");
+ assert!(!events.iter().any(|event|matches!(event["kind"].as_str(),Some("shortlist"|"subset"))));
+ for failure in 0..events.len(){let mut observed=Vec::new();let result=sqx_portfolio::combine_observed(&names,&strategies,&bars,&instrument,&config,252.0,&mut |event|{observed.push(serde_json::to_value(event).unwrap());if observed.len()==failure+1{Err("storage failure".into())}else{Ok(())}});assert_eq!(result.unwrap_err(),"storage failure");assert_eq!(observed,events[..=failure]);}
+}
+
+#[test]
+fn explicit_composition_preserves_failed_components_without_silently_excluding_them(){
+ let bars:Vec<_>=(0..4).map(|i|Bar::new(i*60000,1.0,1.1,0.9,1.0,1.0)).collect();let mut invalid=Strategy::new("invalid");invalid.stop_loss=Some(sqx_strategy::StopLoss::Points(-1.0));
+ let names=vec!["Invalid selection".into(),"Valid selection".into()];let mut events=Vec::new();
+ let report=sqx_portfolio::combine_observed(&names,&[invalid,Strategy::new("valid")],&bars,&Instrument::fx("EURUSD"),&BacktestConfig::default(),252.0,&mut |event|{events.push(serde_json::to_value(event).unwrap());Ok(())}).unwrap();
+ assert_eq!(report.components.len(),2);assert!(!report.components[0].errors.is_empty());assert!(report.components[1].errors.is_empty());assert!(report.combined.is_none());assert_eq!(events.len(),4);
+ let rejected=sqx_portfolio::combine_observed(&[],&[Strategy::new("a"),Strategy::new("b")],&bars,&Instrument::fx("EURUSD"),&BacktestConfig::default(),252.0,&mut |_|panic!("invalid names must fail before execution")).unwrap();assert!(!rejected.errors.is_empty());assert!(rejected.components.is_empty());
+}

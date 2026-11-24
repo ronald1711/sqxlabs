@@ -406,7 +406,12 @@ Generated dashboard portfolios also retain the full journal. The browser keeps a
 pending request identity after a lost response; retrying locates the same study,
 including after backup/restore and loss of the loaded dataset. Starting a new
 study with current settings is an explicit action and does not cancel prior work.
-Portfolios built from selected/databank strategies still need this journal.
+Selected/databank portfolios also freeze the exact chosen strategies, display
+names and equal weights. They retain every component without ranking or a
+minimum-trade filter; any invalid component prevents a combined result. The
+selection and any supplied origin metadata are retained, but supplied origin
+links are not independently verified. Both dashboard portfolio routes support
+request-identity recovery after lost responses.
 
 MCP `robustness` uses the supplied strategy as its walk-forward control and
 varies only exit distances within the same rule family. It no longer substitutes

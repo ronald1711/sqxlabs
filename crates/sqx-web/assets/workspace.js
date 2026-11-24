@@ -468,16 +468,44 @@ $('compare-selected').onclick=()=>{
   const metrics=[['Net profit','net_profit'],['Profit factor','profit_factor'],['Trades','trades'],['Drawdown %','dd_pct']];
   $('comparison').innerHTML='<div class="table-scroll"><table><thead><tr><th>Recorded metric</th>'+rows.map(r=>'<th>'+escapeHtml(r.name)+'</th>').join('')+'</tr></thead><tbody>'+metrics.map(([label,key])=>'<tr><th>'+label+'</th>'+rows.map(r=>'<td>'+fmt(r[key],key==='trades'?0:2)+'</td>').join('')+'</tr>').join('')+'<tr><th>Independent validation</th>'+rows.map(()=>'<td>Not recorded</td>').join('')+'</tr></tbody></table></div>';
 };
-$('res-portfolio').onclick=async()=>{
-  const rows=Array.from(selectedStrategies.values());
-  if(rows.length<2 || rows.length>20){announce('Select 2 to 20 strategies to build a portfolio.');return;}
-  const out=$('res-portfolio-out'),costs=settings(),symbol=selectedSymbol();out.textContent='Evaluating selected strategies with current costs…';
-  const d=await postJSON('/api/portfolio/databank',JSON.stringify(Object.assign({symbol,strategies:rows.map(r=>r.strategy)},costs)));
-  if(d.error){out.textContent=d.error;return;}
-  out.innerHTML='<h3>Equal-weight portfolio · '+escapeHtml(symbol)+'</h3><p>'+escapeHtml(d.components.join(', '))+'</p><p>Net '+fmt(d.metrics.net_profit,2)+' · Drawdown '+fmt(d.metrics.max_drawdown_pct,2)+'% · Spread '+costs.spread+' FX pips · Slippage '+costs.slippage+' FX pips · Commission '+costs.commission+'/lot</p><div id="res-portfolio-chart"></div><details><summary>Return correlation</summary><p>Undefined values mean insufficient variation or an invalid return denominator; they are not evidence of diversification.</p><div class="table-scroll"><table><tr><th>Strategy</th>'+d.components.map(n=>'<th>'+escapeHtml(n)+'</th>').join('')+'</tr>'+d.correlation.map((row,i)=>'<tr><th>'+escapeHtml(d.components[i])+'</th>'+row.map(v=>'<td>'+fmt(v,2)+'</td>').join('')+'</tr>').join('')+'</table></div></details>';
+let selectedPortfolioPending=false;
+const selectedPortfolioKey='sqx.pendingSelectedPortfolio.v1';
+$('res-portfolio-new').onclick=function(){
+  if(selectedPortfolioPending)return;
+  localStorage.removeItem(selectedPortfolioKey);this.hidden=true;
+  $('res-portfolio-out').textContent='The next build will use the current selection and settings. This does not cancel earlier work; inspect Builder → Saved research for its status.';
+};
+async function buildSelectedPortfolio(){
+  if(selectedPortfolioPending)return;
+  const out=$('res-portfolio-out'),button=$('res-portfolio'),fresh=$('res-portfolio-new');
+  selectedPortfolioPending=true;button.disabled=true;
+  try{
+    let request;const pending=localStorage.getItem(selectedPortfolioKey);
+    if(pending){request=JSON.parse(pending);if(!request||typeof request.request_key!=='string'||!Array.isArray(request.strategies))throw Error('Stored selection request is invalid. Inspect Saved research before starting a new study.');}
+    else{
+      const rows=Array.from(selectedStrategies.values()),symbol=selectedSymbol();
+      if(rows.length<2||rows.length>20)throw Error('Select 2 to 20 strategies to build a portfolio.');
+      if(!symbol)throw Error('Load and select market data before building a portfolio.');
+      request=Object.assign({symbol,strategies:rows.map(row=>row.strategy),selection_context:rows,request_key:crypto.randomUUID()},settings());
+      localStorage.setItem(selectedPortfolioKey,JSON.stringify(request));
+    }
+    const costs=request;fresh.hidden=false;out.textContent=pending?'Retrying the saved selection and costs…':'Evaluating and saving the selected strategies…';
+    let d;try{d=await postJSON('/api/portfolio/databank',JSON.stringify(request));}catch(error){out.textContent='The response could not be received. Retry to locate the same selection, or inspect Builder → Saved research before starting another study.';return;}
+    const id=d.archive&&d.archive.started_run_id;
+    const saved=id?'<p>Saved portfolio study: '+escapeHtml(id)+'. Open Builder → Saved research to inspect, back up or resume. Repeatability does not establish independent correctness.</p>':'';
+    if(id){localStorage.removeItem(selectedPortfolioKey);fresh.hidden=true;}
+    if(d.recovery_required){out.innerHTML=saved+'<p>'+escapeHtml(d.message||'This study already exists.')+'</p>';return;}
+    if(d.error){out.innerHTML=saved+'<p>'+escapeHtml(d.error)+'</p>';return;}
+    const symbol=d.symbol||'Selected market';
+  out.innerHTML=saved+'<h3>Equal-weight portfolio · '+escapeHtml(symbol)+'</h3><p>'+escapeHtml(d.components.join(', '))+'</p><p>Net '+fmt(d.metrics.net_profit,2)+' · Drawdown '+fmt(d.metrics.max_drawdown_pct,2)+'% · Spread '+costs.spread+' FX pips · Slippage '+costs.slippage+' FX pips · Commission '+costs.commission+'/lot</p><div id="res-portfolio-chart"></div><details><summary>Return correlation</summary><p>Undefined values mean insufficient variation or an invalid return denominator; they are not evidence of diversification.</p><div class="table-scroll"><table><tr><th>Strategy</th>'+d.components.map(n=>'<th>'+escapeHtml(n)+'</th>').join('')+'</tr>'+d.correlation.map((row,i)=>'<tr><th>'+escapeHtml(d.components[i])+'</th>'+row.map(v=>'<td>'+fmt(v,2)+'</td>').join('')+'</tr>').join('')+'</table></div></details>';
+  if(d.no_trade_components&&d.no_trade_components.length)out.innerHTML+='<p>No trades in this period for: '+escapeHtml(d.no_trade_components.join(', '))+'. These components remain included at their assigned weights.</p>';
   const notice=document.createElement('p');notice.textContent=researchNotice(d.research_context);out.prepend(notice);
   drawChart(d.equity,'res-portfolio-chart');
-};
+
+  }catch(error){out.textContent=error.message||String(error);fresh.hidden=false;}
+  finally{selectedPortfolioPending=false;button.disabled=false;}
+}
+$('res-portfolio').onclick=buildSelectedPortfolio;
 
 
 async function refreshResearchRuns() {

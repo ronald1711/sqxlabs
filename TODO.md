@@ -302,3 +302,15 @@ See [README.md](README.md) for operation and [ci/README.md](ci/README.md) for ch
   is included in CI. Rendered browser review and process-kill coverage of this
   HTTP route remain open. Selected/databank portfolio composition is still not
   journaled and must preserve the explicit selection when migrated.
+
+- [x] Journal explicit selected/databank portfolio compositions separately from
+  candidate search. Keep 2..20 chosen components and display names at equal
+  weights, without ranking or excluding zero-trade components; show those
+  components in the response/UI. Invalid components remain evidence and prevent
+  combination. Tests cover twenty-component preservation, every write boundary,
+  exact backup/replay without live data or databank, alias/source-row retention,
+  workflow labels and immutable retry settings after browser selection changes.
+  Supplied origin links remain unverified. A rendered browser fixture confirms
+  selected components, saved-study identity, market-name display and zero-trade
+  disclosure. HTTP process-kill, broader browser recovery and power-loss coverage
+  remain open.

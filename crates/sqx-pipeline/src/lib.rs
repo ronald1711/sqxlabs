@@ -14,6 +14,7 @@ use sqx_strategy::Strategy;
 /// One pipeline step.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TaskKind {
+    PortfolioCombination { names:Vec<String>, strategies:Vec<Strategy> },
     Portfolio { strategies:Vec<Strategy>, selection:sqx_portfolio::SearchConfig },
     Backtest { strategy: Strategy },
     Build { count: usize, keep: usize },
@@ -47,6 +48,8 @@ pub struct Pipeline {
 /// The outcome of running a pipeline.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PipelineReport {
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub portfolio_combination: Option<sqx_portfolio::CombinationReport>,
     #[serde(skip_serializing_if="Option::is_none")]
     pub portfolio: Option<sqx_portfolio::SearchReport>,
     #[serde(skip_serializing_if="Option::is_none")]
@@ -119,6 +122,7 @@ pub fn run(
 #[derive(Debug,serde::Serialize)]
 #[serde(tag="kind",rename_all="snake_case")]
 pub enum PipelineEvent<'a> {
+    PortfolioCombination { step:usize, event:sqx_portfolio::SearchEvent<'a> },
     Portfolio { step:usize, event:sqx_portfolio::SearchEvent<'a> },
     BacktestStarted { step:usize, strategy:&'a Strategy },
     BacktestOutcome { step:usize, result:&'a sqx_backtest::BacktestResult },
@@ -147,7 +151,7 @@ pub fn run_observed(
     observer:&mut impl FnMut(PipelineEvent<'_>)->Result<(),String>,
 )->Result<PipelineReport,String> {
     let failure=|error:String| Ok(PipelineReport{errors:vec![error],..Default::default()});
-    if pipeline.tasks.iter().any(|t|matches!(t.kind,TaskKind::Portfolio{..})) && pipeline.tasks.len()!=1{
+    if pipeline.tasks.iter().any(|t|matches!(t.kind,TaskKind::Portfolio{..}|TaskKind::PortfolioCombination{..})) && pipeline.tasks.len()!=1{
         return failure("Portfolio studies must be standalone; they do not populate a strategy databank".into());
     }
     if pipeline.tasks.iter().any(|t|matches!(t.kind,TaskKind::Backtest{..})) && pipeline.tasks.len()!=1 {
@@ -171,7 +175,7 @@ pub fn run_observed(
             _=>{}
         }
     }
-    let mut retests=Vec::new();let mut builds=Vec::new();let mut optimizations=Vec::new();let mut errors=Vec::new();let mut discovery=None;let mut robustness=None;let mut backtest_result=None;let mut portfolio=None;
+    let mut retests=Vec::new();let mut builds=Vec::new();let mut optimizations=Vec::new();let mut errors=Vec::new();let mut discovery=None;let mut robustness=None;let mut backtest_result=None;let mut portfolio=None;let mut portfolio_combination=None;
     let mut rng = StdRng::seed_from_u64(seed);
     let mut databank: Vec<Strategy> = Vec::new();
     let mut log = Vec::new();
@@ -181,6 +185,10 @@ pub fn run_observed(
         steps += 1;
         observer(PipelineEvent::StepStarted{step:steps,task_index:pc,task:&pipeline.tasks[pc],inputs:&databank})?;
         match &pipeline.tasks[pc].kind {
+            TaskKind::PortfolioCombination{names,strategies}=>{
+                let report=sqx_portfolio::combine_observed(names,strategies,bars,instrument,config,periods_per_year,&mut |event|observer(PipelineEvent::PortfolioCombination{step:steps,event}))?;
+                errors.extend(report.errors.iter().cloned());portfolio_combination=Some(report);pc+=1;
+            },
             TaskKind::Portfolio{strategies,selection}=>{
                 let report=sqx_portfolio::search_observed(strategies,bars,instrument,config,periods_per_year,selection,&mut |event|observer(PipelineEvent::Portfolio{step:steps,event}))?;
                 errors.extend(report.errors.iter().cloned());portfolio=Some(report);pc+=1;
@@ -312,7 +320,7 @@ pub fn run_observed(
     }
     log.push(format!("Pipeline {} after {} steps; {} strategies in databank",if pc<pipeline.tasks.len(){"stopped at its limit"}else{"finished"}, steps, databank.len()));
     if pc<pipeline.tasks.len(){errors.push("Pipeline step limit reached before completion".into());}
-    Ok(PipelineReport {portfolio,backtest:backtest_result,errors,retests,builds,optimizations,discovery,robustness,databank, log })
+    Ok(PipelineReport {portfolio_combination,portfolio,backtest:backtest_result,errors,retests,builds,optimizations,discovery,robustness,databank, log })
 }
 
 /// A default demo pipeline: Build -> Retest -> Optimize.

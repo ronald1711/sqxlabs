@@ -905,6 +905,7 @@ mod tests {
         let mut request=serde_json::to_value(invalid).unwrap();request["symbol"]=json!("EURUSD");
         let result:serde_json::Value=serde_json::from_str(&analyze_json(&request.to_string(),&state)).unwrap();
         assert!(result["error"].is_string());assert!(result.get("markdown").is_none());
+        std::fs::remove_dir_all(state.archive.root()).unwrap();
     }
 
     #[test]
@@ -941,6 +942,32 @@ mod tests {
         assert_eq!(response["research_context"]["config"]["commission_per_lot"],7.0);
         let response: serde_json::Value = serde_json::from_str(&portfolio_databank_json(r#"{"symbol":"EURUSD","strategies":[]}"#, &state)).unwrap();
         assert!(response["error"].is_string());
+        std::fs::remove_dir_all(state.archive.root()).unwrap();
+    }
+
+    #[test]
+    fn selected_portfolio_keeps_twenty_components_and_recovers_without_databank_or_data(){
+        let state=research_state();state.store.write().unwrap().series[0].bars=(0..20).map(|i|Bar::new(i*60000,1.1,1.1,1.1,1.1,1.0)).collect();
+        let strategies:Vec<_>=(0..20).map(|i|Strategy::new(&format!("Selected {i}"))).collect();
+        let request=json!({"symbol":"EURUSD","strategies":strategies,"request_key":"selected-portfolio-1","allow_data_gaps":true});
+        let response:serde_json::Value=serde_json::from_str(&portfolio_databank_json(&request.to_string(),&state)).unwrap();assert!(response.get("error").is_none(),"{response}");assert_eq!(response["components"].as_array().unwrap().len(),20);assert_eq!(response["no_trade_components"].as_array().unwrap().len(),20);
+        let id=response["archive"]["started_run_id"].as_str().unwrap();let done=state.archive.load(response["archive"]["run_id"].as_str().unwrap()).unwrap();let study=&done.run.result["report"]["portfolio_combination"];
+        assert_eq!(study["components"].as_array().unwrap().len(),20);assert_eq!(study["weights"],json!(vec![0.05;20]));assert!(done.run.result["report"].get("portfolio").is_none());
+        let backup=sqx_project::pipeline_archive::export(&state.archive,id).unwrap();let restored=research_state();restored.store.write().unwrap().series.clear();sqx_project::pipeline_archive::import(&restored.archive,backup).unwrap();std::fs::remove_dir_all(state.archive.root()).unwrap();
+        let repeated:serde_json::Value=serde_json::from_str(&portfolio_databank_json(&request.to_string(),&restored)).unwrap();assert_eq!(repeated["recovery_required"],true);assert_eq!(repeated["archive"]["started_run_id"],id);
+        let replay=sqx_project::pipeline_archive::recover(&restored.archive,id,true).unwrap();assert_eq!(replay.completion_id,done.run_id);assert_eq!(json!(replay.report),done.run.result["report"]);
+        let listing:serde_json::Value=serde_json::from_str(&research_list_json(&restored)).unwrap();assert!(listing["runs"].as_array().unwrap().iter().all(|row|row["workflow_kind"]=="portfolio"));
+        std::fs::remove_dir_all(restored.archive.root()).unwrap();
+    }
+
+    #[test]
+    fn databank_composition_freezes_display_names_and_selection_rows(){
+        let state=research_state();let rows=json!([{"name":"Alias A","strategy":Strategy::new("Rules A"),"source_run_id":"declared-unverified-origin"},{"name":"Alias B","strategy":Strategy::new("Rules B")}]);
+        *state.databank.write().unwrap()=rows.as_array().unwrap().clone();
+        let response:serde_json::Value=serde_json::from_str(&portfolio_databank_json(&json!({"symbol":"EURUSD","top":2,"allow_data_gaps":true}).to_string(),&state)).unwrap();assert!(response.get("error").is_none(),"{response}");assert_eq!(response["components"],json!(["Alias A","Alias B"]));
+        let start=state.archive.load(response["archive"]["started_run_id"].as_str().unwrap()).unwrap();assert_eq!(start.dataset["source_context"]["databank_rows"],rows);assert_eq!(start.dataset["source_context"]["selection_origin"],"databank_order");
+        assert_eq!(start.strategy["pipeline"]["tasks"][0]["kind"]["PortfolioCombination"]["strategies"][0]["name"],"Rules A");
+        std::fs::remove_dir_all(state.archive.root()).unwrap();
     }
 
     #[test]
@@ -1242,6 +1269,8 @@ fn portfolio_databank_json(body: &str, state: &State) -> String {
         Ok(v) => v,
         Err(e) => return json!({ "error": format!("{e}") }).to_string(),
     };
+    let (creation_guard,existing)=match reserve_web_research_request("web_portfolio_combination",&val,state){Ok(result)=>result,Err(error)=>return json!({"error":error}).to_string()};
+    if let Some(id)=existing{return json!({"recovery_required":true,"message":"This selection already has a saved portfolio study. Inspect Saved research before retrying.","archive":{"started_run_id":id}}).to_string();}
     let symbol = val.get("symbol").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let series = match find_series(state, &symbol) {
         Some(s) => s,
@@ -1252,10 +1281,10 @@ fn portfolio_databank_json(body: &str, state: &State) -> String {
     let pyp = pyp_for(&series.bars);
     let cfg = match config_for_series(&val,&series){Ok(config)=>config,Err(error)=>return json!({"error":error}).to_string()};
     if let Err(error)=sqx_backtest::validate_backtest_inputs(&series.bars,&inst,&cfg){return json!({"error":error}).to_string();}
-    let research_context=json!({"data_quality":quality,"config":cfg,"data_gaps_acknowledged":val.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false),"scope":"Exploratory analysis; portfolio combinations are weighted independent simulations, not shared-account execution or independent validation."});
+    let mut research_context=json!({"data_quality":quality,"config":cfg,"data_gaps_acknowledged":val.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false),"scope":"Exploratory analysis; portfolio combinations are weighted independent simulations, not shared-account execution or independent validation."});
     let top = val.get("top").and_then(|v| v.as_u64()).unwrap_or(5).clamp(2, 20) as usize;
     let rows = state.databank.read().unwrap().clone();
-    let mut strategies: Vec<(String, Strategy)> = Vec::new();
+    let mut strategies: Vec<(String, Strategy)> = Vec::new();let mut selected_rows=Vec::new();
     if let Some(selected) = val.get("strategies") {
         match serde_json::from_value::<Vec<Strategy>>(selected.clone()) {
             Ok(selected) if (2..=20).contains(&selected.len()) => {
@@ -1267,7 +1296,7 @@ fn portfolio_databank_json(body: &str, state: &State) -> String {
         for r in rows.iter() {
             let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
             if let Ok(s) = serde_json::from_value::<Strategy>(r.get("strategy").cloned().unwrap_or(json!({}))) {
-                strategies.push((name, s));
+                selected_rows.push(r.clone());strategies.push((name, s));
             }
             if strategies.len() >= top {
                 break;
@@ -1278,17 +1307,25 @@ fn portfolio_databank_json(body: &str, state: &State) -> String {
         return json!({ "error": "need at least 2 databank strategies" }).to_string();
     }
     let names: Vec<String> = strategies.iter().map(|(n, _)| n.clone()).collect();
-    let results: Vec<BacktestResult> = strategies
-        .iter()
-        .map(|(_, s)| backtest(s, &series.bars, &inst, &cfg))
-        .collect();
-    let failures:Vec<_>=results.iter().enumerate().filter(|(_,run)|!run.errors.is_empty()).map(|(index,run)|json!({"strategy":names[index],"errors":run.errors})).collect();
-    if !failures.is_empty(){return json!({"error":"Portfolio contains invalid component simulations","components":failures}).to_string();}
-    let k = strategies.len();
-    let weights = vec![1.0 / k as f64; k];
-    let pf = sqx_portfolio::combine(&names, &results, &weights, cfg.initial_deposit, series.bars.len(), pyp);
-    if !pf.errors.is_empty(){return json!({"error":pf.errors.join("; ")}).to_string();}
+    research_context["selection_origin"]=json!(if val.get("strategies").is_some(){"explicit_client_selection"}else{"databank_order"});
+    research_context["databank_rows"]=json!(selected_rows);
+    let pipeline=sqx_pipeline::Pipeline{name:"Selected portfolio composition".into(),tasks:vec![sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::PortfolioCombination{
+        names:names.clone(),strategies:strategies.into_iter().map(|(_,strategy)|strategy).collect(),
+    }}]};
+    let request=json!({"research_kind":"cli_pipeline_started","origin":"web_portfolio_combination","attempt_id":format!("{:032x}",rand::random::<u128>()),"web_request":val,"config":cfg,"seed":0,"periods_per_year":pyp});
+    let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,"normalization":series.normalization,"bars":series.bars,"source_context":research_context});
+    let specification=json!({"pipeline":pipeline,"generator":GeneratorConfig::default()});
+    let started=match retained_engine_identity(state).and_then(|engine|state.archive.save(engine,dataset,specification,request,json!({"status":"execution_not_recorded"}))){Ok(id)=>id,Err(error)=>return json!({"error":format!("Portfolio composition could not be archived: {error}")}).to_string()};
+    drop(creation_guard);
+    let recovered=match sqx_project::pipeline_archive::recover(&state.archive,&started,true){Ok(result)=>result,Err(error)=>return json!({"error":format!("Portfolio composition stopped: {error}. Inspect Saved research before retrying."),"archive":{"started_run_id":started}}).to_string()};
+    let receipt=json!({"started_run_id":started,"run_id":recovered.completion_id});
+    let study=match recovered.report.portfolio_combination{Some(study)=>study,None=>return json!({"error":recovered.report.errors.join("; "),"archive":receipt}).to_string()};
+    if !study.errors.is_empty(){let failures:Vec<_>=study.components.iter().enumerate().filter(|(_,row)|!row.errors.is_empty()).map(|(index,row)|json!({"strategy":names[index],"errors":row.errors})).collect();return json!({"error":format!("Portfolio contains invalid component simulations: {}",study.errors.join("; ")),"components":failures,"archive":receipt,"research_context":research_context}).to_string();}
+    let no_trade_components:Vec<_>=study.components.iter().enumerate().filter(|(_,row)|row.result.trades.is_empty()).map(|(i,_)|names[i].clone()).collect();
+    let pf=match study.combined{Some(pf)=>pf,None=>return json!({"error":"Portfolio composition has no combined result","archive":receipt}).to_string()};
     json!({
+        "archive":receipt,
+        "no_trade_components":no_trade_components,
         "research_context":research_context,
         "account_currency":pf.account_currency,
         "symbol": series.symbol,
@@ -1843,7 +1880,7 @@ fn research_data_quality(series:&SymbolSeries, request:&serde_json::Value, as_of
 fn research_restore_json(body:&str,state:&State)->String {
     let result=(||->Result<String,String>{
         let bundle:sqx_project::archive::ResearchBundle=serde_json::from_str(body).map_err(|e|e.to_string())?;
-        let _request_guard=if bundle.run.request["research_kind"]=="cli_pipeline_started" && matches!(bundle.run.request["origin"].as_str(),Some("web_robustness"|"web_portfolio")) {
+        let _request_guard=if bundle.run.request["research_kind"]=="cli_pipeline_started" && matches!(bundle.run.request["origin"].as_str(),Some("web_robustness"|"web_portfolio"|"web_portfolio_combination")) {
             let (guard,existing)=reserve_web_research_request(bundle.run.request["origin"].as_str().unwrap(),&bundle.run.request["web_request"],state)?;
             if existing.is_some_and(|id|id!=bundle.run_id){return Err("Restored stress-test request key conflicts with an existing study".into());}
             guard
@@ -1865,7 +1902,7 @@ fn reserve_web_research_request(origin:&str,value:&serde_json::Value,state:&Stat
     let mut existing=None;
     for id in state.archive.list()? {
         let record=state.archive.load(&id)?;
-        if record.run.request["research_kind"]=="cli_pipeline_started" && matches!(record.run.request["origin"].as_str(),Some("web_robustness"|"web_portfolio")) && record.run.request["web_request"]["request_key"]==key {
+        if record.run.request["research_kind"]=="cli_pipeline_started" && matches!(record.run.request["origin"].as_str(),Some("web_robustness"|"web_portfolio"|"web_portfolio_combination")) && record.run.request["web_request"]["request_key"]==key {
             if record.run.request["origin"]!=origin || record.run.request["web_request"]!=*value{return Err("Research request key already belongs to different inputs or workflow".into());}
             if existing.replace(id).is_some(){return Err("Conflicting studies share this stress-test request key".into());}
         }
@@ -2283,7 +2320,7 @@ fn research_list_json(state:&State)->String{
             let tasks=bundle.strategy["pipeline"]["tasks"].as_array();
             let workflow_kind=if pipeline {
                 match tasks.filter(|tasks|tasks.len()==1).and_then(|tasks|tasks.first()).map(|task|&task["kind"]) {
-                    Some(task) if task.get("Portfolio").is_some()=>"portfolio",
+                    Some(task) if task.get("Portfolio").is_some() || task.get("PortfolioCombination").is_some()=>"portfolio",
                     Some(task) if task.get("Backtest").is_some()=>"backtest",
                     Some(task) if task.get("Generate").is_some()=>"generation",
                     Some(task) if task.get("DiscoverWalkForward").is_some()=>"walk_forward",
