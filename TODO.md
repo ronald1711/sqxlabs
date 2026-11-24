@@ -264,3 +264,10 @@ See [README.md](README.md) for operation and [ci/README.md](ci/README.md) for ch
   Checkpoint-only and completed backups recover without source files; failed
   calculations stay invalid. This route reruns a single backtest from the start.
   MCP portfolio trial accounting and other remaining routes are still open.
+
+- [x] Expose ordered portfolio-subset start/outcome checkpoints, explicit finite
+  and zero-drawdown score conventions, and failed-combination diagnostics.
+  Hand-calculated pair scores and every observer failure boundary are tested.
+  Nonfinite aggregate equity or subset arithmetic cannot select a portfolio.
+  These library checkpoints still need wiring into durable portfolio entry points;
+  this does not close the portfolio trial-accounting requirement.

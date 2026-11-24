@@ -10,7 +10,7 @@ use sqx_metrics::{compute, Metrics};
 use sqx_strategy::Strategy;
 
 /// One component of a portfolio.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ComponentInfo {
     pub name: String,
     pub weight: f64,
@@ -21,7 +21,7 @@ pub struct ComponentInfo {
 }
 
 /// The combined portfolio result.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct PortfolioResult {
     pub account_currency: Option<String>,
     pub errors: Vec<String>,
@@ -97,6 +97,7 @@ pub fn combine(
         for j in 0..n {
             val += weights[j] * (results[j].equity[i].1 - initial);
         }
+        if !val.is_finite(){return invalid_portfolio(format!("Combined equity is nonfinite at sample {i}"),initial,bar_count,periods_per_year);}
         equity.push((t, val));
     }
 
@@ -155,26 +156,61 @@ pub fn combine(
     PortfolioResult { account_currency:results[0].execution.account_currency.clone(),errors:Vec::new(), metrics, equity, correlation, components }
 }
 
+/// Serializable score conventions: zero-drawdown cases are explicit, not JSON null.
+#[derive(Debug,Clone,PartialEq,serde::Serialize)]
+pub enum SubsetScore { Ratio(f64), PositiveNoDrawdown, NonpositiveNoDrawdown, Unavailable }
+
+#[derive(Debug,Clone,serde::Serialize)]
+pub struct SubsetSearchReport {
+    pub selected:Vec<usize>,
+    pub considered_components:usize,
+    pub attempted:usize,
+    pub invalid:usize,
+    pub errors:Vec<String>,
+}
+
+#[derive(Debug,serde::Serialize)]
+#[serde(tag="kind",rename_all="snake_case")]
+pub enum SubsetEvent<'a>{
+    Started{index:usize,components:&'a [usize]},
+    Outcome{index:usize,components:&'a [usize],net_profit:Option<f64>,max_drawdown:Option<f64>,score:SubsetScore,errors:&'a [String]},
+}
+
 /// Search for the subset (size min_k..=max_k) with the best return/drawdown.
 /// Only the first 12 results are considered to bound the search.
-pub fn best_subset(results: &[BacktestResult], min_k: usize, max_k: usize, initial: f64) -> Vec<usize> {
-    let n = results.len().min(12);
-    if n == 0 || min_k==0 || min_k>max_k || min_k>n || validate_components(results,initial).is_err() { return Vec::new(); }
-    let max_k = max_k.min(n);
-    let mut best_score = f64::NEG_INFINITY;
-    let mut best: Vec<usize> = Vec::new();
-    for k in min_k..=max_k {
-        for combo in gen_combos(n, k) {
-            let w = 1.0 / combo.len() as f64;
-            let (np, dd) = combo_stats(results, &combo, w, initial);
-            let score = if dd > 0.0 { np / dd } else if np > 0.0 { f64::INFINITY } else { f64::NEG_INFINITY };
-            if best.is_empty() || score > best_score {
-                best_score = score;
-                best = combo;
-            }
+pub fn best_subset(results:&[BacktestResult],min_k:usize,max_k:usize,initial:f64)->Vec<usize>{
+    best_subset_observed(results,min_k,max_k,initial,&mut |_|Ok(())).expect("infallible subset observer").selected
+}
+
+/// Freeze each ordered subset before calculation and report its outcome before
+/// selecting a winner. A failed observer stops the search immediately.
+pub fn best_subset_observed(results:&[BacktestResult],min_k:usize,max_k:usize,initial:f64,
+    observer:&mut impl FnMut(SubsetEvent<'_>)->Result<(),String>)->Result<SubsetSearchReport,String>{
+    let n=results.len().min(12);
+    let mut report=SubsetSearchReport{selected:Vec::new(),considered_components:n,attempted:0,invalid:0,errors:Vec::new()};
+    if n==0 || min_k==0 || min_k>max_k || min_k>n{
+        report.errors.push("Subset sizes require 1 <= minimum <= maximum and enough considered components".into());return Ok(report);
+    }
+    if let Err(error)=validate_components(results,initial){report.errors.push(error);return Ok(report);}
+    let mut best_score=f64::NEG_INFINITY;
+    for k in min_k..=max_k.min(n){
+        for combo in gen_combos(n,k){
+            let index=report.attempted;observer(SubsetEvent::Started{index,components:&combo})?;
+            let (np,dd)=combo_stats(results,&combo,1.0/combo.len() as f64,initial);
+            let mut errors=Vec::new();
+            let score=if !np.is_finite() || !dd.is_finite() || dd<0.0 || (dd>0.0 && !(np/dd).is_finite()){
+                errors.push(format!("Subset {index} has nonfinite profit, drawdown or ratio"));SubsetScore::Unavailable
+            }else if dd>0.0{SubsetScore::Ratio(np/dd)}else if np>0.0{SubsetScore::PositiveNoDrawdown}else{SubsetScore::NonpositiveNoDrawdown};
+            observer(SubsetEvent::Outcome{index,components:&combo,net_profit:np.is_finite().then_some(np),max_drawdown:dd.is_finite().then_some(dd),score:score.clone(),errors:&errors})?;
+            report.attempted+=1;
+            if !errors.is_empty(){report.invalid+=1;report.errors.extend(errors);continue;}
+            let rank=match score{SubsetScore::Ratio(value)=>value,SubsetScore::PositiveNoDrawdown=>f64::INFINITY,SubsetScore::NonpositiveNoDrawdown=>f64::NEG_INFINITY,SubsetScore::Unavailable=>unreachable!()};
+            if report.selected.is_empty() || rank>best_score{best_score=rank;report.selected=combo;}
         }
     }
-    best
+    // Never silently select around an invalid combination.
+    if !report.errors.is_empty(){report.selected.clear();}
+    Ok(report)
 }
 
 fn combo_stats(results: &[BacktestResult], combo: &[usize], w: f64, initial: f64) -> (f64, f64) {
@@ -187,6 +223,7 @@ fn combo_stats(results: &[BacktestResult], combo: &[usize], w: f64, initial: f64
         for &j in combo {
             val += w * (results[j].equity[i].1 - initial);
         }
+        if !val.is_finite(){return (f64::NAN,f64::NAN);}
         if val > peak { peak = val; }
         let dd = peak - val;
         if dd > max_dd { max_dd = dd; }
