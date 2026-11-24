@@ -1,5 +1,30 @@
-use std::{fs,io::{Read,Write},net::TcpListener,process::Command,time::{Duration,Instant}};
+use std::{fs,io::{Read,Write},net::{TcpListener,TcpStream},process::Command,time::{Duration,Instant}};
 use serde_json::{json,Value};
+
+// Accepted sockets may retain nonblocking mode. A read timeout does not turn a
+// nonblocking socket into a blocking one; fragmented curl requests must wait.
+fn fixture_stream(stream:TcpStream)->TcpStream {
+    stream.set_nonblocking(false).unwrap();
+    stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    stream.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+    stream
+}
+#[test]
+fn provider_fixture_waits_for_fragmented_request_bytes(){
+    let listener=TcpListener::bind("127.0.0.1:0").unwrap();
+    let address=listener.local_addr().unwrap();
+    let (ready_tx,ready_rx)=std::sync::mpsc::channel();
+    let sender=std::thread::spawn(move||{
+        let mut client=TcpStream::connect(address).unwrap();client.write_all(b"first").unwrap();
+        ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        std::thread::sleep(Duration::from_millis(100));client.write_all(b"last").unwrap();
+    });
+    let (stream,_)=listener.accept().unwrap();
+    stream.set_nonblocking(true).unwrap(); // exercise the formerly failing mode on every OS
+    let mut stream=fixture_stream(stream);let mut first=[0;5];stream.read_exact(&mut first).unwrap();
+    ready_tx.send(()).unwrap();let mut last=[0;4];stream.read_exact(&mut last).unwrap();
+    assert_eq!(&first,b"first");assert_eq!(&last,b"last");sender.join().unwrap();
+}
 
 #[test]
 fn assistant_archives_candidates_after_success_and_provider_failure_and_reports_storage_failure(){
@@ -14,8 +39,8 @@ fn assistant_archives_candidates_after_success_and_provider_failure_and_reports_
             let mut requests=Vec::new();
             for round in 0..if storage_ok {3}else{1} {
                 let deadline=Instant::now()+Duration::from_secs(15);
-                let mut stream=loop {match listener.accept(){Ok((s,_))=>break s,Err(e) if e.kind()==std::io::ErrorKind::WouldBlock=>{assert!(Instant::now()<deadline,"provider request missing");std::thread::sleep(Duration::from_millis(10));},Err(e)=>panic!("{e}")}};
-                stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let stream=loop {match listener.accept(){Ok((s,_))=>break s,Err(e) if e.kind()==std::io::ErrorKind::WouldBlock=>{assert!(Instant::now()<deadline,"provider request missing");std::thread::sleep(Duration::from_millis(10));},Err(e)=>panic!("{e}")}};
+                let mut stream=fixture_stream(stream);
                 let mut bytes=Vec::new();let mut buf=[0;4096];
                 let body=loop {
                     let n=stream.read(&mut buf).unwrap();assert!(n>0);bytes.extend_from_slice(&buf[..n]);
@@ -94,8 +119,8 @@ fn assistant_trials_survive_process_kill_before_session_return() {
         .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap());
     for round in 0..2 {
         let deadline=Instant::now()+Duration::from_secs(30);
-        let mut stream=loop {match listener.accept(){Ok((s,_))=>break s,Err(e) if e.kind()==std::io::ErrorKind::WouldBlock=>{assert!(Instant::now()<deadline,"provider request missing");assert!(child.0.try_wait().unwrap().is_none());std::thread::sleep(Duration::from_millis(10));},Err(e)=>panic!("{e}")}};
-        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let stream=loop {match listener.accept(){Ok((s,_))=>break s,Err(e) if e.kind()==std::io::ErrorKind::WouldBlock=>{assert!(Instant::now()<deadline,"provider request missing");assert!(child.0.try_wait().unwrap().is_none());std::thread::sleep(Duration::from_millis(10));},Err(e)=>panic!("{e}")}};
+        let mut stream=fixture_stream(stream);
         let mut bytes=Vec::new();let mut buf=[0;4096];
         loop {
             let n=stream.read(&mut buf).unwrap();assert!(n>0);bytes.extend_from_slice(&buf[..n]);
