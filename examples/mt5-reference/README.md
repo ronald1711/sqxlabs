@@ -13,11 +13,16 @@ boundary. Missing the entry interval fails the case. `ShortSide` selects the sid
 No stop, target, indicator, conversion policy or financing assumption is implicit
 in this reference source.
 
-Structured `SQX_REFERENCE_*` journal lines expose requested quote/time, actual
-execution response, completion and final balance/equity. Completion means only
-that the reference program observed its intended two successful order responses
-and no remaining position. It does not assert parity with SqxLabs. Preserve the
-full MT5 report and history, not merely the completion line.
+Structured `SQX_REFERENCE_*` journal lines expose account/instrument properties,
+requested quote/time, actual execution response, every final history deal and
+its profit, commission, swap and fee. Final history is read directly rather than
+assuming transaction callbacks arrive in request order. Completion additionally
+requires exactly two market deals of the intended sides, volume, symbol and
+magic, one entry and exit for the same position, no remaining position, and
+balance change reconciled against their net amounts within 0.000001 account
+currency units. Other cash adjustments cannot silently pass that reconciliation.
+This internal consistency check does not assert parity with SqxLabs. Preserve
+the full MT5 report and history, not merely the completion line.
 
 Current evidence: the installed MetaEditor build 6328 compiled this source with
 zero errors and warnings in a separate Wine prefix. **No market-mode execution or
