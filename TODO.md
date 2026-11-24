@@ -252,3 +252,9 @@ See [README.md](README.md) for operation and [ci/README.md](ci/README.md) for ch
   Missing, corrupted and correctly hashed but invalid JSON inputs still fail.
   This removes repeated input parsing within a listing; full recovery, payload
   loading, large-backup memory and power-loss limits remain open.
+
+- [x] Distinguish empty, loading, unavailable and loaded dataset coverage in the
+  dashboard; provide a direct Data route when no market data is loaded.
+  Reject empty-data stress requests before submission and ignore stale asynchronous
+  coverage responses, including A/B/A selection changes. Browser checks cover the
+  empty state and import navigation; simulated delayed/failing responses cover races.

@@ -1,0 +1,23 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync('crates/sqx-web/assets/workspace.js','utf8');
+const elements=Object.fromEntries(['research-context','data-info','data-quality-output'].map(id=>[id,{}]));
+let symbol='',calls=0;const pending=[];
+const context=vm.createContext({$:id=>elements[id],selectedSymbol:()=>symbol,settings:()=>({spread:0,slippage:0,commission:0,account:{currency:'USD',max_leverage:30}}),escapeHtml:s=>String(s).replaceAll('<','&lt;'),day:()=> 'date',normalizationSummary:()=> 'not supplied',announce:()=>{},getJSON:()=>{calls++;return new Promise((resolve,reject)=>pending.push({resolve,reject}));}});
+vm.runInContext("let dataContext=null,dataContextError='',dataContextRequest=0,strategyModel={name:'fixture'},lastRun=null;",context);
+vm.runInContext(source.slice(source.indexOf('function updateContext()'),source.indexOf('async function readNormalizationFiles')),context);
+vm.runInContext(source.slice(source.indexOf('refreshDataInfo = async function()'),source.indexOf('getJSON = async function')),context);
+const dataset=bars=>({symbol:'A',timeframe:'M1',bars,first_time:1,last_time:2});
+(async()=>{
+ await context.refreshDataInfo();assert.equal(calls,0);assert.match(elements['research-context'].innerHTML,/No market data loaded/);assert.match(elements['research-context'].innerHTML,/data-go="data"/);
+ symbol='A';const first=context.refreshDataInfo();symbol='B';const second=context.refreshDataInfo();symbol='A';const newest=context.refreshDataInfo();
+ assert.match(elements['research-context'].innerHTML,/Loading data coverage/);
+ pending[2].resolve(dataset(30));await newest;assert.match(elements['research-context'].innerHTML,/30 bars/);
+ pending[0].resolve(dataset(10));await first;pending[1].resolve({error:'obsolete failure'});await second;
+ assert.match(elements['research-context'].innerHTML,/30 bars/);assert.doesNotMatch(elements['research-context'].innerHTML,/obsolete/);
+ const failed=context.refreshDataInfo();assert.equal(vm.runInContext('dataContext',context),null);pending[3].reject(Error('<connection lost>'));await failed;
+ assert.match(elements['research-context'].innerHTML,/Data coverage unavailable: &lt;connection lost>/);assert.doesNotMatch(elements['research-context'].innerHTML,/30 bars|Loading data coverage/);
+ const retry=context.refreshDataInfo();pending[4].resolve(dataset(40));await retry;assert.match(elements['research-context'].innerHTML,/40 bars/);
+ const late=context.refreshDataInfo();symbol='';await context.refreshDataInfo();pending[5].resolve(dataset(50));await late;
+ assert.equal(vm.runInContext('dataContext',context),null);assert.match(elements['research-context'].innerHTML,/No market data loaded/);assert.equal(calls,6);
+ console.log('Dataset context: empty state, transport failure, retry, A/B/A races and cleared selection passed.');
+})().catch(error=>{console.error(error);process.exitCode=1;});
