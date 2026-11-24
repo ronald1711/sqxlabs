@@ -3554,8 +3554,9 @@ mock provider after accepting a connection from a nonblocking listener. The
 fixture now explicitly selects blocking accepted sockets with bounded read/write
 timeouts. A delayed-fragment test exercises this condition on every platform.
 This fixes the test transport rather than relaxing archive or engine assertions.
-The affected run is failed evidence, not a successful release gate; a later exact
-commit needs a fresh full matrix result.
+The affected run is failed evidence, not a successful release gate. Replacement
+run 45365576256 for commit 68a1319 passed all four Linux/macOS debug/release jobs
+and both profile comparisons. This does not certify later commits automatically.
 
 ### Crosscheck archives in holdout exposure audits
 

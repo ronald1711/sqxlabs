@@ -71,9 +71,9 @@ remaining execution assumptions and unsupported cases are visible.
 - [x] Push and independently verify the expanded MT5/reference changes. Commit
   156c0d7 passed all four jobs and both profile comparisons in run 45358671142.
 - [x] Verify recorder commit ed76833 in GitHub run 45362906500: all four jobs and profile comparisons passed.
-- [ ] Fix any platform-specific failures exposed by those runs.
-  Run 45364814462 exposed a mock-provider nonblocking read failure on macOS.
-  The fixture was corrected in fdee568; the replacement matrix must pass.
+- [x] Resolve the macOS mock-provider nonblocking read failure exposed by run
+  45364814462. Fixed in fdee568; replacement run 45365576256 for 68a1319 passed
+  all four jobs and both profile comparisons.
 - [ ] Configure successful checks as required branch protections/ruleset checks.
 - [ ] Establish a versioned release/artifact retention procedure: archive replay
   requires the exact recorded executable, not merely compatible source code.
