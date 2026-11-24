@@ -37,3 +37,31 @@ tick intervals or generated replacements. Compare each signal and executed order
 then reconcile costs and balances under declared tolerances. Expand scenarios
 only after discrepancies are explained; this harness alone does not validate
 the wider engine or the user's strategy.
+
+## Frozen baseline inputs
+
+Run `python3 examples/mt5-reference/prepare_fixture.py <new-directory>` to create
+120 M1 candles and 480 synthetic bid/ask ticks, two SqxLabs strategy files, an
+account configuration and corresponding MT5 `.set`/`.ini` files. Existing
+directories are refused. The manifest hashes the generated inputs and records
+`comparison_status: not_executed`; generation is never validation.
+
+The baseline uses USD 10,000, leverage 30, 0.1 EURUSD lot, observed two-pip spread
+and zero commission, financing and extra slippage. Hand arithmetic predicts
+USD -1 for long and USD -3 for short. It begins at 2026-01-05 00:00 UTC, enters
+at 00:01 and exits at 00:02. SqxLabs uses a one-trade daily limit to reproduce the
+reference program's single-position case.
+
+MT5 inputs require a separately prepared `SQX_EURUSD` custom symbol with EUR base
+and margin currency, USD profit currency, Forex calculation, 100,000 contract
+size, five decimal places, 0.00001 tick size, 0.01 volume step and FOK execution.
+Enable quote/trade sessions covering the fixture. Set commission and financing
+to zero explicitly; the generated INI does not configure all symbol/tester fees.
+Place the `.set` files in that isolated terminal's `MQL5/Profiles/Tester` folder
+and the compiled reference in `MQL5/Experts`. Import and verify both bars and ticks
+before any market-mode run. Do not install this workflow into the shared terminal.
+
+The generated two-sided fixture was run locally through SqxLabs and its archived
+trade prices, timestamps, exit reasons and balances matched the hand calculation.
+**The corresponding MT5 market-mode comparison remains unexecuted.** The baseline
+does not cover third-currency conversion, nonzero costs or dynamic exits.
