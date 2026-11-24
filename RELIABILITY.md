@@ -78,14 +78,26 @@ power loss/disk-full interruption, runtime packaging, all-route trial accounting
 independent broker execution and real paper reconciliation remain unproven.
 Further MT5 work is temporarily deferred at the user's request, not completed.
 
-Standalone optimization and generation recovery are separate follow-ups in PRs
-#6 and #7. Optimization passed 430 local workspace tests and four remote checks
-at `f9bffe9`; its merge with current main requires its own checks. Generation's
-64-candidate process-kill/restore comparison passed, but a subsequent workspace
-run exposed colliding timestamp-based test directories under parallel execution.
-Route-specific random directory identities fix that isolation defect, and the
-two parallel recovery tests pass after the fix. Full replacement workspace and
-remote runs are required before that increment is accepted.
+Standalone optimization, generation recovery and clearer saved-research labels
+are consolidated in [PR #8](https://github.com/ronald1711/sqxlabs/pull/8), based on
+main `072f4f7`. PRs #6 and #7 are closed as superseded, not separately merged;
+their commits remain in the combined head `871daf7`. Optimization passed 430
+local workspace tests and four remote checks at the earlier `f9bffe9`.
+Generation's 64-candidate process-kill/restore comparison passed, but a subsequent
+workspace run exposed colliding timestamp-based test directories under parallel
+execution. Route-specific random directory identities fix that isolation defect.
+The replacement full workspace run at `066235d` passed 433 tests with zero failed
+or ignored; its workspace build passed. The later presentation-only `871daf7`
+passed four relevant web tests, JavaScript syntax/recovery checks and a build.
+A browser check confirmed the search name, inspection controls and retained
+“Not independently validated” warning. These checks do not establish responsive
+or accessibility coverage.
+
+Combined-head GitHub run `45447951438` remains pending as of this audit. Required
+Linux/macOS debug/release checks must pass before merge; earlier component checks
+do not substitute for those gates. Superseded component runs were cancelled to
+avoid duplicate work; neither the combined run nor main's post-merge run was
+cancelled. No independent MT5 execution evidence was added.
 
 The successful nonselected walk-forward candidate gap found during this audit has
 now been addressed in the report (see the later verification entry). Remaining

@@ -81,13 +81,18 @@ remaining execution assumptions and unsupported cases are visible.
   window's separately generated candidate family without changing its seeded
   search semantics. Its process-kill/backup/source-deletion recovery test matches
   all 32 candidate outcomes and the completion identity of an uninterrupted run.
-  This increment is on the optimize-recovery branch, not yet released on main.
+  This increment is included in combined PR #8, not yet released on main.
   Standalone CLI `generate` now also retains the seeded family, all full candidate
   outcomes and ranking eligibility through the shared pipeline archive. A real
   process-kill/backup/source-deletion test matches all 64 candidate outcomes
   against a fresh uninterrupted search, rejects changed prefixes and engine
   mismatches, and resumes after restoring filesystem write access. This increment
-  is on the generate-recovery branch; full platform verification remains pending.
+  is included in combined PR #8; full platform verification remains pending.
+  The replacement full local workspace run passed 433 tests after fixing a
+  collision between parallel recovery-test directories. Saved research cards
+  now distinguish generation searches, walk-forward studies and pipelines;
+  broader accessibility and recovery UX validation remain open. PRs #6/#7 were
+  superseded without dropping their commits. See RELIABILITY.md for exact revisions.
 - [x] Preserve MCP generation execution failures in responses, exclude failed candidates from ranking and mark partial searches as errors. Durable generation accounting is implemented below; other MCP routes remain open.
 - [x] Stop MCP portfolio selection on failed or missing candidate evaluations and preserve error/selection context.
 - [x] Persist MCP generation inputs, per-candidate checkpoints and full results before ranking; inspect interrupted searches after restart without original CSV files. Replay and resume are tracked below; other MCP routes remain open.
