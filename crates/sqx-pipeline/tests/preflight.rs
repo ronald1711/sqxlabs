@@ -97,3 +97,20 @@ fn observer_freezes_family_and_stops_immediately_on_storage_failure() {
  assert_eq!(result.unwrap_err(),"simulated disk failure");
  assert_eq!(events,vec!["step","family","start","outcome"]);
 }
+
+#[test]
+fn standalone_generation_preserves_seed_names_ranking_and_every_outcome(){
+ use rand::SeedableRng;
+ use sqx_optimizer::{random_strategy,backtest_batch,rank,Fitness};
+ let bars:Vec<_>=(0..180).map(|i|{let p=1.1+(i as f64*0.3).sin()*0.01;Bar::new(i*60000,p,p+0.002,p-0.002,p,1.0)}).collect();
+ let instrument=Instrument::fx("EURUSD");let config=BacktestConfig::default();let generator=GeneratorConfig::default();
+ let mut rng=rand::rngs::StdRng::seed_from_u64(731);
+ let family:Vec<_>=(0..4).map(|i|random_strategy(&mut rng,&format!("s{i:04}"),&generator)).collect();
+ let expected=rank(backtest_batch(&family,&bars,&instrument,&config,525600.0),Fitness::ProfitFactor,1);
+ let pipeline=Pipeline{name:"generation".into(),tasks:vec![Task{kind:TaskKind::Generate{count:4,min_trades:1}}]};
+ let report=sqx_pipeline::run(&pipeline,&bars,&instrument,&config,525600.0,&generator,731);
+ assert!(report.errors.is_empty());assert_eq!(report.builds.len(),4);
+ assert_eq!(report.databank,expected.into_iter().map(|(strategy,_)|strategy).collect::<Vec<_>>());
+ for (index,row) in report.builds.iter().enumerate(){assert_eq!(row.evaluation.strategy,family[index]);assert_eq!(row.candidate_index,index);}
+ assert_eq!(report.log.len(),2,"the generation task must advance exactly once");
+}

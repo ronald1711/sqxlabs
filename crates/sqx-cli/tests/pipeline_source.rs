@@ -64,6 +64,15 @@ fn pipeline_binds_seed_and_settings_and_assistant_checks_data_before_provider_ac
 
 #[test]
 fn interrupted_pipeline_retains_frozen_family_and_completed_candidate() {
+    interrupted_generation_recovery(false);
+}
+
+#[test]
+fn interrupted_standalone_generation_preserves_all_trials_and_recovers() {
+    interrupted_generation_recovery(true);
+}
+
+fn interrupted_generation_recovery(standalone:bool) {
     use std::process::Stdio;
     let root=std::env::temp_dir().join(format!("sqx-pipeline-kill-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
     fs::create_dir_all(&root).unwrap();
@@ -73,10 +82,14 @@ fn interrupted_pipeline_retains_frozen_family_and_completed_candidate() {
     fs::write(&csv,&data).unwrap();
     struct Child(std::process::Child);
     impl Drop for Child {fn drop(&mut self){let _=self.0.kill();let _=self.0.wait();}}
-    let mut child=Child(Command::new(env!("CARGO_BIN_EXE_sqx-cli"))
-        .args(["pipeline","--data"]).arg(&csv)
-        .args(["--symbol","EURUSD","--timeframe","M1","--count","64","--keep","1","--archive-dir"])
-        .arg(root.join("archive")).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
+    let generate=|directory:&str|{
+        let mut command=Command::new(env!("CARGO_BIN_EXE_sqx-cli"));
+        command.args([if standalone{"generate"}else{"pipeline"},"--data"]).arg(&csv)
+            .args(["--symbol","EURUSD","--timeframe","M1","--count","64","--archive-dir"]).arg(root.join(directory));
+        if !standalone{command.args(["--keep","1"]);}
+        command
+    };
+    let mut child=Child(generate("archive").stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
     let archive=sqx_project::archive::Archive::new(root.join("archive"));
     let deadline=std::time::Instant::now()+std::time::Duration::from_secs(60);
     loop {
@@ -142,12 +155,12 @@ fn interrupted_pipeline_retains_frozen_family_and_completed_candidate() {
     assert_eq!(serde_json::from_slice::<Value>(&replay.stdout).unwrap()["appended_events"],0);
     assert_eq!(restored.list().unwrap().len(),count);
     fs::write(&csv,&data).unwrap();
-    let reference=Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["pipeline","--data"]).arg(&csv)
-        .args(["--symbol","EURUSD","--timeframe","M1","--count","64","--keep","1","--archive-dir"])
-        .arg(root.join("reference")).output().unwrap();
-    let receipt:Value=serde_json::from_str(String::from_utf8_lossy(&reference.stdout).lines().find_map(|l|l.strip_prefix("Pipeline archive: ")).unwrap()).unwrap();
+    let reference=generate("reference").output().unwrap();
+    assert!(reference.status.success(),"{}",String::from_utf8_lossy(&reference.stderr));
+    let receipt:Value=serde_json::from_str(String::from_utf8_lossy(&reference.stdout).lines().find_map(|l|l.strip_prefix(if standalone{"Generation archive: "}else{"Pipeline archive: "})).unwrap()).unwrap();
     let expected=sqx_project::archive::Archive::new(root.join("reference")).load(receipt["run_id"].as_str().unwrap()).unwrap();
     assert_eq!(completed.run.result["report"],expected.run.result["report"]);
+    assert_eq!(completed.run.result["report"]["builds"].as_array().unwrap().len(),64);
     assert_ne!(completed.run.request["started_run_id"],expected.run.request["started_run_id"],"fresh attempts need distinct identities");
     let altered=sqx_project::archive::Archive::new(root.join("altered"));
     altered.restore(started).unwrap();

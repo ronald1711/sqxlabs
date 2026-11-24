@@ -16,6 +16,7 @@ use sqx_strategy::Strategy;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TaskKind {
     Build { count: usize, keep: usize },
+    Generate { count: usize, min_trades: usize },
     Retest { mc_runs: usize, min_positive_pct: f64 },
     Optimize { windows: usize, candidates: usize },
     /// Standalone generated search: a fresh seeded family in each training window.
@@ -125,6 +126,7 @@ pub fn run_observed(
         match task.kind {
             TaskKind::Optimize{windows,candidates} if windows==0 || windows>12 || candidates==0 || candidates>2000=>return failure("Optimize requires 1..12 windows and 1..2000 variants".into()),
             TaskKind::Build{count,keep} if count==0 || count>2000 || keep==0 || keep>count=>return failure("Build requires 1 <= keep <= count <= 2000".into()),
+            TaskKind::Generate{count,..} if count==0=>return failure("Generate requires at least one candidate".into()),
             TaskKind::Retest{mc_runs,min_positive_pct} if mc_runs==0 || mc_runs>10000 || !min_positive_pct.is_finite() || !(0.0..=100.0).contains(&min_positive_pct)=>return failure("Invalid retest run count or percentage".into()),
             TaskKind::GoToTask{index} if index>=pipeline.tasks.len()=>return failure("Pipeline jump target is out of range".into()),
             _=>{}
@@ -147,9 +149,14 @@ pub fn run_observed(
                 discovery=Some(report);
                 pc+=1;
             },
-            TaskKind::Build { count, keep } => {
+            TaskKind::Build { count, .. } | TaskKind::Generate { count, .. } => {
+                let (keep,min_trades,standalone)=match &pipeline.tasks[pc].kind {
+                    TaskKind::Build{keep,..}=>(*keep,5,false),
+                    TaskKind::Generate{min_trades,..}=>(*count,*min_trades,true),
+                    _=>unreachable!(),
+                };
                 let cands: Vec<Strategy> = (0..*count)
-                    .map(|i| random_strategy(&mut rng, &format!("b{steps}-{i}"), gen))
+                    .map(|i| random_strategy(&mut rng, &if standalone{format!("s{i:04}")}else{format!("b{steps}-{i}")}, gen))
                     .collect();
                 observer(PipelineEvent::BuildFamily{step:steps,candidates:&cands})?;
                 let mut evaluations=Vec::with_capacity(cands.len());
@@ -165,8 +172,8 @@ pub fn run_observed(
                         errors.push(format!("Build step {steps}, candidate {index} ({}): {}",evaluation.strategy.name,evaluation.errors.join("; ")));
                     }else{scored.push((evaluation.strategy.clone(),evaluation.metrics));}
                 }
-                let ranked = rank(scored, Fitness::ProfitFactor, 5);
-                databank = ranked.into_iter().take(*keep).map(|(s, _)| s).collect();
+                let ranked = rank(scored, Fitness::ProfitFactor, min_trades);
+                databank = ranked.into_iter().take(keep).map(|(s, _)| s).collect();
                 for (candidate_index,evaluation) in evaluations.into_iter().enumerate(){
                     let selected=databank.contains(&evaluation.strategy);
                     builds.push(BuildEvaluation{step:steps,candidate_index,evaluation,selected});
