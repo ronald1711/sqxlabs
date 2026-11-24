@@ -324,9 +324,14 @@ search and all linked checkpoints, candidate results and completion records.
 Export takes the search writer lock, rejects missing/conflicting relationships,
 and preserves incomplete status. Failed and rejected candidates remain included.
 It does not run strategies or include engine binaries, unrelated experiment or
-holdout records. Content hashes are not authenticated provenance. A dedicated
-whole-search import operation and representative-size transport tests remain open;
-this is not yet the complete backup/restore workflow.
+holdout records. Content hashes are not authenticated provenance. `generation_import` accepts the returned object as `backup`, checks its complete
+graph in a private temporary archive, then checks the merged destination history
+under its writer lock before publication. Conflicting results are never replaced.
+Repeated import is idempotent. Storage failure may leave a partial import; retry
+the same backup after resolving the error. The response reports engine-copy
+availability separately; original-engine replay remains a distinct operation.
+Representative-size transport, disk/power-loss tests and UI integration remain
+open. Neither operation restores unrelated holdout or experiment evidence.
 
 `generation_resume` with `search_id` replays recorded candidate outcomes and then
 finishes missing candidates from the frozen family. It requires the original

@@ -35,6 +35,10 @@ where F:FnMut(&Strategy,&[Bar],&Instrument,&BacktestConfig)->sqx_backtest::Backt
 
 fn search_lock(archive:&Archive,id:&str)->Result<std::fs::File,String> {
     archive.load(id)?; // Validate the content-addressed identifier before using it as a path.
+    search_lock_verified_id(archive,id)
+}
+
+fn search_lock_verified_id(archive:&Archive,id:&str)->Result<std::fs::File,String> {
     let directory=archive.root().join("mcp-generation-locks");std::fs::create_dir_all(&directory).map_err(|e|e.to_string())?;
     let file=std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(directory.join(id)).map_err(|e|e.to_string())?;
     file.try_lock().map_err(|e|format!("Search is active or its process lock is unavailable: {e}"))?;
@@ -269,6 +273,61 @@ pub fn export_search(archive:&Archive,id:&str)->Result<Value,String> {
         "scope":"Content and record relationships checked; no strategy execution, outcome replay, origin authentication or independent validation. Includes all records linked to this search at export time. Executable bytes and unrelated holdout/experiment records are not included."}))
 }
 
+/// Validate in a private staging archive; publish only after checking the merged
+/// destination graph under its writer lock. No executable bytes are accepted.
+pub fn import_search(archive:&Archive,backup:&Value)->Result<Value,String> {
+    let object=backup.as_object().ok_or("Backup must be an object")?;
+    if object.len()!=7 || object.keys().any(|key|!matches!(key.as_str(),"schema"|"kind"|"search_id"|"recorded_completion"|"records"|"engine_bytes_included"|"scope"))
+        || backup["schema"]!=1 || backup["kind"]!="mcp_generation_backup" || backup["engine_bytes_included"]!=false
+        || !backup["recorded_completion"].is_boolean() || !backup["scope"].is_string() {
+        return Err("Unsupported generation backup envelope".into());
+    }
+    let id=backup["search_id"].as_str().ok_or("Missing search identity")?;
+    let rows=backup["records"].as_array().ok_or("Missing backup records")?;
+    if rows.is_empty() || rows.len()>4002{return Err("Invalid backup record count".into());}
+    struct Stage(std::path::PathBuf);
+    impl Drop for Stage {fn drop(&mut self){let _=std::fs::remove_dir_all(&self.0);}}
+    let path=std::env::temp_dir().join(format!("sqx-generation-import-{:032x}",rand::random::<u128>()));
+    let mut directory=std::fs::DirBuilder::new();
+    #[cfg(unix)] {use std::os::unix::fs::DirBuilderExt;directory.mode(0o700);}
+    directory.create(&path).map_err(|e|e.to_string())?;
+    let stage=Stage(path);let staging=Archive::new(&stage.0);
+    let mut ids=std::collections::BTreeSet::new();
+    for row in rows {
+        let record:sqx_project::archive::ResearchBundle=serde_json::from_value(row.clone()).map_err(|e|e.to_string())?;
+        if !ids.insert(record.run_id.clone()){return Err("Duplicate backup record".into());}
+        staging.restore(&record)?;
+    }
+    let checked=export_search(&staging,id)?; // Also validates id before destination path construction.
+    if checked["records"].as_array().unwrap().len()!=rows.len()
+        || checked["recorded_completion"]!=backup["recorded_completion"] {
+        return Err("Backup contains unrelated records or a false completion status".into());
+    }
+    let _lock=search_lock_verified_id(archive,id)?;
+    // Validate both histories together. Existing conflicting results must never be
+    // hidden by importing a preferred outcome or an incomplete backup.
+    for existing in archive.list()? {
+        let record=archive.load(&existing)?;
+        if existing==id || record.run.request["search_id"]==id || record.run.request["started_run_id"]==id {
+            staging.restore(&record)?;
+        }
+    }
+    let merged=export_search(&staging,id)?;
+    let mut records:Vec<sqx_project::archive::ResearchBundle>=serde_json::from_value(merged["records"].clone()).map_err(|e|e.to_string())?;
+    // Checkpoints precede results, and completion is published last. A storage
+    // failure may leave an incomplete import; repeating the import is idempotent.
+    records.sort_by_key(|record|match record.run.request["research_kind"].as_str(){
+        Some("mcp_generation_started")=>0,Some("mcp_generation_trial_started")=>1,
+        Some("mcp_generation_trial")=>2,_=>3,
+    });
+    for record in &records {
+        archive.restore(record).map_err(|error|format!("Import publication incomplete; retry the same backup after resolving storage error: {error}"))?;
+    }
+    Ok(json!({"search_id":id,"records_retained":records.len(),"recorded_completion":merged["recorded_completion"],
+        "engine_retention":archive.engine_retention(&records[0].run.engine_id),
+        "scope":"Record identities and merged relationships verified. No strategy replay or execution. Storage failure can leave a partial import; retries are idempotent. Engine binaries and unrelated experiment/holdout evidence are not restored."}))
+}
+
 pub fn history(archive:&Archive)->Result<Value,String> {
     let mut searches=std::collections::BTreeMap::new();
     let mut trial_starts=Vec::new();let mut trial_results=Vec::new();let mut completions=Vec::new();
@@ -304,6 +363,50 @@ mod tests {
     impl Temp {fn new()->Self{Self(std::env::temp_dir().join(format!("sqx-mcp-generation-{:032x}",rand::random::<u128>())))} }
     impl Drop for Temp {fn drop(&mut self){let _=std::fs::remove_dir_all(&self.0);}}
     fn bars()->Vec<Bar>{vec![Bar::new(0,1.0,1.1,0.9,1.0,1.0),Bar::new(60000,1.0,1.1,0.9,1.0,1.0)]}
+    #[test]
+    fn import_validates_before_publication_and_survives_source_deletion(){
+        let source=Temp::new();let archive=Archive::new(&source.0);
+        let (_,id,completion)=execute(&archive,&[Strategy::new("one"),Strategy::new("two")],&bars(),&Instrument::fx("EURUSD"),&BacktestConfig::default(),252.0,7,&json!({"timeframe":"M1"})).unwrap();
+        let backup=export_search(&archive,&id).unwrap();
+        std::fs::remove_dir_all(&source.0).unwrap();
+        let interrupted=Temp::new();let interrupted_archive=Archive::new(&interrupted.0);
+        let candidate=backup["records"].as_array().unwrap().iter().find(|row|row["run"]["request"]["research_kind"]=="mcp_generation_trial_started").unwrap();
+        let broken=interrupted.0.join("strategies").join(format!("{}.json",candidate["run"]["strategy_id"].as_str().unwrap()));
+        std::fs::create_dir_all(broken.parent().unwrap()).unwrap();std::fs::write(&broken,b"corrupted object").unwrap();
+        assert!(import_search(&interrupted_archive,&backup).unwrap_err().contains("publication incomplete"));
+        assert!(!interrupted.0.join("runs").join(format!("{completion}.json")).exists());
+        assert!(!interrupted_archive.list().unwrap().is_empty(),"failure should exercise partial publication");
+        std::fs::remove_file(broken).unwrap();
+        assert_eq!(import_search(&interrupted_archive,&backup).unwrap()["recorded_completion"],true);
+        assert_eq!(export_search(&interrupted_archive,&id).unwrap(),backup);
+        let target=Temp::new();let destination=Archive::new(&target.0);
+        for mutation in 0..5 {
+            let mut damaged=backup.clone();
+            match mutation {
+                0=>{damaged["records"][0]["dataset"]["bars"]=json!([]);},
+                1=>{let duplicate=damaged["records"][0].clone();damaged["records"].as_array_mut().unwrap().push(duplicate);},
+                2=>{damaged["recorded_completion"]=json!(false);},
+                3=>{damaged["engine_bytes_included"]=json!(true);},
+                _=>{damaged["records"].as_array_mut().unwrap().retain(|row|row["run"]["request"]["research_kind"]!="mcp_generation_trial_started");},
+            }
+            assert!(import_search(&destination,&damaged).is_err());assert!(destination.list().unwrap().is_empty());
+        }
+        let report=import_search(&destination,&backup).unwrap();assert_eq!(report["recorded_completion"],true);
+        assert_eq!(report["engine_retention"]["status"],"missing");
+        assert_eq!(export_search(&destination,&id).unwrap(),backup);
+        let before=destination.list().unwrap();import_search(&destination,&backup).unwrap();assert_eq!(destination.list().unwrap(),before);
+        let replayed=resume_search(&destination,&id).unwrap();assert_eq!(replayed["previous_results_replayed"],2);assert_eq!(replayed["new_results_recorded"],0);
+        assert_eq!(destination.list().unwrap(),before);
+        let guard=search_lock(&destination,&id).unwrap();assert!(import_search(&destination,&backup).unwrap_err().contains("active"));drop(guard);
+        let done=destination.load(&completion).unwrap();let trial=destination.load(done.run.result["trials"][0]["result_id"].as_str().unwrap()).unwrap();
+        let mut conflict=trial.run.result.clone();conflict["eligible"]=json!(true);
+        destination.save(trial.run.engine_id,trial.dataset,trial.strategy,trial.run.request,conflict).unwrap();
+        let before=destination.list().unwrap();assert!(import_search(&destination,&backup).unwrap_err().contains("Conflicting"));assert_eq!(destination.list().unwrap(),before);
+        let partial=Temp::new();let partial_archive=Archive::new(&partial.0);
+        let mut incomplete=backup.clone();incomplete["records"].as_array_mut().unwrap().retain(|row|row["run_id"]!=completion);incomplete["recorded_completion"]=json!(false);
+        assert_eq!(import_search(&partial_archive,&incomplete).unwrap()["recorded_completion"],false);
+        assert_eq!(export_search(&partial_archive,&id).unwrap(),incomplete);
+    }
     #[test]
     fn export_preserves_entire_search_and_rejects_missing_conflicting_or_active_records(){
         let temp=Temp::new();let archive=Archive::new(&temp.0);

@@ -71,7 +71,9 @@ remaining execution assumptions and unsupported cases are visible.
   candidate family, every checkpoint/result (including rejected and failed
   candidates), and completion links. A single-record download is not this backup.
   MCP `generation_export` now exports under the existing search lock and checks
-  linked identities; dedicated whole-search import and scale validation remain open.
+  linked identities; `generation_import` validates the entire merged graph before
+  publication. Source-deletion restore, original-engine replay, conflicts and repeat
+  imports are tested. Scale, disk/power-loss and UI validation remain open.
   Validate content identities and
   cross-record relationships before publishing restored runs. Reject missing or
   conflicting linked records, retain incomplete-search status, and test recovery
