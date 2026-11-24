@@ -52,7 +52,7 @@ remaining execution assumptions and unsupported cases are visible.
 
 - [ ] Provide durable trial accounting on every research entry point, including
   CLI, MCP, pipelines, optimization and robustness operations.
-- [x] Preserve MCP generation execution failures in responses, exclude failed candidates from ranking and mark partial searches as errors. Durable MCP trial accounting remains open.
+- [x] Preserve MCP generation execution failures in responses, exclude failed candidates from ranking and mark partial searches as errors. Durable generation accounting is implemented below; other MCP routes remain open.
 - [x] Stop MCP portfolio selection on failed or missing candidate evaluations and preserve error/selection context.
 - [x] Persist MCP generation inputs, per-candidate checkpoints and full results before ranking; inspect interrupted searches after restart without original CSV files. Replay and resume are tracked below; other MCP routes remain open.
 - [x] Replay or explicitly restart one archived MCP generation candidate with engine/search/input relationship checks, preserving conflicting outcomes and incomplete search status.
@@ -67,6 +67,14 @@ remaining execution assumptions and unsupported cases are visible.
 - [x] Include all markets from archived CLI crosschecks, including checkpoints and failures, in holdout exposure audits and restored commitment evidence.
 - [x] Audit complete declared candle intervals across experiment, crosscheck, backtest, comparison and evolution evidence; surface missing legacy durations and retain uncertainty through restore.
 - [ ] Make a selected strategy traceable to its full search/selection history.
+- [ ] Export and restore a complete MCP generation search, including the frozen
+  candidate family, every checkpoint/result (including rejected and failed
+  candidates), and completion links. A single-record download is not this backup.
+  Take the export under the existing search lock; validate content identities and
+  cross-record relationships before publishing restored runs. Reject missing or
+  conflicting linked records, retain incomplete-search status, and test recovery
+  after deleting the original store and CSV. Keep executable transport explicit;
+  a JSON backup must not silently install or execute stored engine bytes.
 
 ## P1 — Establish remote release gates
 
