@@ -3823,3 +3823,14 @@ independent arithmetic, not copied from engine output. This is an execution-mode
 contract test, not MT5/broker execution evidence or proof of all stop behaviours.
 The targeted test passed in both debug and release profiles. No engine behaviour
 was changed by this addition.
+
+Four additional fixed-price cases cover long/short trailing and break-even
+activation on supplied ticks. An adverse excursion precedes the favourable tick;
+the only stop-change event must occur at the favourable tick, never retroactively
+at the earlier excursion. A later quote crosses the new stop and liquidates at
+the executable bid/ask. Independent arithmetic gives USD 5.30 net for the trailing
+cases and USD -2.70 for break-even gaps, including USD 0.70 commission. Assertions
+cover stop-change time/level, exit reason/time/price, PnL and final equity. All six
+fixed-price cases passed in debug and release. These cover the declared ten-pip
+distance and fixed-size USD-account contract only; ATR distances, combined stop
+types, financing, conversion and broker parity need separate evidence.
