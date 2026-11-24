@@ -24,6 +24,7 @@ fn protocol_backup_survives_source_removal_and_replays_in_a_fresh_process(){
     let history=body(call(&source,"generation_history",json!({})));
     let id=history["searches"].as_object().unwrap().keys().next().unwrap();
     let backup=body(call(&source,"generation_export",json!({"search_id":id})));
+    assert_eq!(backup["schema"],2);assert_eq!(backup["datasets"].as_object().unwrap().len(),1);
     assert_eq!(backup["recorded_completion"],true);assert_eq!(backup["records"].as_array().unwrap().len(),6);
     fs::remove_dir_all(&source).unwrap();fs::remove_file(&data).unwrap();
     for arguments in [json!({"backup":backup,"destination":"unexpected"}),json!({"backup":{}})] {

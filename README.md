@@ -321,6 +321,8 @@ outcomes are never replaced. This does not advance other candidates or complete
 the search, and successful replay is not independent correctness evidence.
 `generation_export` with `search_id` returns one JSON backup containing the frozen
 search and all linked checkpoints, candidate results and completion records.
+Version 2 transport stores shared datasets and strategies once, keyed by their
+existing content hashes. Version 1 backups remain importable.
 Export takes the search writer lock, rejects missing/conflicting relationships,
 and preserves incomplete status. Failed and rejected candidates remain included.
 It does not run strategies or include engine binaries, unrelated experiment or
@@ -330,6 +332,8 @@ under its writer lock before publication. Conflicting results are never replaced
 Repeated import is idempotent. Storage failure may leave a partial import; retry
 the same backup after resolving the error. The response reports engine-copy
 availability separately; original-engine replay remains a distinct operation.
+Import currently expands shared objects internally for graph validation; compact
+transport is not a guarantee of bounded peak memory.
 Representative-size transport, disk/power-loss tests and UI integration remain
 open. Neither operation restores unrelated holdout or experiment evidence.
 

@@ -4137,3 +4137,24 @@ backup SHA-256 is
 `681b87e25b7f308576ffe97c60195df8dd4d531ecdc8bb74a0bf9f6c569e4f15`.
 This synthetic test does not establish MT5 parity, power-loss safety or untouched
 holdout evidence.
+
+## Compact MCP backup comparison (2026-11-24)
+
+Schema 2 stores each shared dataset/strategy once under its existing content hash;
+schema 1 remains importable. The 64-candidate/2,000-candle search above retained
+all 130 run IDs after compact export/import/re-export, then replayed all 64
+results using the original frozen executable, without creating missing results.
+Backup size fell from 74,611,326 to 52,777,342 bytes (29.26%); MCP response size
+fell from 82,450,000 to 57,493,244 bytes. Export/import/replay measured
+18.111s / 59.108s / 22.718s on this run. Import speed did not improve materially.
+Current validation still expands shared objects internally, so peak memory and
+large full-result transport remain open work.
+
+All 16 MCP unit tests and both separate-process integration tests passed in
+release, including missing/altered/unreferenced shared-object rejection and
+legacy import compatibility. This is not a new full-workspace or broker-parity
+claim. Local report: `work/mt5-validation/backup-compact-scale-64x2000/report.json`.
+Compact backup SHA-256:
+`e89405f596dd3ae0128af74e751613bdb66ccb56a0854cec7629c35bf3f6e397`.
+Exporter executable SHA-256:
+`feb8f356e23d8a69b908787827b93c6661299a96ba89aa227a881bbe77f4ca20`.

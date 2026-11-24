@@ -125,8 +125,10 @@ remaining execution assumptions and unsupported cases are visible.
 - [ ] Validate long-running research and backup/restore at representative scale.
   A 64-candidate/2,000-candle synthetic MCP export/import/replay passed, but
   produced 74,611,326 backup bytes (82,450,000 protocol bytes) and took 58.498s
-  to import on the local Mac. Deduplicate shared datasets/strategies in transport
-  before claiming large-search usability; retain all outcomes and exact hashes.
+  to import on the local Mac. Version 2 now deduplicates shared objects: the same
+  backup is 52,777,342 bytes (29.26% smaller), but import still took 59.108s.
+  Bound internal memory and improve large-result transport/validation before
+  claiming large-search usability; retain all outcomes and exact hashes.
 - [ ] If remote hosting is introduced, implement and test authentication and access
   control first. The supported server currently restricts access to loopback.
 

@@ -192,7 +192,7 @@ fn call_tool(params: &Value) -> Value {
         "generation_export" => {
             if !args.as_object().is_some_and(|object|object.len()==1 && object.contains_key("search_id")){return err_result("Only search_id is accepted".into());}
             let id=match args["search_id"].as_str(){Some(id)=>id,None=>return err_result("search_id must be a string".into())};
-            match generation_archive::export_search(&generation_archive::configured_archive(),id) {
+            match generation_archive::export_compact(&generation_archive::configured_archive(),id) {
                 Ok(backup)=>text_result(backup.to_string()),Err(error)=>err_result(error),
             }
         },

@@ -273,9 +273,51 @@ pub fn export_search(archive:&Archive,id:&str)->Result<Value,String> {
         "scope":"Content and record relationships checked; no strategy execution, outcome replay, origin authentication or independent validation. Includes all records linked to this search at export time. Executable bytes and unrelated holdout/experiment records are not included."}))
 }
 
+/// Version 2 transport stores shared objects once; run identities are unchanged.
+pub fn export_compact(archive:&Archive,id:&str)->Result<Value,String> {
+    compact_backup(export_search(archive,id)?)
+}
+fn compact_backup(mut backup:Value)->Result<Value,String> {
+    let rows=backup["records"].as_array().ok_or("Missing backup records")?;
+    let mut datasets=serde_json::Map::new();let mut strategies=serde_json::Map::new();let mut records=Vec::new();
+    for row in rows {
+        let record:sqx_project::archive::ResearchBundle=serde_json::from_value(row.clone()).map_err(|e|e.to_string())?;
+        datasets.insert(record.run.dataset_id.clone(),record.dataset);
+        strategies.insert(record.run.strategy_id.clone(),record.strategy);
+        records.push(json!({"run_id":record.run_id,"run":record.run}));
+    }
+    backup["schema"]=json!(2);backup["records"]=json!(records);
+    backup["datasets"]=json!(datasets);backup["strategies"]=json!(strategies);
+    Ok(backup)
+}
+fn expand_compact(backup:&Value)->Result<Value,String> {
+    let object=backup.as_object().ok_or("Backup must be an object")?;
+    if object.len()!=9 || object.keys().any(|key|!matches!(key.as_str(),"schema"|"kind"|"search_id"|"recorded_completion"|"records"|"engine_bytes_included"|"scope"|"datasets"|"strategies")) {
+        return Err("Unsupported compact backup envelope".into());
+    }
+    let datasets=backup["datasets"].as_object().ok_or("Missing shared datasets")?;
+    let strategies=backup["strategies"].as_object().ok_or("Missing shared strategies")?;
+    let rows=backup["records"].as_array().ok_or("Missing backup records")?;
+    if rows.is_empty() || rows.len()>4002{return Err("Invalid backup record count".into());}
+    let mut used_data=std::collections::BTreeSet::new();let mut used_rules=std::collections::BTreeSet::new();let mut records=Vec::new();
+    for row in rows {
+        let fields=row.as_object().ok_or("Invalid compact record")?;
+        if fields.len()!=2 || !fields.contains_key("run_id") || !fields.contains_key("run"){return Err("Invalid compact record fields".into());}
+        let run:sqx_project::archive::RunRecord=serde_json::from_value(row["run"].clone()).map_err(|e|e.to_string())?;
+        let dataset=datasets.get(&run.dataset_id).ok_or("Missing referenced dataset")?;
+        let strategy=strategies.get(&run.strategy_id).ok_or("Missing referenced strategy")?;
+        used_data.insert(run.dataset_id.clone());used_rules.insert(run.strategy_id.clone());
+        records.push(json!({"run_id":row["run_id"],"run":run,"dataset":dataset,"strategy":strategy}));
+    }
+    if used_data.len()!=datasets.len() || used_rules.len()!=strategies.len(){return Err("Unreferenced shared objects in backup".into());}
+    let mut expanded=backup.clone();let fields=expanded.as_object_mut().unwrap();fields.remove("datasets");fields.remove("strategies");
+    expanded["schema"]=json!(1);expanded["records"]=json!(records);Ok(expanded)
+}
+
 /// Validate in a private staging archive; publish only after checking the merged
 /// destination graph under its writer lock. No executable bytes are accepted.
 pub fn import_search(archive:&Archive,backup:&Value)->Result<Value,String> {
+    if backup["schema"]==2 {return import_search(archive,&expand_compact(backup)?);}
     let object=backup.as_object().ok_or("Backup must be an object")?;
     if object.len()!=7 || object.keys().any(|key|!matches!(key.as_str(),"schema"|"kind"|"search_id"|"recorded_completion"|"records"|"engine_bytes_included"|"scope"))
         || backup["schema"]!=1 || backup["kind"]!="mcp_generation_backup" || backup["engine_bytes_included"]!=false
@@ -363,6 +405,29 @@ mod tests {
     impl Temp {fn new()->Self{Self(std::env::temp_dir().join(format!("sqx-mcp-generation-{:032x}",rand::random::<u128>())))} }
     impl Drop for Temp {fn drop(&mut self){let _=std::fs::remove_dir_all(&self.0);}}
     fn bars()->Vec<Bar>{vec![Bar::new(0,1.0,1.1,0.9,1.0,1.0),Bar::new(60000,1.0,1.1,0.9,1.0,1.0)]}
+    #[test]
+    fn compact_transport_preserves_ids_and_rejects_missing_altered_or_extra_objects(){
+        let source=Temp::new();let archive=Archive::new(&source.0);
+        let (_,id,_)=execute(&archive,&[Strategy::new("one"),Strategy::new("two")],&bars(),&Instrument::fx("EURUSD"),&BacktestConfig::default(),252.0,7,&json!({"timeframe":"M1"})).unwrap();
+        let legacy=export_search(&archive,&id).unwrap();let compact=export_compact(&archive,&id).unwrap();
+        assert_eq!(compact["schema"],2);assert_eq!(compact["datasets"].as_object().unwrap().len(),1);
+        assert_eq!(compact["strategies"].as_object().unwrap().len(),3);
+        assert_eq!(expand_compact(&compact).unwrap(),legacy);
+        let target=Temp::new();let destination=Archive::new(&target.0);
+        for mutation in 0..5 {
+            let mut damaged=compact.clone();let key=damaged["datasets"].as_object().unwrap().keys().next().unwrap().clone();
+            match mutation {
+                0=>{damaged["datasets"].as_object_mut().unwrap().remove(&key);},
+                1=>{damaged["datasets"][&key]["bars"]=json!([]);},
+                2=>{damaged["datasets"]["extra"]=json!({});},
+                3=>{damaged["records"][0]["dataset"]=json!({});},
+                _=>{damaged["strategies"]=json!({});},
+            }
+            assert!(import_search(&destination,&damaged).is_err());assert!(destination.list().unwrap().is_empty());
+        }
+        import_search(&destination,&compact).unwrap();assert_eq!(export_compact(&destination,&id).unwrap(),compact);
+        import_search(&destination,&legacy).unwrap();assert_eq!(export_compact(&destination,&id).unwrap(),compact);
+    }
     #[test]
     fn import_validates_before_publication_and_survives_source_deletion(){
         let source=Temp::new();let archive=Archive::new(&source.0);
