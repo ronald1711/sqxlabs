@@ -13,6 +13,8 @@ rustup run 1.100.0 rustc --version
 rustup run 1.100.0 cargo --version
 node --version
 curl --version
+# Inventory freshness only, not proof that the listed indicators are validated.
+python3 scripts/indicator_evidence_index.py --check
 rustup run 1.100.0 cargo test "${cargo_args[@]}"
 rustup run 1.100.0 cargo build "${cargo_args[@]}"
 node --check crates/sqx-web/assets/workspace.js
