@@ -3923,3 +3923,24 @@ Validation: all five MCP tests passed in debug and release; the workspace build
 passed. Earlier publication 5a911a8 completed all four Linux/macOS CI jobs and
 release-profile comparisons successfully (run 45387699788). That run predates
 the subsequent engine-retention/inspection and MCP changes.
+
+### Fail closed on incomplete MCP portfolio candidate evaluation
+
+The MCP portfolio route now checks all component execution errors and validates
+account observations before any shortlist/subset selection. If any candidate
+failed, or result coverage differs from the candidate count, it returns a
+protocol error with the failed candidate rules, indices and diagnostics; it does
+not proceed with a silently reduced candidate pool. Insufficient valid trade
+evidence is separately reported with source/account context instead of losing
+that context in a generic error.
+
+For valid searches, context retains attempted/eligible/below-criteria counts,
+seed, objective, minimum trades, shortlist/subset limits and original candidate
+indices for shortlist and selection. Combination errors also preserve context.
+Regression cases distinguish an execution failure, a valid no-trade evaluation
+and a nonfinite final account balance. This improves returned evidence only;
+durable complete candidate history, interruption recovery and independent
+portfolio/account validation remain open.
+
+Validation: all six MCP tests passed in debug and release;
+`cargo build --workspace` passed. No independent portfolio parity is claimed.

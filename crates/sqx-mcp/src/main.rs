@@ -390,19 +390,39 @@ fn tool_portfolio(args: &Value) -> Value {
     let gen = GeneratorConfig::default();
     let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(seed);
     let strategies: Vec<Strategy> = (0..count).map(|i| random_strategy(&mut rng, &format!("p{i:04}"), &gen)).collect();
-    let names: Vec<String> = strategies.iter().map(|s| s.name.clone()).collect();
     let inst = instrument_for(&symbol);
     let pyp = pyp_for(&bars);
     let cfg=match simulation_config(args,timeframe){Ok(config)=>config,Err(error)=>return err_result(error)};
     if let Err(error)=sqx_backtest::validate_backtest_inputs(&bars,&inst,&cfg){return err_result(error);}
     let results = sqx_portfolio::backtest_all(&strategies, &bars, &inst, &cfg);
-    let mets: Vec<Metrics> = results.iter().map(|r| compute_metrics(r, bars.len(), pyp)).collect();
+    portfolio_result(&strategies,&results,bars.len(),pyp,seed,quality,&symbol,timeframe,&cfg)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn portfolio_result(strategies:&[Strategy],results:&[sqx_backtest::BacktestResult],bar_count:usize,pyp:f64,seed:u64,mut context:Value,symbol:&str,timeframe:Timeframe,cfg:&BacktestConfig)->Value {
+    let mut failures=Vec::new();
+    for (candidate_index,(strategy,result)) in strategies.iter().zip(results).enumerate() {
+        let mut errors=result.errors.clone();
+        if let Err(error)=sqx_metrics::validate_observations(result){errors.push(error);}
+        if !errors.is_empty(){failures.push(json!({"candidate_index":candidate_index,"strategy":strategy,"errors":errors}));}
+    }
+    context["portfolio_search"]=json!({"seed":seed,"attempted":results.len(),"requested_candidates":strategies.len(),"invalid":failures.len(),"candidate_failures":failures,"min_trades":5,"fitness":"ProfitFactor","shortlist_limit":12,"subset_size_min":2,"subset_size_max":4,"scope":"Exploratory selection on the supplied data, not independent validation or a durable trial ledger."});
+    if !failures.is_empty() || strategies.len()!=results.len() {
+        let mut response=research_result("Portfolio search incomplete: candidate execution failed or results are missing. No portfolio selection was performed.".into(),context,symbol,timeframe,cfg);
+        response["isError"]=json!(true);return response;
+    }
+    let names:Vec<String>=strategies.iter().map(|s|s.name.clone()).collect();
+    let mets: Vec<Metrics> = results.iter().map(|r| compute_metrics(r, bar_count, pyp)).collect();
     let mut order: Vec<usize> = (0..results.len()).collect();
     order.sort_by(|&a, &b| mets[b].profit_factor.partial_cmp(&mets[a].profit_factor).unwrap_or(std::cmp::Ordering::Equal));
     order.retain(|&i| mets[i].number_of_trades >= 5.0 && mets[i].profit_factor.is_finite());
+    context["portfolio_search"]["eligible"]=json!(order.len());
+    context["portfolio_search"]["below_ranking_criteria"]=json!(results.len()-order.len());
     order.truncate(12);
+    context["portfolio_search"]["shortlisted_candidate_indices"]=json!(order);
     if order.len() < 2 {
-        return err_result("not enough qualifying strategies".to_string());
+        let mut response=research_result("Not enough qualifying strategies to form a portfolio.".into(),context,symbol,timeframe,cfg);
+        response["isError"]=json!(true);return response;
     }
     let sel: Vec<sqx_backtest::BacktestResult> = order.iter().map(|&i| results[i].clone()).collect();
     let sel_names: Vec<String> = order.iter().map(|&i| names[i].clone()).collect();
@@ -410,14 +430,18 @@ fn tool_portfolio(args: &Value) -> Value {
     let comp: Vec<sqx_backtest::BacktestResult> = subset.iter().map(|&i| sel[i].clone()).collect();
     let comp_names: Vec<String> = subset.iter().map(|&i| sel_names[i].clone()).collect();
     let weights = sqx_portfolio::equal_weights(comp.len());
-    let pf = sqx_portfolio::combine(&comp_names, &comp, &weights, cfg.initial_deposit, bars.len(), pyp);
-    if !pf.errors.is_empty(){return err_result(pf.errors.join("; "));}
+    context["portfolio_search"]["selected_candidate_indices"]=json!(subset.iter().map(|&i|order[i]).collect::<Vec<_>>());
+    let pf = sqx_portfolio::combine(&comp_names, &comp, &weights, cfg.initial_deposit, bar_count, pyp);
+    if !pf.errors.is_empty(){
+        context["portfolio_search"]["combination_errors"]=json!(pf.errors);
+        let mut response=research_result("Portfolio combination failed.".into(),context,symbol,timeframe,cfg);
+        response["isError"]=json!(true);return response;
+    }
     let mut lines = vec![format!("portfolio: {} strategies | {}", comp.len(), metrics_summary(&pf.metrics))];
     for c in &pf.components {
         lines.push(format!("  {} w={:.2} net={:.2} dd={:.2}%", c.name, c.weight, c.net_profit, c.max_drawdown_pct));
     }
-    research_result(lines.join("
-"),quality,&symbol,timeframe,&cfg)
+    research_result(lines.join("\n"),context,symbol,timeframe,cfg)
 }
 
 fn tool_robustness(args: &Value) -> Value {
@@ -470,6 +494,33 @@ fn tool_robustness(args: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn portfolio_failures_stop_selection_and_keep_research_context() {
+        let strategy=Strategy::new("portfolio fixture");
+        let cfg=BacktestConfig::default();
+        let bars=vec![Bar::new(0,1.0,1.1,0.9,1.0,1.0),Bar::new(60000,1.0,1.1,0.9,1.0,1.0)];
+        let valid=backtest(&strategy,&bars,&Instrument::fx("EURUSD"),&cfg);
+        assert!(valid.errors.is_empty());
+        let mut failed=valid.clone();failed.errors.push("candidate execution failed".into());
+        let response=portfolio_result(&[strategy.clone(),strategy.clone()],&[valid.clone(),failed],2,252.0,42,json!({"data_quality":{"bars":2}}),"EURUSD",Timeframe::M1,&cfg);
+        assert_eq!(response["isError"],true);
+        let text=response["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("No portfolio selection was performed"));
+        let context:Value=serde_json::from_str(text.split_once("research_context: ").unwrap().1).unwrap();
+        assert_eq!(context["data_quality"]["bars"],2);assert_eq!(context["symbol"],"EURUSD");
+        let evidence=&context["portfolio_search"];
+        assert_eq!(evidence["attempted"],2);assert_eq!(evidence["invalid"],1);assert_eq!(evidence["seed"],42);
+        assert_eq!(evidence["candidate_failures"][0]["candidate_index"],1);
+        assert!(evidence.get("selected_candidate_indices").is_none());
+        let no_trades=portfolio_result(&[strategy.clone()],&[valid.clone()],2,252.0,42,json!({}),"EURUSD",Timeframe::M1,&cfg);
+        let text=no_trades["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Not enough qualifying"));
+        let context:Value=serde_json::from_str(text.split_once("research_context: ").unwrap().1).unwrap();
+        assert_eq!(context["portfolio_search"]["invalid"],0);assert_eq!(context["portfolio_search"]["below_ranking_criteria"],1);
+        let mut invalid_observation=valid;invalid_observation.final_equity=f64::NAN;
+        let response=portfolio_result(&[strategy],&[invalid_observation],2,252.0,42,json!({}),"EURUSD",Timeframe::M1,&cfg);
+        assert_eq!(response["isError"],true);assert!(response.to_string().contains("No portfolio selection was performed"));
+    }
     #[test]
     fn generation_failures_cannot_rank_or_disappear_as_low_fitness() {
         let evaluation=|name:&str,trades:f64,pf:f64,errors:Vec<String>|sqx_optimizer::BatchEvaluation {
