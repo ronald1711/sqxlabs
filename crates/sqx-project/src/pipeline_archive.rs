@@ -36,7 +36,7 @@ fn checksum(backup:&Backup)->Result<String,String>{
 pub fn export(archive:&Archive,id:&str)->Result<Value,String>{
     let _guard=lock(archive,id)?;let state=load(archive,id)?;
     let mut events=Vec::new();
-    for (event_id,_) in &state.events {
+    for event_id in &state.events {
         let bundle=archive.load(event_id)?;
         events.push(PortableRecord{run_id:bundle.run_id,run:bundle.run});
     }
@@ -73,7 +73,7 @@ pub fn import(archive:&Archive,value:Value)->Result<Value,String>{
         return Err("Backup contains unrelated or incorrectly classified records".into());
     }
     // Validate container order as well as the stored sequence/previous links.
-    if state.events.iter().map(|(id,_)|id).ne(backup.events.iter().map(|e|&e.run_id)) {
+    if state.events.iter().ne(backup.events.iter().map(|e|&e.run_id)) {
         return Err("Backup events are not in recorded order".into());
     }
     let _guard=lock_validated(archive,id)?; // ID was verified by restore/load above.
@@ -104,7 +104,8 @@ fn completion_request(root:&ResearchBundle)->Value{
     request["research_kind"]=json!("cli_pipeline");request["started_run_id"]=json!(root.run_id);request
 }
 
-struct State {root:ResearchBundle,events:Vec<(String,Value)>,completion:Option<ResearchBundle>}
+// Keep only ordered identities; full execution payloads can dominate archive size.
+struct State {root:ResearchBundle,events:Vec<String>,completion:Option<ResearchBundle>}
 fn load(archive:&Archive,id:&str)->Result<State,String>{
     let root=archive.load(id)?;
     if root.run.request["research_kind"]!="cli_pipeline_started" || root.run.result!=json!({"status":"execution_not_recorded"}){
@@ -120,7 +121,7 @@ fn load(archive:&Archive,id:&str)->Result<State,String>{
         match record.run.request["research_kind"].as_str(){
             Some("cli_pipeline_event")=>{
                 let sequence=record.run.request["sequence"].as_u64().and_then(|n|usize::try_from(n).ok()).ok_or("Invalid event sequence")?;
-                if events.insert(sequence,(record.run_id,record.run.request,record.run.result)).is_some(){return Err("Conflicting pipeline events at the same sequence".into());}
+                if events.insert(sequence,(record.run_id,record.run.request)).is_some(){return Err("Conflicting pipeline events at the same sequence".into());}
             },
             Some("cli_pipeline")=>{
                 if record.run.request!=completion_request(&root) || completion.replace(record).is_some(){return Err("Conflicting pipeline completion records".into());}
@@ -129,14 +130,14 @@ fn load(archive:&Archive,id:&str)->Result<State,String>{
         }
     }
     let mut ordered=Vec::new();let mut previous=None;
-    for (sequence,(record_id,request,result)) in events{
+    for (sequence,(record_id,request)) in events{
         if sequence!=ordered.len() || request!=event_request(&root,sequence,previous.as_ref()){
             return Err("Missing, reordered or incorrectly linked pipeline event".into());
         }
-        previous=Some(record_id.clone());ordered.push((record_id,result));
+        previous=Some(record_id.clone());ordered.push(record_id);
     }
     if let Some(done)=&completion{
-        if done.run.result["event_ids"]!=json!(ordered.iter().map(|(id,_)|id).collect::<Vec<_>>()){
+        if done.run.result["event_ids"]!=json!(ordered){
             return Err("Completion does not cover the exact recorded prefix".into());
         }
     }
@@ -155,9 +156,12 @@ pub fn summary(archive:&Archive,id:&str)->Result<Value,String>{
 
 pub fn inspect(archive:&Archive,id:&str)->Result<Value,String>{
     let _guard=lock(archive,id)?;let state=load(archive,id)?;
+    let events:Vec<_>=state.events.iter().enumerate().map(|(sequence,id)|{
+        archive.load(id).map(|record|json!({"sequence":sequence,"run_id":id,"event":record.run.result}))
+    }).collect::<Result<_,_>>()?;
     Ok(json!({"started_run_id":id,"status":if state.completion.is_some(){"completion_recorded"}else{"incomplete"},
         "completion_id":state.completion.as_ref().map(|r|&r.run_id),"event_count":state.events.len(),
-        "events":state.events.iter().enumerate().map(|(sequence,(id,event))|json!({"sequence":sequence,"run_id":id,"event":event})).collect::<Vec<_>>(),
+        "events":events,
         "execution_replayed":false,"scope":"Hash/input identities and ordered prefix links checked; inspection alone does not verify recorded calculations or correctness."}))
 }
 
@@ -181,8 +185,9 @@ pub fn recover(archive:&Archive,id:&str,resume:bool)->Result<Recovery,String>{
     let report=sqx_pipeline::run_observed(&pipeline,&bars,&instrument,&config,pyp,&generator,seed,&mut |event|{
         let value=serde_json::to_value(event).map_err(|e|e.to_string())?;
         let index=ids.len();
-        let event_id=if let Some((event_id,recorded))=state.events.get(index){
-            if *recorded!=value{return Err(format!("Pipeline replay differs at event {index}; no further work accepted"));}
+        let event_id=if let Some(event_id)=state.events.get(index){
+            let recorded=archive.load(event_id)?.run.result;
+            if recorded!=value{return Err(format!("Pipeline replay differs at event {index}; no further work accepted"));}
             event_id.clone()
         }else{
             if !resume || state.completion.is_some(){return Err("Replay produced events beyond the saved completion".into());}
@@ -218,6 +223,9 @@ mod backup_tests {
             event_request(&root,0,None),json!({"kind":"step_started"})).unwrap();
         let prefix=export(&source,&id).unwrap();
         assert_eq!(import(&target,prefix.clone()).unwrap()["status"],"incomplete");
+        let compact=summary(&target,&id).unwrap();
+        assert_eq!(compact["event_count"],1);assert!(compact.get("events").is_none());
+        assert_eq!(inspect(&target,&id).unwrap()["events"][0]["event"],json!({"kind":"step_started"}));
         assert_eq!(import(&target,prefix.clone()).unwrap()["published_records"],0);
         let done=source.save(root.run.engine_id.clone(),root.dataset.clone(),root.strategy.clone(),
             completion_request(&root),json!({"event_ids":[event],"report":{}})).unwrap();

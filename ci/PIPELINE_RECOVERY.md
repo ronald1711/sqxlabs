@@ -86,3 +86,13 @@ Neither restore nor inspection launches an archived executable. If a request is
 interrupted, inspect again: a still-running process holds the pipeline lock; an
 unfinished saved prefix remains recoverable. Dashboard and CLI share the same
 archive validation, writer lock and exact-engine recovery implementation.
+
+## Memory scope
+
+Structural validation and compact status retain ordered event identities rather
+than all execution payloads. Replay loads and hash-checks the recorded execution
+for the current event before comparing it, then drops it. Full inspection and
+JSON backup export still materialize their requested payloads; the final report,
+simulator state, input dataset and candidate family also remain in memory.
+This removes one archive-size-dependent retention path; it is not a general
+bounded-memory guarantee or a completed large-search performance validation.
