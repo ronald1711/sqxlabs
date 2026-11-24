@@ -13,7 +13,7 @@ use sqx_robustness::monte_carlo_trade_manipulation;
 use sqx_strategy::Strategy;
 
 /// One pipeline step.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub enum TaskKind {
     Build { count: usize, keep: usize },
     Retest { mc_runs: usize, min_positive_pct: f64 },
@@ -22,20 +22,20 @@ pub enum TaskKind {
 }
 
 /// A named task.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Task {
     pub kind: TaskKind,
 }
 
 /// A custom project pipeline.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Pipeline {
     pub name: String,
     pub tasks: Vec<Task>,
 }
 
 /// The outcome of running a pipeline.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PipelineReport {
     pub retests: Vec<RetestEvaluation>,
     pub builds: Vec<BuildEvaluation>,
@@ -45,7 +45,7 @@ pub struct PipelineReport {
     pub log: Vec<String>,
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug,Clone,serde::Serialize)]
 pub struct BuildEvaluation {
     pub step: usize,
     pub candidate_index: usize,
@@ -53,7 +53,7 @@ pub struct BuildEvaluation {
     pub selected: bool,
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug,Clone,serde::Serialize)]
 pub struct RetestEvaluation {
     pub step:usize,
     pub strategy:Strategy,
@@ -66,7 +66,7 @@ pub struct RetestEvaluation {
 }
 
 /// Recorded family evaluation, including rejected/insufficient candidates.
-#[derive(Debug,Clone)]
+#[derive(Debug,Clone,serde::Serialize)]
 pub struct CandidateOptimization {
     pub original: Strategy,
     pub family: Vec<Strategy>,

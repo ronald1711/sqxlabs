@@ -190,7 +190,7 @@ fn max_drawdown_equity(equity: &[(i64, f64)], initial: f64) -> f64 {
 }
 
 /// One resampled path, in generation order (zero-based run index).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct MonteCarloSample {
     pub run_index: usize,
     pub included_trades: usize,
@@ -199,7 +199,7 @@ pub struct MonteCarloSample {
 }
 
 /// Summary of a Monte Carlo trade-manipulation experiment.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct MonteCarloReport {
     pub samples: Vec<MonteCarloSample>,
     pub errors: Vec<String>,

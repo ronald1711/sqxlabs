@@ -736,6 +736,7 @@ name = "sqx-pipeline"
 version = "0.1.0"
 dependencies = [
  "rand",
+ "serde",
  "sqx-backtest",
  "sqx-core",
  "sqx-metrics",
@@ -774,6 +775,7 @@ name = "sqx-robustness"
 version = "0.1.0"
 dependencies = [
  "rand",
+ "serde",
  "sqx-backtest",
  "sqx-core",
  "sqx-metrics",
