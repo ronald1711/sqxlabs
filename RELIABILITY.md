@@ -32,6 +32,20 @@ verification evidence. Scope must not be reduced to the currently passing tests.
 
 ## Current completion audit (supersedes historical pending notes below)
 
+Latest integration status (2026-11-24): PR #8 merged as `8ef3ef2` after all four
+required checks passed on `871daf7`. Standalone generation/walk-forward recovery
+and their saved-research labels are therefore on main. Subsequent indicator,
+stochastic export, generator-threshold and inventory-CI changes remain pending
+integration. Earlier statements below describing PR #8 as pending are historical.
+At `08db843`, the complete local workspace suite passed 441 tests with zero failed
+or ignored, and the workspace build passed. The independent synthetic reference
+also passed eight execution cases, archive replay and future-price invariance.
+The later merge of current main and the PR #9 branch introduced no source changes.
+The combined revision still needs its own four required remote checks; the earlier
+PR #9 head `f02bb05` passed its four checks but does not include the later repairs.
+No completion requirement or independent platform-execution gap is closed by
+these test counts.
+
 This table is an incomplete-work audit, not certification. Later sections are an
 append-only implementation history; an older “pending” statement may have been
 resolved by a later increment. The numbered requirements above remain unchanged.
