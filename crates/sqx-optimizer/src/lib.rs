@@ -352,6 +352,7 @@ impl EvolutionState {
     pub fn population_size(&self)->usize{self.population.len()}
     pub fn instrument(&self)->&Instrument{&self.instrument}
     pub fn backtest_config(&self)->&BacktestConfig{&self.config}
+    pub fn source_bars(&self)->&[Bar]{&self.bars}
     pub fn genetic_config(&self)->&GeneticConfig{&self.ga}
     pub fn fitness(&self)->Fitness{self.kind}
     pub fn observation_range(&self)->Option<(i64,i64)>{Some((self.bars.first()?.time,self.bars.last()?.time))}

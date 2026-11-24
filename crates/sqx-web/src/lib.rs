@@ -269,10 +269,7 @@ mod tests {
         std::fs::remove_dir_all(state.archive.root()).unwrap();
     }
 
-    #[test]
-    fn frozen_experiment_uses_saved_data_costs_and_records_all_search_trials() {
-        let state=research_state();
-        let bundle={
+    fn attach_normalization(state:&State)->sqx_data::normalization::Bundle{
             let mut store=state.store.write().unwrap();let series=&mut store.series[0];
             let mut utc=String::from("timestamp,open,high,low,close,volume\n");
             for b in &series.bars {utc.push_str(&format!("{},{},{},{},{},{}\n",b.time/1000,b.open,b.high,b.low,b.close,b.volume));}
@@ -282,7 +279,28 @@ mod tests {
             let manifest=json!({"schema":1,"server":"synthetic","raw_sha256":hash(&raw),"policy_sha256":hash(&policy),"normalized_sha256":hash(&utc),"rows":series.bars.len(),"bar_duration_ms":60000,"clock":"explicit UTC fixture","scope":"synthetic transformation"}).to_string();
             let bundle=sqx_data::normalization::Bundle{manifest_json:manifest,policy_json:policy,raw_csv:raw,utc_csv:utc};
             series.normalization=Some(bundle.clone());bundle
-        };
+    }
+
+    #[test]
+    fn evolution_creation_preserves_normalization_after_live_data_is_removed(){
+        let state=research_state();let bundle=attach_normalization(&state);
+        let ga=sqx_optimizer::GeneticConfig{population_size:2,generations:1,elite_count:1,..Default::default()};
+        let result:serde_json::Value=serde_json::from_str(&evolution_json("start",&json!({"symbol":"EURUSD","request_key":"normalization","seed":42,"ga":ga}).to_string(),&state)).unwrap();
+        let id=result["status"]["job_id"].as_str().expect("evolution job created");
+        state.store.write().unwrap().series.clear();
+        let jobs=sqx_project::evolution::EvolutionJobs::new(state.archive.root());
+        let backup=jobs.backup(id).unwrap();backup.verify().unwrap();
+        let job:sqx_project::evolution::EvolutionJob=serde_json::from_str(&backup.job_json).unwrap();
+        assert_eq!(serde_json::to_value(job.normalization.unwrap()).unwrap(),json!(bundle));
+        let destination=research_state();let restored=sqx_project::evolution::EvolutionJobs::new(destination.archive.root());
+        restored.restore(&backup).unwrap();assert_eq!(restored.backup(id).unwrap().job_json,backup.job_json);
+        std::fs::remove_dir_all(state.archive.root()).unwrap();std::fs::remove_dir_all(destination.archive.root()).unwrap();
+    }
+
+    #[test]
+    fn frozen_experiment_uses_saved_data_costs_and_records_all_search_trials() {
+        let state=research_state();
+        let bundle=attach_normalization(&state);
         let split=state.store.read().unwrap().series[0].bars[140].time;
         let request=json!({"symbol":"EURUSD","holdout_start_time":split,"min_development_trades":1,"min_holdout_trades":1,"prior_exposure_disclosed":true,"deposit":4321.0});
         let created:serde_json::Value=serde_json::from_str(&experiment_json("create",&request.to_string(),&state)).unwrap();
@@ -2024,7 +2042,7 @@ fn evolution_json(action:&str,body:&str,state:&State)->String {
                 let config=config_for_series(&value,&series)?;let generator=gen_config_from(&value)?;let instrument=instrument_for(&series.symbol);
                 let initial=sqx_optimizer::EvolutionState::new(input.seed,&generator,&input.ga,sqx_optimizer::Fitness::ProfitFactor,&series.bars,&instrument,&config,pyp_for(&series.bars))?;
                 let context=json!({"source":"web","seed":input.seed,"timeframe":series.timeframe,"calendar":series.calendar,"data_quality":quality,"allow_data_gaps":value.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false)});
-                let id=jobs.create_with_context(&retained_engine_identity(state)?,&input.request_key,&initial,context)?;
+                let id=jobs.create_with_normalization(&retained_engine_identity(state)?,&input.request_key,&initial,context,series.normalization.clone())?;
                 Ok(json!({"status":jobs.status(&id)?,"data_quality":quality,"interpretation":"Frozen exploratory search over all supplied data; not an untouched final test."}))
             },
             "advance"=>{

@@ -3678,3 +3678,28 @@ and other research routes still need equivalent source-bundle propagation.
 Both full local debug and release gates passed for the experiment normalization
 increment: workspace tests/builds, frontend checks, 37 Python tests and independent
 reference/replay/future-mutation checks. Publication and remote checks are separate.
+
+### Normalization sources in durable genetic searches
+
+New evolution jobs have an optional source-bundle field separate from their
+1 MiB metadata context. Dashboard creation passes the imported bundle; CLI-style
+contexts containing a bundle are lifted into this field before the context limit
+is checked. Source bundles are bounded separately at 20 MiB. Missing legacy
+sources are not manufactured. Existing embedded legacy bundles remain readable.
+
+Creation, stored-job reads and backup verification recheck the source against
+initial candles and duration. Recorded normalization verification metadata must
+agree with the recomputed result. Duplicate sources, orphan verification claims,
+and rehashed candle alterations are rejected. The source remains part of the
+content-addressed job and raw backup JSON; it is not an external mutable link.
+
+Targeted tests pass for a source larger than 1 MiB, preserved metadata bounds,
+source-free restore, legacy bundles, rehashed candle edits and altered verification
+metadata. A dashboard test checks exact source retention after removing live data.
+The full workspace/profile gates are checked separately before publication.
+
+Full local debug and release gates passed for this source-bundle increment,
+including workspace tests/builds, frontend checks, 37 Python tests and independent
+reference/replay/future-mutation checks. Frozen-input consistency across later
+checkpoint states is a separate review item; source validation of the initial
+job must not be represented as proof of every subsequent state transition.

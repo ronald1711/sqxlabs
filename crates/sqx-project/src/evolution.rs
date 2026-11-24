@@ -6,7 +6,25 @@ use sqx_optimizer::EvolutionState;
 use crate::archive::Archive;
 #[derive(Debug,Clone,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct EvolutionJob {pub schema:u32,pub engine_id:String,pub request_key:String,pub initial:EvolutionState,#[serde(default,skip_serializing_if="Value::is_null")] pub context:Value}
+pub struct EvolutionJob {pub schema:u32,pub engine_id:String,pub request_key:String,pub initial:EvolutionState,#[serde(default,skip_serializing_if="Value::is_null")] pub context:Value,
+ #[serde(default,skip_serializing_if="Option::is_none")] pub normalization:Option<sqx_data::normalization::Bundle>}
+impl EvolutionJob {
+ fn verify_normalization(&self)->Result<(),String>{
+  let legacy=self.context["normalization"].get("bundle").filter(|v|!v.is_null())
+   .map(|v|serde_json::from_value::<sqx_data::normalization::Bundle>(v.clone()).map_err(err)).transpose()?;
+  if self.normalization.is_some() && legacy.is_some(){return Err("Duplicate evolution normalization sources".into());}
+  if let Some(bundle)=self.normalization.as_ref().or(legacy.as_ref()) {
+   if encode(bundle)?.len()>20*1024*1024{return Err("Evolution normalization source exceeds 20 MiB".into());}
+   let verified=bundle.verify_bars(self.initial.source_bars(),self.initial.backtest_config().bar_duration_ms)?;
+   if let Some(claim)=self.context["normalization"].get("verification").filter(|v|!v.is_null()) {
+    if serde_json::to_value(verified).map_err(err)?!=*claim{return Err("Evolution normalization verification differs from source".into());}
+   }
+  } else if self.context["normalization"].get("verification").is_some_and(|v|!v.is_null()) {
+   return Err("Evolution normalization verification has no source bundle".into());
+  }
+  Ok(())
+ }
+}
 #[derive(Debug,Clone,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GenerationRecord {
@@ -56,6 +74,7 @@ impl EvolutionBackup {
  pub fn verify(&self)->Result<(),String>{
   if self.schema!=1 || crate::archive::content_id(self.job_json.as_bytes())!=self.job_id{return Err("Evolution backup job integrity failure".into());}
   let job:EvolutionJob=serde_json::from_str(&self.job_json).map_err(err)?;
+  job.verify_normalization()?;
   if job.schema!=1 || job.initial.generation()!=0 || job.initial.is_complete(){return Err("Invalid initial evolution job".into());}
   let (_,last)=job.initial.observation_range().ok_or("Evolution dataset is empty")?;
   crate::observation::end(last,job.initial.backtest_config().bar_duration_ms,&job.context["timeframe"])?;
@@ -93,13 +112,22 @@ impl EvolutionJobs {
   self.create_with_context(engine_id,request_key,state,Value::Null)
  }
  pub fn create_with_context(&self,engine_id:&str,request_key:&str,state:&EvolutionState,context:Value)->Result<String,String>{
+  self.create_with_normalization(engine_id,request_key,state,context,None)
+ }
+ pub fn create_with_normalization(&self,engine_id:&str,request_key:&str,state:&EvolutionState,mut context:Value,mut normalization:Option<sqx_data::normalization::Bundle>)->Result<String,String>{
   if !context.is_null() && !context.is_object(){return Err("Evolution context must be an object".into());}
+  if let Some(source)=context["normalization"].get("bundle").filter(|v|!v.is_null()).cloned() {
+   if normalization.is_some(){return Err("Duplicate evolution normalization sources".into());}
+   normalization=Some(serde_json::from_value(source).map_err(err)?);
+   context["normalization"].as_object_mut().unwrap().remove("bundle");
+  }
   if encode(&context)?.len()>1024*1024{return Err("Evolution context exceeds 1 MiB".into());}
   if engine_id.trim().is_empty() || request_key.trim().is_empty() || request_key.len()>256{return Err("Engine identity and bounded request key are required".into());}
   if state.generation()!=0 || state.is_complete(){return Err("A new evolution job requires an initial checkpoint".into());}
   let (_,last)=state.observation_range().ok_or("Evolution dataset is empty")?;
   crate::observation::end(last,state.backtest_config().bar_duration_ms,&context["timeframe"])?;
-  let job=EvolutionJob{schema:1,engine_id:engine_id.into(),request_key:request_key.into(),initial:state.clone(),context};
+  let job=EvolutionJob{schema:1,engine_id:engine_id.into(),request_key:request_key.into(),initial:state.clone(),context,normalization};
+  job.verify_normalization()?;
   let bytes=encode(&job)?;let expected_id=crate::archive::content_id(&bytes);
   fs::create_dir_all(self.archive.root()).map_err(err)?;
   let lock=OpenOptions::new().create(true).truncate(false).read(true).write(true).open(self.archive.root().join("evolution-registry.lock")).map_err(err)?;lock.lock().map_err(err)?;
@@ -115,7 +143,7 @@ impl EvolutionJobs {
  }
  fn job(&self,id:&str)->Result<EvolutionJob,String>{
   let job:EvolutionJob=serde_json::from_slice(&self.archive.read_blob("evolution_jobs",id)?).map_err(err)?;
-  if job.schema!=1{return Err("Unsupported evolution job schema".into());}Ok(job)
+  if job.schema!=1{return Err("Unsupported evolution job schema".into());}job.verify_normalization()?;Ok(job)
  }
  fn lock(&self,id:&str)->Result<(File,PathBuf),String>{
   self.job(id)?; // Checks identifier and integrity before using it as a directory name.
