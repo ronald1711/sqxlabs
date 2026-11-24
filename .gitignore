@@ -7,6 +7,7 @@ scripts/*
 !scripts/mt5_export.py
 !scripts/mt5_normalize.py
 !scripts/mt5_capture_window.py
+!scripts/mt5_capture_quality.py
 !scripts/mt5_capture_journal.py
 !scripts/mt5_record.py
 !scripts/mt5_errors.py

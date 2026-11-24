@@ -645,3 +645,22 @@ the current 10000 ms reference contract. That contract was not relaxed to declar
 the new sample fully covered. A later invocation of the updated recorder appended
 one more window successfully; automatic late-history recovery itself is covered
 by the controlled tests, not claimed as observed in that successful invocation.
+
+## Reusable offline candle/tick consistency check
+
+`python3 scripts/mt5_capture_quality.py --capture <hash-named-capture-directory>`
+checks the capture hash, contiguous M1 candle timestamps, tick bounds/order and
+bid/ask validity, then compares each candle's OHLC exactly with its observed bid
+ticks. Equal-millisecond ticks retain response order. Missing ticks and differing
+OHLC produce a discrepancy report and nonzero exit; invalid input is rejected.
+Tick-volume counts are reported but are not used to certify tick completeness.
+This check neither normalizes broker time nor proves authentic/complete history,
+conversion freshness or executable fills.
+
+During the fifteen-window read-only recording probe beginning at broker timestamp
+1795527300, the first EURJPY history response contained ticks but no candle. A
+bounded retry in the same invocation recovered the window before committing it.
+A concurrent two-window export (hash a5137be1e54124c140dec232317227d79811f0623877952ae397e87502e67bf0)
+passed all six candle comparisons while recording continued. This is interim
+evidence, not completion of the fifteen-window probe. The 40-test Python suite
+passed, including mismatched OHLC, missing ticks and invalid-input regressions.
