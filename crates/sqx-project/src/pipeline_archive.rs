@@ -1,6 +1,6 @@
 //! Pipeline prefix inspection and deterministic recovery. Stored binaries are never executed.
 use serde_json::{json,Value};
-use crate::archive::{Archive,ResearchBundle};
+use crate::archive::{Archive,ResearchBundle,RunRecord};
 use std::collections::BTreeMap;
 
 const SCOPE:&str="Ordered build/retest and walk-forward trial checkpoints, with full walk-forward execution outcomes. Recovery replays the saved prefix before appending missing events. Full-data discovery is exploratory, not an untouched holdout.";
@@ -45,7 +45,7 @@ fn checksum(backup:&Backup)->Result<String,String>{
 
 pub fn export(archive:&Archive,id:&str)->Result<Value,String>{
     let _guard=lock(archive,id)?;let state=load(archive,id)?;
-    let mut events=Vec::new();let mut reader=archive.read_session();
+    let mut events=Vec::new();let mut reader=archive.record_session();
     for event_id in &state.events {
         events.push(PortableRecord{run_id:event_id.clone(),run:reader.load_run(event_id)?});
     }
@@ -70,11 +70,10 @@ pub fn import(archive:&Archive,value:Value)->Result<Value,String>{
     impl Drop for Temporary {fn drop(&mut self){let _=std::fs::remove_dir_all(&self.0);}}
     let _temporary=Temporary(path.clone());let staging=Archive::new(path);
     staging.restore(&backup.start)?;
-    let mut incoming=vec![backup.start.run_id.clone()];
+    let mut incoming=vec![backup.start.run_id.clone()];let mut staging_reader=staging.record_session();
     for record in backup.events.iter().chain(backup.completion.iter()) {
         if incoming.contains(&record.run_id){return Err("Duplicate pipeline backup record".into());}
-        let bundle=ResearchBundle{run_id:record.run_id.clone(),run:record.run.clone(),dataset:backup.start.dataset.clone(),strategy:backup.start.strategy.clone()};
-        staging.restore(&bundle)?;incoming.push(record.run_id.clone());
+        staging_reader.restore_run(&record.run_id,&record.run)?;incoming.push(record.run_id.clone());
     }
     let id=&backup.start.run_id;
     let state=load(&staging,id)?;
@@ -91,20 +90,23 @@ pub fn import(archive:&Archive,value:Value)->Result<Value,String>{
     let _request_guard=request_key.map(|key|stress_request_lock(archive,key)).transpose()?;
     let _guard=lock_validated(archive,id)?; // ID was verified by restore/load above.
     let existing=archive.list()?;
+    let mut existing_reader=archive.record_session();
     for record_id in &existing {
-        let record=archive.load(record_id)?;
+        let record=PortableRecord{run_id:record_id.clone(),run:existing_reader.load_run(record_id)?};
         if let Some(key)=request_key {
             if record.run_id!=*id && record.run.request["research_kind"]=="cli_pipeline_started" && record.run.request["origin"]=="web_robustness" && record.run.request["web_request"]["request_key"]==key {
                 return Err("Restored stress-test request key conflicts with an existing study".into());
             }
         }
-        if record.run_id==*id || record.run.request["started_run_id"]==*id {staging.restore(&record)?;}
+        if record.run_id==*id || record.run.request["started_run_id"]==*id {staging_reader.restore_run(&record.run_id,&record.run)?;}
     }
     let merged=load(&staging,id)?;
     let mut published=0;
-    // Completion goes last, after every linked input/event has been published.
+    // Publish shared inputs once, then every checked event; completion stays last.
+    archive.restore(&backup.start)?;
+    let mut publishing_reader=archive.record_session();
     for record_id in &incoming {
-        archive.restore(&staging.load(record_id)?)?;
+        publishing_reader.restore_run(record_id,&staging_reader.load_run(record_id)?)?;
         if !existing.contains(record_id){published+=1;}
     }
     Ok(json!({"started_run_id":id,"published_records":published,"event_count":merged.events.len(),
@@ -129,7 +131,7 @@ fn load(archive:&Archive,id:&str)->Result<State,String>{
     if root.run.request["research_kind"]!="cli_pipeline_started" || root.run.result!=json!({"status":"execution_not_recorded"}){
         return Err("Expected a pipeline start record".into());
     }
-    let mut events=BTreeMap::new();let mut completion=None;let mut reader=archive.read_session();
+    let mut events=BTreeMap::new();let mut completion=None;let mut reader=archive.record_session();
     for record_id in archive.list()?{
         let run=reader.load_run(&record_id)?;
         let record=PortableRecord{run_id:record_id,run};
@@ -175,7 +177,7 @@ pub fn summary(archive:&Archive,id:&str)->Result<Value,String>{
 
 pub fn inspect(archive:&Archive,id:&str)->Result<Value,String>{
     let _guard=lock(archive,id)?;let state=load(archive,id)?;
-    let mut reader=archive.read_session();
+    let mut reader=archive.record_session();
     let events:Vec<_>=state.events.iter().enumerate().map(|(sequence,id)|{
         reader.load_run(id).map(|record|json!({"sequence":sequence,"run_id":id,"event":record.result}))
     }).collect::<Result<_,_>>()?;
@@ -201,7 +203,7 @@ pub fn recover(archive:&Archive,id:&str,resume:bool)->Result<Recovery,String>{
     let generator:sqx_optimizer::GeneratorConfig=serde_json::from_value(root.strategy["generator"].clone()).map_err(|e|e.to_string())?;
     let seed=root.run.request["seed"].as_u64().ok_or("Missing pipeline seed")?;
     let pyp=root.run.request["periods_per_year"].as_f64().filter(|n|n.is_finite() && *n>0.0).ok_or("Invalid periods per year")?;
-    let mut ids=Vec::new();let mut appended=0;let mut reader=archive.read_session();
+    let mut ids=Vec::new();let mut appended=0;let mut reader=archive.record_session();
     let report=sqx_pipeline::run_observed(&pipeline,&bars,&instrument,&config,pyp,&generator,seed,&mut |event|{
         let value=serde_json::to_value(event).map_err(|e|e.to_string())?;
         let index=ids.len();
@@ -211,7 +213,7 @@ pub fn recover(archive:&Archive,id:&str,resume:bool)->Result<Recovery,String>{
             event_id.clone()
         }else{
             if !resume || state.completion.is_some(){return Err("Replay produced events beyond the saved completion".into());}
-            let event_id=archive.save(root.run.engine_id.clone(),root.dataset.clone(),root.strategy.clone(),event_request(root,index,ids.last()),value)?;
+            let event_id=reader.save_run(&RunRecord{schema:1,engine_id:root.run.engine_id.clone(),dataset_id:root.run.dataset_id.clone(),strategy_id:root.run.strategy_id.clone(),request:event_request(root,index,ids.last()),result:value})?;
             appended+=1;event_id
         };
         ids.push(event_id);Ok(())
@@ -224,7 +226,7 @@ pub fn recover(archive:&Archive,id:&str,resume:bool)->Result<Recovery,String>{
             return Err("Pipeline final report differs on replay".into());
         }
         done.run_id
-    }else{archive.save(root.run.engine_id.clone(),root.dataset.clone(),root.strategy.clone(),completion_request(root),result)?};
+    }else{reader.save_run(&RunRecord{schema:1,engine_id:root.run.engine_id.clone(),dataset_id:root.run.dataset_id.clone(),strategy_id:root.run.strategy_id.clone(),request:completion_request(root),result})?};
     Ok(Recovery{report,completion_id,replayed:state.events.len(),appended})
 }
 
