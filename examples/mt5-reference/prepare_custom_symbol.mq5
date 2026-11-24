@@ -4,35 +4,46 @@
 #property strict
 #property script_show_inputs
 input bool CreateSyntheticTestMarket=false;
+bool SetI(string s,ENUM_SYMBOL_INFO_INTEGER key,long value) {
+ ResetLastError();if(CustomSymbolSetInteger(s,key,value))return true;
+ PrintFormat("SQX_FIXTURE_PROPERTY_ERROR property=%s error=%d",EnumToString(key),GetLastError());return false;
+}
+bool SetD(string s,ENUM_SYMBOL_INFO_DOUBLE key,double value) {
+ ResetLastError();if(CustomSymbolSetDouble(s,key,value))return true;
+ PrintFormat("SQX_FIXTURE_PROPERTY_ERROR property=%s value=%.8f error=%d",EnumToString(key),value,GetLastError());return false;
+}
+bool SetS(string s,ENUM_SYMBOL_INFO_STRING key,string value) {
+ ResetLastError();if(CustomSymbolSetString(s,key,value))return true;
+ PrintFormat("SQX_FIXTURE_PROPERTY_ERROR property=%s error=%d",EnumToString(key),GetLastError());return false;
+}
 void OnStart() {
  if(!CreateSyntheticTestMarket || MQLInfoInteger(MQL_TESTER)) {
   Print("SQX_FIXTURE_REFUSED: explicitly enable CreateSyntheticTestMarket in the terminal script inputs");return;
  }
- string s="SQX_EURUSD";
+ string s="SQX_EURUSD_V2";
  if(!CustomSymbolCreate(s,"SqxReference","")) {Print("SQX_REF_CREATE_ERROR ",GetLastError());return;}
- bool ok=true;
- ok=CustomSymbolSetInteger(s,SYMBOL_DIGITS,5)&&ok;
- ok=CustomSymbolSetInteger(s,SYMBOL_SWAP_MODE,SYMBOL_SWAP_MODE_DISABLED)&&ok;
- ok=CustomSymbolSetInteger(s,SYMBOL_TRADE_STOPS_LEVEL,0)&&ok;
- ok=CustomSymbolSetInteger(s,SYMBOL_TRADE_FREEZE_LEVEL,0)&&ok;
- ok=CustomSymbolSetDouble(s,SYMBOL_POINT,0.00001)&&ok;
- ok=CustomSymbolSetDouble(s,SYMBOL_TRADE_TICK_SIZE,0.00001)&&ok;
- ok=CustomSymbolSetDouble(s,SYMBOL_TRADE_CONTRACT_SIZE,100000)&&ok;
- ok=CustomSymbolSetDouble(s,SYMBOL_VOLUME_MIN,0.01)&&ok;
- ok=CustomSymbolSetDouble(s,SYMBOL_VOLUME_MAX,100)&&ok;
- ok=CustomSymbolSetDouble(s,SYMBOL_VOLUME_STEP,0.01)&&ok;
- ok=CustomSymbolSetString(s,SYMBOL_CURRENCY_BASE,"EUR")&&ok;
- ok=CustomSymbolSetString(s,SYMBOL_CURRENCY_PROFIT,"USD")&&ok;
- ok=CustomSymbolSetString(s,SYMBOL_CURRENCY_MARGIN,"EUR")&&ok;
- ok=CustomSymbolSetInteger(s,SYMBOL_TRADE_CALC_MODE,SYMBOL_CALC_MODE_FOREX)&&ok;
- ok=CustomSymbolSetInteger(s,SYMBOL_TRADE_MODE,SYMBOL_TRADE_MODE_FULL)&&ok;
- ok=CustomSymbolSetInteger(s,SYMBOL_TRADE_EXEMODE,SYMBOL_TRADE_EXECUTION_MARKET)&&ok;
- ok=CustomSymbolSetInteger(s,SYMBOL_FILLING_MODE,SYMBOL_FILLING_FOK)&&ok;
+ if(!SetI(s,SYMBOL_DIGITS,5))return;
+ if(!SetI(s,SYMBOL_SWAP_MODE,SYMBOL_SWAP_MODE_DISABLED))return;
+ if(!SetI(s,SYMBOL_TRADE_STOPS_LEVEL,0))return;
+ if(!SetI(s,SYMBOL_TRADE_FREEZE_LEVEL,0))return;
+ if(!SetD(s,SYMBOL_POINT,0.00001))return;
+ if(!SetD(s,SYMBOL_TRADE_TICK_SIZE,0.00001))return;
+ if(!SetD(s,SYMBOL_TRADE_CONTRACT_SIZE,100000))return;
+ if(!SetD(s,SYMBOL_VOLUME_MAX,100))return;
+ if(!SetD(s,SYMBOL_VOLUME_STEP,0.01))return;
+ if(!SetD(s,SYMBOL_VOLUME_MIN,0.01))return;
+ if(SymbolInfoDouble(s,SYMBOL_VOLUME_MIN)!=0.01 || SymbolInfoDouble(s,SYMBOL_VOLUME_MAX)!=100 || SymbolInfoDouble(s,SYMBOL_VOLUME_STEP)!=0.01){Print("SQX_FIXTURE_VOLUME_READBACK_ERROR");return;}
+ if(!SetS(s,SYMBOL_CURRENCY_BASE,"EUR"))return;
+ if(!SetS(s,SYMBOL_CURRENCY_PROFIT,"USD"))return;
+ if(!SetS(s,SYMBOL_CURRENCY_MARGIN,"EUR"))return;
+ if(!SetI(s,SYMBOL_TRADE_CALC_MODE,SYMBOL_CALC_MODE_FOREX))return;
+ if(!SetI(s,SYMBOL_TRADE_MODE,SYMBOL_TRADE_MODE_FULL))return;
+ if(!SetI(s,SYMBOL_TRADE_EXEMODE,SYMBOL_TRADE_EXECUTION_MARKET))return;
+ if(!SetI(s,SYMBOL_FILLING_MODE,SYMBOL_FILLING_FOK))return;
  for(int day=0;day<7;day++) {
-  ok=CustomSymbolSetSessionQuote(s,(ENUM_DAY_OF_WEEK)day,0,0,86400)&&ok;
-  ok=CustomSymbolSetSessionTrade(s,(ENUM_DAY_OF_WEEK)day,0,0,86400)&&ok;
+  ResetLastError();if(!CustomSymbolSetSessionQuote(s,(ENUM_DAY_OF_WEEK)day,0,0,86400)){PrintFormat("SQX_FIXTURE_QUOTE_SESSION_ERROR day=%d error=%d",day,GetLastError());return;}
+  ResetLastError();if(!CustomSymbolSetSessionTrade(s,(ENUM_DAY_OF_WEEK)day,0,0,86400)){PrintFormat("SQX_FIXTURE_TRADE_SESSION_ERROR day=%d error=%d",day,GetLastError());return;}
  }
- if(!ok){Print("SQX_REF_PROPERTIES_ERROR ",GetLastError());return;}
  if(!SymbolSelect(s,true)){Print("SQX_FIXTURE_SELECT_ERROR ",GetLastError());return;}
  MqlRates rates[];MqlTick ticks[];ArrayResize(rates,240);ArrayResize(ticks,960);
  datetime start=D'2026.01.04 22:00';
@@ -60,5 +71,5 @@ void OnStart() {
    Print("SQX_FIXTURE_BAR_MISMATCH ",k);return;
   }
  }
- Print("SQX_FIXTURE_READY symbol=SQX_EURUSD bars=240 ticks=960 tick_and_bar_readback=matched");
+ Print("SQX_FIXTURE_READY symbol=SQX_EURUSD_V2 bars=240 ticks=960 tick_and_bar_readback=matched");
 }

@@ -103,3 +103,13 @@ The extra prehistory avoids the documented tester requirement for at least 100
 preceding bars moving the requested start date. The original 120 test candles
 and hand-calculated long/short expectations are unchanged. Setup is not execution
 parity evidence; inspect the actual tester start, ticks, settings and full logs.
+
+### Setup revision V2
+
+The first user-run setup reported 5308, followed by 5304 on retry. Read-only
+inspection found volume_min still at 0.00000001 while volume_max=100 and
+volume_step=0.01 had applied. V2 sets maximum, step and minimum in that order,
+checks volume readback and reports each failing property/session immediately.
+It creates a fresh `SQX_EURUSD_V2`, leaving the partial original untouched.
+Use that symbol in the tester and `--symbol SQX_EURUSD_V2` in the log checker.
+V2 compilation and runtime success still require the user's terminal check.

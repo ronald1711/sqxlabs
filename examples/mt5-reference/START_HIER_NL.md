@@ -4,6 +4,12 @@ Voer dit uit in de MT5 die je via SiliconMetaTrader5 opent. Een losse installati
 
 De proef gebruikt verzonnen koersen en een virtueel testeraccount van **USD 10.000, hefboom 1:30**. Dit wijzigt niet de valuta of het saldo van je EUR-demoaccount. De referentiestrategie weigert buiten de Strategy Tester te draaien en accepteert alleen een eigen testsymbool. Er worden geen orders naar de broker gestuurd.
 
+## Herstel na fout 5308 / 5304
+
+Vervang alleen het setupscript onder **MQL5/Scripts** door de nieuwe versie en compileer het opnieuw. Start het via **Scripts** in Navigator, niet via de dubbele kopie onder Expert Advisors. Laat het gedeeltelijk aangemaakte `SQX_EURUSD` staan. Versie 2 gebruikt `SQX_EURUSD_V2` en zet eerst het maximumvolume, dan de stapgrootte en het minimumvolume. De eerste mislukte instelling wordt nu bij naam gemeld. Laat Algo Trading voor charts uit; inschakelen verhelpt deze configuratiefout niet.
+
+De bestaande `constant_signal_exit` hoeft niet aangepast te worden. Kies bij de tester wel het nieuwe symbool. Logcontrole voor deze versie gebruikt `--symbol SQX_EURUSD_V2`.
+
 ## 1. Twee bestanden plaatsen en compileren
 
 Open in MT5 **File → Open Data Folder**. Kopieer:
@@ -17,11 +23,11 @@ Open MetaEditor vanuit deze MT5 met F4 (op de Mac eventueel Fn+F4). Open beide b
 
 Ga terug naar MT5. Ververs zo nodig Navigator. Onder **Scripts**: start `prepare_custom_symbol` op een bestaande chart. Zet de invoer **CreateSyntheticTestMarket = true** en bevestig.
 
-Het script maakt uitsluitend het nieuwe symbool **SQX_EURUSD**. Het toont dit nieuwe testsymbool in Market Watch en overschrijft geen bestaand symbool. Het bevat geen orderfuncties. Het importeert 240 M1-candles en 960 bid/ask-ticks: 120 opwarmcandles en 120 testcandles. Swap staat uit; de spread is vast twee pips.
+Het script maakt uitsluitend het nieuwe symbool **SQX_EURUSD_V2**. Het toont dit nieuwe testsymbool in Market Watch en overschrijft geen bestaand symbool. Het bevat geen orderfuncties. Het importeert 240 M1-candles en 960 bid/ask-ticks: 120 opwarmcandles en 120 testcandles. Swap staat uit; de spread is vast twee pips.
 
 Controleer onder **Toolbox → Experts** de melding:
 
-`SQX_FIXTURE_READY symbol=SQX_EURUSD bars=240 ticks=960 tick_and_bar_readback=matched`
+`SQX_FIXTURE_READY symbol=SQX_EURUSD_V2 bars=240 ticks=960 tick_and_bar_readback=matched`
 
 **Ga alleen verder als deze melding er staat.** Bij een bestaande naam of een andere fout: bewaar de melding; verwijder of overschrijf niet op goed geluk iets. Een mislukte setup kan een gedeeltelijk aangemaakt testsymbool achterlaten.
 
@@ -32,7 +38,7 @@ Open **View → Strategy Tester** (Ctrl+R) en kies een enkele test, geen optimal
 | Instelling | Waarde |
 |---|---|
 | Expert | constant_signal_exit |
-| Symbool | SQX_EURUSD |
+| Symbool | SQX_EURUSD_V2 |
 | Periode | M1 |
 | Begin / einde | 2026.01.05 / 2026.01.06 |
 | Model | Every tick based on real ticks |

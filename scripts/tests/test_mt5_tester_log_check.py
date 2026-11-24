@@ -34,6 +34,14 @@ class TesterLogCheck(unittest.TestCase):
         with self.assertRaises(ValueError):
             check(short)
 
+    def test_versioned_symbol_must_be_explicit(self):
+        changed = LONG.replace('SQX_EURUSD', 'SQX_EURUSD_V2')
+        self.assertEqual(check(changed, symbol='SQX_EURUSD_V2')['status'], 'reported_baseline_values_match')
+        with self.assertRaises(ValueError):
+            check(changed)
+        with self.assertRaises(ValueError):
+            check(LONG, symbol='EURUSD')
+
     def test_command_line_encoding_hash_and_failure_status(self):
         script = Path(__file__).resolve().parents[1] / 'mt5_tester_log_check.py'
         with tempfile.TemporaryDirectory() as directory:

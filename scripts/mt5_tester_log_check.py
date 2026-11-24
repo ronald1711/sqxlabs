@@ -13,7 +13,9 @@ from pathlib import Path
 import re
 
 
-def check(text, short=False):
+def check(text, short=False, symbol="SQX_EURUSD"):
+    if symbol not in {"SQX_EURUSD", "SQX_EURUSD_V2"}:
+        raise ValueError("Unsupported reference symbol")
     rows = {}
     sequence = []
     for line in text.splitlines():
@@ -57,7 +59,7 @@ def check(text, short=False):
                 raise ValueError(f'{key}: expected {value}, got {actual}')
 
     start = int(datetime(2026, 1, 5, tzinfo=timezone.utc).timestamp())
-    require(rows['INIT'][0], symbol='SQX_EURUSD', short=int(short), signal_bar=start, lots=0.1)
+    require(rows['INIT'][0], symbol=symbol, short=int(short), signal_bar=start, lots=0.1)
     require(rows['ACCOUNT'][0], currency='USD', balance=10000, leverage=30)
     require(rows['SYMBOL'][0], base='EUR', profit='USD', margin='EUR', contract=100000,
             point=0.00001, tick_size=0.00001, calculation=0)
@@ -92,11 +94,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('log', type=Path)
     parser.add_argument('--short', action='store_true')
+    parser.add_argument('--symbol', choices=['SQX_EURUSD', 'SQX_EURUSD_V2'], default='SQX_EURUSD')
     args = parser.parse_args()
     data = args.log.read_bytes()
     try:
         text = data.decode('utf-16' if data.startswith((b'\xff\xfe', b'\xfe\xff')) else 'utf-8-sig')
-        result = check(text, args.short)
+        result = check(text, args.short, args.symbol)
     except (ValueError, UnicodeError) as error:
         result = {'status': 'rejected', 'reason': str(error)}
     result['log_sha256'] = hashlib.sha256(data).hexdigest()
