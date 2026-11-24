@@ -84,6 +84,7 @@ impl Experiments {
     }
     pub fn create(&self, data: &ExperimentData, mut plan: ExperimentPlan) -> Result<String,String> {
         sqx_backtest::validate_backtest_inputs(&data.bars,&data.instrument,&plan.config)?;
+        crate::observation::range(&data.bars,plan.config.bar_duration_ms,&data.provenance["timeframe"])?;
         if plan.schema != 1 || plan.engine_id.is_empty() || plan.holdout_start < 2 || plan.holdout_start >= data.bars.len()
             || plan.min_development_trades == 0 || plan.min_holdout_trades == 0
             || !plan.periods_per_year.is_finite() || plan.periods_per_year <= 0.0 {
@@ -219,7 +220,7 @@ impl Experiments {
         let mut report=report(&result,data.bars.len()-plan.holdout_start,plan.periods_per_year,plan.min_holdout_trades);
         report["trial"]=json!(trial);
         report["holdout_start_time"]=json!(data.bars[plan.holdout_start].time);
-        report["holdout_end_time"]=json!(data.bars.last().unwrap().time);
+        report["holdout_end_time"]=json!(crate::observation::range(&data.bars[plan.holdout_start..],plan.config.bar_duration_ms,&data.provenance["timeframe"])?.end);
         report["prior_exposure_disclosed"]=json!(plan.prior_exposure_disclosed);
         report["exposure_at_commitment"]=ledger.find("holdout_committed").and_then(|v|v.get("exposure_at_commitment")).cloned()
             .unwrap_or_else(||json!({"classification":"not_recorded","scope":"Legacy commitment; no exposure audit was recorded."}));
@@ -238,19 +239,25 @@ impl Experiments {
         drop(ledger); // never acquire another experiment's lock while holding ours
         let mut exposure=self.exposure_audit(id,&plan,&data,own_attempts)?;
         if let Some(remembered)=remembered_exposure {
+            if remembered["observation_extent_complete"]==false {
+                exposure["observation_extent_complete"]=json!(false);
+                exposure["carried_commitment_evidence"]=remembered.clone();
+            }
             if remembered["classification"]=="known_reuse_or_disclosed_exposure" {
                 exposure["classification"]=json!("known_reuse_or_disclosed_exposure");
                 exposure["carried_commitment_evidence"]=remembered;
             }
         }
         Ok(json!({"experiment_id":id,"plan":plan,"state":state,"current_exposure_audit":exposure,"jobs":jobs,
-            "development_start_time":data.bars[0].time,"holdout_start_time":data.bars[plan.holdout_start].time,"holdout_end_time":data.bars.last().unwrap().time,
+            "development_start_time":data.bars[0].time,"holdout_start_time":data.bars[plan.holdout_start].time,"holdout_end_time":exposure["holdout_observation_range"]["end"],
             "scope":"Reserved within this experiment only. Data access and testing outside this protocol are not prevented or certified.",
             "trials_attempted":events.iter().filter(|e|e["event"]["kind"]=="trial_started").count(),"events":events}))
     }
     fn exposure_audit(&self,id:&str,plan:&ExperimentPlan,data:&ExperimentData,own_attempts:usize)->Result<Value,String>{
-        let start=data.bars[plan.holdout_start].time;
-        let end=data.bars.last().unwrap().time;
+        let own_range=crate::observation::range(&data.bars[plan.holdout_start..],plan.config.bar_duration_ms,&data.provenance["timeframe"])?;
+        let (start,end)=(own_range.start,own_range.end);
+        let mut unknown_extents=Vec::new();
+        if !own_range.extent_known{unknown_extents.push(json!({"source":"current_holdout","id":id}));}
         let mut overlaps=Vec::new();let mut attempts=own_attempts;let mut archived_runs=0usize;let mut archived_pipelines=0usize;let mut archived_robustness=0usize;let mut archived_assistant=0usize;let mut archived_cli=0usize;let mut archived_crosschecks=0usize;
         for other_id in self.list()? {
             if other_id==id{continue;}
@@ -258,13 +265,16 @@ impl Experiments {
             if !same_market(&data.instrument,&other_data.instrument){continue;}
             let ledger=self.ledger(&other_id)?;
             let count=ledger.events.iter().filter(|e|e.1.payload["kind"]=="trial_started").count();attempts+=count;
-            let development_start=other_data.bars[0].time;
-            let development_end=other_data.bars[other_plan.holdout_start-1].time;
+            let development=crate::observation::range(&other_data.bars[..other_plan.holdout_start],other_plan.config.bar_duration_ms,&other_data.provenance["timeframe"])?;
+            let (development_start,development_end)=(development.start,development.end);
+            if count>0 && !development.extent_known{unknown_extents.push(json!({"source":"experiment_development","id":other_id}));}
             if count>0 && intersects(start,end,development_start,development_end) {
                 overlaps.push(json!({"source":"experiment_development","id":other_id,"attempts":count,"start":development_start,"end":development_end}));
             }
             if ledger.has("holdout_committed") {
-                let final_start=other_data.bars[other_plan.holdout_start].time;let final_end=other_data.bars.last().unwrap().time;
+                let final_range=crate::observation::range(&other_data.bars[other_plan.holdout_start..],other_plan.config.bar_duration_ms,&other_data.provenance["timeframe"])?;
+                let (final_start,final_end)=(final_range.start,final_range.end);
+                if !final_range.extent_known{unknown_extents.push(json!({"source":"experiment_final_commitment","id":other_id}));}
                 if intersects(start,end,final_start,final_end) {
                     overlaps.push(json!({"source":"experiment_final_commitment","id":other_id,"start":final_start,"end":final_end}));
                 }
@@ -280,13 +290,15 @@ impl Experiments {
                 for (market_index,market) in markets.iter().enumerate() {
                     let instrument:Instrument=serde_json::from_value(market["instrument"].clone()).map_err(err)?;
                     let bars:Vec<Bar>=serde_json::from_value(market["bars"].clone()).map_err(err)?;
-                    let (Some(first),Some(last))=(bars.first(),bars.last()) else{return Err("crosscheck exposure requires market candles".into());};
+                    if bars.is_empty(){return Err("crosscheck exposure requires market candles".into());}
                     if !same_market(&data.instrument,&instrument){continue;}
+                    let range=crate::observation::range(&bars,crate::observation::duration(&market["config"])?,&market["source_context"]["timeframe"])?;
+                    if !range.extent_known{unknown_extents.push(json!({"source":"archived_cli_crosscheck","id":run_id,"market_index":market_index}));}
                     same_market_record=true;
                     // A checkpoint claims the full input window before execution.
                     // A crash cannot establish which inputs were already inspected.
-                    if intersects(start,end,first.time,last.time) {
-                        overlaps.push(json!({"source":"archived_cli_crosscheck","id":run_id,"market_index":market_index,"record_kind":bundle.run.request["research_kind"],"start":first.time,"end":last.time}));
+                    if intersects(start,end,range.start,range.end) {
+                        overlaps.push(json!({"source":"archived_cli_crosscheck","id":run_id,"market_index":market_index,"record_kind":bundle.run.request["research_kind"],"start":range.start,"end":range.end}));
                     }
                 }
                 archived_crosschecks+=usize::from(same_market_record);
@@ -295,15 +307,18 @@ impl Experiments {
             let instrument:Instrument=serde_json::from_value(bundle.dataset["instrument"].clone()).map_err(err)?;
             if !same_market(&data.instrument,&instrument){continue;}
             let bars:Vec<Bar>=serde_json::from_value(bundle.dataset["bars"].clone()).map_err(err)?;
-            if let (Some(first),Some(last))=(bars.first(),bars.last()) {
+            if !bars.is_empty() {
+                let config=if !bundle.run.request["config"].is_null(){&bundle.run.request["config"]}else{&bundle.run.request["_resolved_config"]};
+                let range=crate::observation::range(&bars,crate::observation::duration(config)?,&bundle.dataset["timeframe"])?;
+                if !range.extent_known{unknown_extents.push(json!({"source":"archived_research","id":run_id}));}
                 let pipeline=bundle.run.request["research_kind"]=="pipeline";
                 let robustness=bundle.run.request["research_kind"]=="robustness";
                 let assistant=matches!(bundle.run.request["research_kind"].as_str(),Some("assistant_candidates"|"assistant_trial"|"assistant_trial_started"));
                 let cli=matches!(bundle.run.request["research_kind"].as_str(),Some("cli_backtest"|"cli_backtest_started"));
                 if cli {archived_cli+=1;}
                 if assistant {archived_assistant+=1;}else if pipeline {archived_pipelines+=1;}else if robustness {archived_robustness+=1;}else{archived_runs+=1;}
-                if intersects(start,end,first.time,last.time) {
-                    overlaps.push(json!({"source":if cli {"archived_cli_backtest"}else if assistant {"archived_assistant_candidates"}else if pipeline {"archived_pipeline"}else if robustness {"archived_robustness"}else{"archived_backtest"},"id":run_id,"start":first.time,"end":last.time}));
+                if intersects(start,end,range.start,range.end) {
+                    overlaps.push(json!({"source":if cli {"archived_cli_backtest"}else if assistant {"archived_assistant_candidates"}else if pipeline {"archived_pipeline"}else if robustness {"archived_robustness"}else{"archived_backtest"},"id":run_id,"start":range.start,"end":range.end}));
                 }
             }
         }
@@ -316,19 +331,25 @@ impl Experiments {
             if !same_market(&data.instrument,&instrument){continue;}
             archived_comparisons+=1;
             let bars:Vec<Bar>=serde_json::from_value(record.reference.dataset["bars"].clone()).map_err(err)?;
-            if let (Some(first),Some(last))=(bars.first(),bars.last()) {
-                if intersects(start,end,first.time,last.time){overlaps.push(json!({"source":"comparison_reference_backtest","id":comparison_id,"run_id":record.reference.run_id,"start":first.time,"end":last.time}));}
+            if !bars.is_empty() {
+                let request=&record.reference.run.request;
+                let config=if !request["config"].is_null(){&request["config"]}else{&request["_resolved_config"]};
+                let range=crate::observation::range(&bars,crate::observation::duration(config)?,&record.reference.dataset["timeframe"])?;
+                if !range.extent_known{unknown_extents.push(json!({"source":"comparison_reference_backtest","id":comparison_id}));}
+                if intersects(start,end,range.start,range.end){overlaps.push(json!({"source":"comparison_reference_backtest","id":comparison_id,"run_id":record.reference.run_id,"start":range.start,"end":range.end}));}
             }
         }
         let mut evolution_claims=0usize;
         for job in crate::evolution::EvolutionJobs::new(self.archive.root()).exposure()? {
             if !same_market(&data.instrument,&job.instrument){continue;}
             evolution_claims+=job.claimed_generations;
+            if !job.extent_known{unknown_extents.push(json!({"source":"evolution_generation_claim","id":job.job_id}));}
             if intersects(start,end,job.start,job.end){overlaps.push(json!({"source":"evolution_generation_claim","id":job.job_id,"claimed_generations":job.claimed_generations,"start":job.start,"end":job.end}));}
         }
         Ok(json!({"classification":if plan.prior_exposure_disclosed||!overlaps.is_empty(){"known_reuse_or_disclosed_exposure"}else{"no_known_registry_overlap"},
+            "holdout_observation_range":{"start":start,"end":end,"extent_known":own_range.extent_known},"observation_extent_complete":unknown_extents.is_empty(),"unknown_interval_extents":unknown_extents,
             "known_overlaps":overlaps,"same_market_experiment_attempts":attempts,"same_market_archived_backtest_records":archived_runs,"same_market_archived_cli_backtest_records":archived_cli,"same_market_archived_crosscheck_records":archived_crosschecks,"same_market_archived_assistant_records":archived_assistant,"same_market_archived_pipeline_records":archived_pipelines,"same_market_archived_robustness_records":archived_robustness,"same_market_archived_comparison_records":archived_comparisons,"same_market_evolution_generation_claims":evolution_claims,
-            "scope":"Overlap of recorded observation-time ranges on the same named market or FX pair. Includes other experiment trials/commitments and archived multi-market CLI crosscheck inputs (including checkpoints and failures) and dashboard and CLI backtests (including recorded failures) and completed pipeline/robustness reports and assistant session summaries and trial checkpoints/results (including pending work and reported failures), plus backtests embedded in saved paper comparisons and claimed durable evolution generations (including interrupted work). CLI backtest counts are a subset of backtest record counts. Record counts may reference the same run and are not independent trial counts. Only records in this archive are visible; unarchived searches, data viewing, other CLI/MCP and external work are not covered. No known overlap does not prove independence."}))
+            "scope":"Candle extents use declared timeframe/duration, including true UTC calendar months. Missing extents are explicitly unverified, not inferred from gaps. Overlap of recorded observation-time ranges on the same named market or FX pair. Includes other experiment trials/commitments and archived multi-market CLI crosscheck inputs (including checkpoints and failures) and dashboard and CLI backtests (including recorded failures) and completed pipeline/robustness reports and assistant session summaries and trial checkpoints/results (including pending work and reported failures), plus backtests embedded in saved paper comparisons and claimed durable evolution generations (including interrupted work). CLI backtest counts are a subset of backtest record counts. Record counts may reference the same run and are not independent trial counts. Only records in this archive are visible; unarchived searches, data viewing, other CLI/MCP and external work are not covered. No known overlap does not prove independence."}))
     }
     pub fn backup(&self,id:&str)->Result<ExperimentBackup,String>{
         let plan=self.plan(id)?;let ledger=self.ledger(id)?;let data=self.data(&plan)?;
@@ -351,6 +372,7 @@ impl Experiments {
             return Err("experiment backup identity/integrity failure".into());
         }
         sqx_backtest::validate_backtest_inputs(&backup.data.bars,&backup.data.instrument,&backup.plan.config)?;
+        crate::observation::range(&backup.data.bars,backup.plan.config.bar_duration_ms,&backup.data.provenance["timeframe"])?;
         if backup.plan.schema!=1 || backup.plan.holdout_start<2 || backup.plan.holdout_start>=backup.data.bars.len()
             || backup.plan.min_development_trades==0 || backup.plan.min_holdout_trades==0
             || !backup.plan.periods_per_year.is_finite() || backup.plan.periods_per_year<=0.0 || backup.plan.engine_id.is_empty() {

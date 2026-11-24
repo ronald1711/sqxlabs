@@ -352,3 +352,81 @@ fn crosscheck_market_and_time_boundaries_do_not_fabricate_overlap(){
     archive.save("test-engine".into(),json!({"markets":[]}),json!(strategy()),json!({"research_kind":"cli_crosscheck_started"}),json!({})).unwrap();
     assert!(store.status(&id).unwrap_err().contains("nonempty market inputs"),"malformed evidence cannot become a clean audit");
 }
+
+#[test]
+fn candle_contents_overlap_holdout_even_when_the_open_is_before_it(){
+    for crosscheck in [false,true] {
+        let temp=Temp::new();let store=Experiments::new(&temp.0);let mut current=data();current.provenance=json!({"timeframe":"M1"});let mut config=plan();config.config.bar_duration_ms=Some(60000);
+        let id=store.create(&current,config).unwrap();let archive=sqx_project::archive::Archive::new(&temp.0);
+        let market=json!({"instrument":current.instrument,"bars":[Bar::new(3600000,1.0,1.0,1.0,1.0,1.0)],"timeframe":"H1","source_context":{"timeframe":"H1"},"config":{"bar_duration_ms":3600000}});
+        let (dataset,request)=if crosscheck{(json!({"markets":[market]}),json!({"research_kind":"cli_crosscheck_started"}))}else{(market,json!({"research_kind":"cli_backtest_started","config":{"bar_duration_ms":3600000}}))};
+        archive.save("test-engine".into(),dataset,json!(strategy()),request,json!({})).unwrap();
+        let audit=store.status(&id).unwrap()["current_exposure_audit"].clone();
+        assert_eq!(audit["classification"],"known_reuse_or_disclosed_exposure","H1 [60min,120min) overlaps M1 holdout [70min,100min)");
+        assert_eq!(audit["observation_extent_complete"],true);
+        assert_eq!(audit["known_overlaps"][0]["end"],7199999);
+    }
+}
+
+#[test]
+fn final_holdout_candle_extent_is_included_but_exclusive_end_is_not(){
+    for (source_start,overlaps) in [(9000000,true),(10800000,false)] {
+        let temp=Temp::new();let store=Experiments::new(&temp.0);
+        let current=ExperimentData{bars:(0..3).map(|i|Bar::new(i*3600000,1.0,1.0,1.0,1.0,1.0)).collect(),instrument:Instrument::fx("EURUSD"),provenance:json!({"timeframe":"H1"})};
+        let mut config=plan();config.holdout_start=2;config.config.bar_duration_ms=Some(3600000);
+        let id=store.create(&current,config).unwrap();
+        sqx_project::archive::Archive::new(&temp.0).save("test-engine".into(),json!({"instrument":current.instrument,"timeframe":"M1","bars":[Bar::new(source_start,1.0,1.0,1.0,1.0,1.0)]}),json!(strategy()),json!({}),json!({})).unwrap();
+        let audit=store.status(&id).unwrap()["current_exposure_audit"].clone();
+        assert_eq!(audit["classification"]=="known_reuse_or_disclosed_exposure",overlaps);
+        assert_eq!(audit["observation_extent_complete"],true);
+    }
+}
+
+#[test]
+fn other_experiment_training_candle_extents_disclose_data_reuse(){
+    let temp=Temp::new();let store=Experiments::new(&temp.0);let id=store.create(&data(),plan()).unwrap();
+    let other=ExperimentData{bars:(0..3).map(|i|Bar::new(i*3600000,1.0,1.0,1.0,1.0,1.0)).collect(),instrument:Instrument::fx("EURUSD"),provenance:json!({"timeframe":"H1"})};
+    let mut config=plan();config.holdout_start=2;config.config.bar_duration_ms=Some(3600000);
+    let other_id=store.create(&other,config).unwrap();store.trial(&other_id,"test-engine",&strategy()).unwrap();
+    let audit=store.status(&id).unwrap()["current_exposure_audit"].clone();
+    assert_eq!(audit["classification"],"known_reuse_or_disclosed_exposure");
+    assert_eq!(audit["known_overlaps"][0]["source"],"experiment_development");
+    assert_eq!(audit["known_overlaps"][0]["end"],7199999);
+}
+
+#[test]
+fn missing_duration_is_explicit_uncertainty_and_survives_restored_commitment(){
+    let temp=Temp::new();let store=Experiments::new(&temp.0);let mut current=data();current.provenance=json!({"timeframe":"M1"});let mut config=plan();config.config.bar_duration_ms=Some(60000);
+    let id=store.create(&current,config).unwrap();
+    sqx_project::archive::Archive::new(&temp.0).save("test-engine".into(),json!({"instrument":current.instrument,"bars":[Bar::new(0,1.0,1.0,1.0,1.0,1.0)]}),json!(strategy()),json!({}),json!({})).unwrap();
+    let audit=store.status(&id).unwrap()["current_exposure_audit"].clone();
+    assert_eq!(audit["classification"],"no_known_registry_overlap");assert_eq!(audit["observation_extent_complete"],false);
+    assert_eq!(audit["unknown_interval_extents"].as_array().unwrap().len(),1);
+    store.trial(&id,"test-engine",&strategy()).unwrap();let revealed=store.reveal(&id,"test-engine",0).unwrap();
+    assert_eq!(revealed["exposure_at_commitment"]["observation_extent_complete"],false);
+    let target=Temp::new();let restored=Experiments::new(&target.0);restored.restore(&store.backup(&id).unwrap()).unwrap();
+    let audit=restored.status(&id).unwrap()["current_exposure_audit"].clone();
+    assert_eq!(audit["observation_extent_complete"],false);assert_eq!(audit["carried_commitment_evidence"]["unknown_interval_extents"].as_array().unwrap().len(),1);
+}
+
+#[test]
+fn restored_comparison_candle_extent_discloses_overlap_without_its_source_run(){
+    use sqx_project::{archive::Archive,reconciliation::*};
+    let original=Temp::new();let archive=Archive::new(&original.0);
+    let run=archive.save("test-engine".into(),json!({"instrument":Instrument::fx("EURUSD"),"bars":[Bar::new(3600000,1.0,1.0,1.0,1.0,1.0)],"timeframe":"H1"}),json!(Strategy::new("empty comparison fixture")),json!({}),json!({"trades":0,"trade_details":[],"run_context":{"account_currency":"USD"}})).unwrap();
+    let source=json!({"schema":1,"source_label":"synthetic H1 fixture","scope":{"market":"EURUSD","quote_currency":"USD","account_currency":"USD","contract_size":100000,"start_ms":3600000,"end_ms":7199999},"trades":[]}).to_string();
+    let comparison=save_comparison(&archive,&run,&source,&Tolerances{time_ms:0,price:0.0,size:0.0,money:0.0}).unwrap();
+    let record=load_comparison(&archive,&comparison).unwrap();let restored=Temp::new();let target=Archive::new(&restored.0);
+    restore_comparison(&target,&comparison,&record).unwrap();assert!(target.list().unwrap().is_empty());
+    let store=Experiments::new(&restored.0);let id=store.create(&data(),plan()).unwrap();
+    let audit=store.status(&id).unwrap()["current_exposure_audit"].clone();
+    assert_eq!(audit["classification"],"known_reuse_or_disclosed_exposure");
+    assert_eq!(audit["known_overlaps"][0]["source"],"comparison_reference_backtest");assert_eq!(audit["known_overlaps"][0]["end"],7199999);
+}
+
+#[test]
+fn contradictory_timeframe_metadata_is_rejected_before_creating_experiment(){
+    let temp=Temp::new();let store=Experiments::new(&temp.0);let mut fixture=data();fixture.provenance=json!({"timeframe":"H1"});let mut config=plan();config.config.bar_duration_ms=Some(60000);
+    assert!(store.create(&fixture,config).unwrap_err().contains("conflicts with timeframe"));
+    assert!(store.list().unwrap().is_empty());
+}

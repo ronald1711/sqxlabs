@@ -525,6 +525,12 @@ refreshResearchRuns();
 
 let activeSearch = null;
 let searchStarting = false;
+function exposureLabel(audit) {
+  if (!audit) return 'Exposure audit was not recorded. ';
+  if (audit.classification==='known_reuse_or_disclosed_exposure') return 'EXPLORATORY ONLY — known data reuse or disclosed prior exposure. ';
+  if (audit.observation_extent_complete!==true) return 'EXPOSURE AUDIT INCOMPLETE — candle durations are missing or unverified in current or retained evidence. ';
+  return 'No known overlap in this registry; independence is not proven. ';
+}
 async function showExperiment() {
   const id=$('experiment-select').value;
   $('experiment-trials').replaceChildren();$('experiment-final').replaceChildren();$('experiment-jobs').replaceChildren();
@@ -535,7 +541,7 @@ async function showExperiment() {
   $('experiment-context').textContent=state.state+' · '+state.trials_attempted+' attempted candidates · Final period '+new Date(state.holdout_start_time).toISOString()+' to '+new Date(state.holdout_end_time).toISOString()+' · Deposit '+state.plan.config.initial_deposit+' '+state.plan.config.account.currency+' · Prior exposure: '+(state.plan.prior_exposure_disclosed?'yes / unsure':'not declared')+'. '+state.scope;
   const audit=state.current_exposure_audit;
   const exposure=document.createElement('div');
-  exposure.textContent=(audit.classification==='known_reuse_or_disclosed_exposure'?'EXPLORATORY ONLY — known data reuse or disclosed prior exposure. ':'No known overlap in this registry; independence is not proven. ')+audit.same_market_experiment_attempts+' experiment attempts on this market; '+audit.same_market_archived_backtest_records+' archived backtest records; '+(audit.same_market_archived_pipeline_records||0)+' archived pipeline reports; '+(audit.same_market_archived_crosscheck_records||0)+' archived crosscheck records (including checkpoints); '+(audit.same_market_archived_robustness_records||0)+' archived stress-test reports; '+(audit.same_market_archived_comparison_records||0)+' saved paper comparisons; '+(audit.same_market_evolution_generation_claims||0)+' claimed evolution generations. '+audit.scope;
+  exposure.textContent=exposureLabel(audit)+audit.same_market_experiment_attempts+' experiment attempts on this market; '+audit.same_market_archived_backtest_records+' archived backtest records; '+(audit.same_market_archived_pipeline_records||0)+' archived pipeline reports; '+(audit.same_market_archived_crosscheck_records||0)+' archived crosscheck records (including checkpoints); '+(audit.same_market_archived_robustness_records||0)+' archived stress-test reports; '+(audit.same_market_archived_comparison_records||0)+' saved paper comparisons; '+(audit.same_market_evolution_generation_claims||0)+' claimed evolution generations. '+audit.scope;
   $('experiment-trials').append(exposure);
   for(const overlap of audit.known_overlaps){const line=document.createElement('p');line.textContent=overlap.source+' · '+overlap.id.slice(0,16)+' · '+new Date(overlap.start).toISOString()+' → '+new Date(overlap.end).toISOString();$('experiment-trials').append(line);}
   $('experiment-trial').disabled=state.state!=='development';$('experiment-search').disabled=state.state!=='development'||!!activeSearch||searchStarting;
@@ -556,7 +562,7 @@ async function showExperiment() {
     $('experiment-trials').append(row);
   }
   const final=state.events.find(e=>e.event.kind==='holdout_finished');
-  if(final){const report=final.event.report;const result=document.createElement('p');const committedAudit=report.exposure_at_commitment;result.textContent=(committedAudit ? 'Exposure at commitment: '+committedAudit.classification+'. ' : 'Exposure at commitment was not recorded. ')+'Final test · Candidate '+report.trial+' · Net '+fmt(report.metrics.net_profit,2)+' · Drawdown '+fmt(report.metrics.max_drawdown_pct,2)+'% · '+report.metrics.trades+' trades · '+(report.evidence_sufficient?'trade threshold met':'insufficient evidence / invalid execution')+'. '+report.interpretation;$('experiment-final').append(result);}
+  if(final){const report=final.event.report;const result=document.createElement('p');const committedAudit=report.exposure_at_commitment;result.textContent=('Exposure at commitment: '+exposureLabel(committedAudit))+'Final test · Candidate '+report.trial+' · Net '+fmt(report.metrics.net_profit,2)+' · Drawdown '+fmt(report.metrics.max_drawdown_pct,2)+'% · '+report.metrics.trades+' trades · '+(report.evidence_sufficient?'trade threshold met':'insufficient evidence / invalid execution')+'. '+report.interpretation;$('experiment-final').append(result);}
   else if(state.state==='committed') {const commit=state.events.find(e=>e.event.kind==='holdout_committed');const resume=document.createElement('button');resume.textContent='Resume committed final test';resume.onclick=()=>experimentAction('reveal',{trial:commit.event.trial});$('experiment-final').append(resume);}
 }
 async function refreshExperiments(selected) {

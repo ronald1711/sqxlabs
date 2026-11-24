@@ -525,6 +525,15 @@ mod tests {
             {let mut v=request.clone();v["timeframe"]=json!("M5");v},
             {let mut v=request.clone();v["normalization_bundle"]["policy_json"]=json!("{}");v},
         ] {assert!(import(&altered)["error"].is_string());}
+        let mut monthly=request.clone();monthly["timeframe"]=json!("MN1");
+        let mut month_policy:serde_json::Value=serde_json::from_str(&bundle.policy_json).unwrap();
+        month_policy["intervals"][0]["raw_end_ms"]=json!(1704000000000i64);
+        let month_policy=month_policy.to_string();
+        let mut month_manifest:serde_json::Value=serde_json::from_str(&bundle.manifest_json).unwrap();
+        month_manifest["policy_sha256"]=json!(hash(&month_policy));month_manifest["bar_duration_ms"]=json!(30i64*86400000);
+        monthly["normalization_bundle"]["policy_json"]=json!(month_policy);
+        monthly["normalization_bundle"]["manifest_json"]=json!(month_manifest.to_string());
+        assert!(import(&monthly)["error"].as_str().unwrap().contains("declared candle timeframe"));
         let after:serde_json::Value=serde_json::from_str(&data_json(&state,"EURUSD")).unwrap();
         assert_eq!(info,after,"failed imports must not replace the dataset");
         let strategy=json!({"symbol":"EURUSD","name":"source fixture","long":true,"short":false,"signals":[],"exits":[],"stop_loss":null,"profit_target":null,"money_management":{"FixedSize":{"size":0.1}}});
@@ -1482,7 +1491,7 @@ fn import_json(body: &str, state: &State) -> String {
     let calendar=match val.get("calendar").filter(|v|!v.is_null()) {Some(v)=>match serde_json::from_value::<sqx_data::quality::MarketCalendar>(v.clone()){Ok(c)=>Some(c),Err(e)=>return json!({"error":e.to_string()}).to_string()},None=>None};
     let normalization=match val.get("normalization_bundle").filter(|v|!v.is_null()) {
         Some(v)=>match serde_json::from_value::<sqx_data::normalization::Bundle>(v.clone()) {
-            Ok(bundle)=>{if let Err(error)=bundle.verify_bars(&bars,timeframe.minutes().and_then(|m|m.checked_mul(60000))) {return json!({"error":error}).to_string();} Some(bundle)},
+            Ok(bundle)=>{if let Err(error)=bundle.verify_bars(&bars,normalization_bar_duration(timeframe)) {return json!({"error":error}).to_string();} Some(bundle)},
             Err(error)=>return json!({"error":error.to_string()}).to_string(),
         },None=>None,
     };
@@ -1591,10 +1600,15 @@ fn config_for_series(value:&serde_json::Value,series:&SymbolSeries)->Result<Back
 
 // A single gate keeps dashboard backtests, stress tests and assistant research
 // consistent. Gap acknowledgment never overrides malformed/incomplete candles.
+fn normalization_bar_duration(timeframe:Timeframe)->Option<i64> {
+    // The normalization format describes fixed-width candles only. Calendar
+    // months cannot be verified by substituting a nominal thirty-day duration.
+    match timeframe {Timeframe::MN1|Timeframe::Tick=>None,tf=>tf.minutes().and_then(|m|m.checked_mul(60000))}
+}
 fn normalization_status(series:&SymbolSeries)->serde_json::Value {
     match &series.normalization {
         None=>json!({"status":"not_supplied","scope":"No clock-normalization evidence supplied; UTC timestamps are user-declared."}),
-        Some(bundle)=>match bundle.verify_bars(&series.bars,series.timeframe.minutes().and_then(|m|m.checked_mul(60000))) {
+        Some(bundle)=>match bundle.verify_bars(&series.bars,normalization_bar_duration(series.timeframe)) {
             Ok(verification)=>json!({"status":"verified_transformation","verification":verification}),
             Err(error)=>json!({"status":"invalid","error":error}),
         },

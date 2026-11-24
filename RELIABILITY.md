@@ -3579,3 +3579,35 @@ multiple matching datasets, an interrupted checkpoint, a failed result, temporal
 boundaries, retained exposure after restore, and actual CLI-produced crosscheck
 archives read by the experiment registry. This closes this archive-format gap;
 it does not establish that external or unarchived research was never performed.
+
+### Candle contents, not only candle-open timestamps, define data exposure
+
+A separate reproduction showed that an H1 candle covering minutes [60,120) was
+not detected against an M1 holdout covering [70,100): its opening timestamp alone
+was outside the holdout. Observation ranges now include the final candle's full
+declared duration, with an inclusive millisecond end immediately before the next
+boundary. This applies to the target holdout itself, other experiment development
+and final periods, single/multi-market archives, restored paper comparisons and
+durable evolution claims.
+
+Fixed intervals use the declared duration/timeframe; UTC calendar months use their
+actual calendar boundary, including February in leap years. Contradictory,
+nonpositive, overflowing or unsupported declarations fail validation. New
+experiments and evolution jobs check their interval metadata before publication.
+The normalization bundle format currently supports fixed-width candles only;
+the dashboard no longer accepts nominal thirty-day normalization as MN1 evidence.
+
+Missing legacy duration metadata is not inferred from candle gaps. Its known
+opening timestamps remain usable, but observation_extent_complete is false and
+the unresolved sources are listed. The UI displays an incomplete exposure audit,
+including for legacy commitment reports, and saved commitments preserve that
+uncertainty after restoration without the original source archives. A
+no_known_registry_overlap classification alone is never an independence claim.
+
+Tests cover hourly/minute overlap, the target's final candle, exact exclusive
+boundaries, other experiment training inputs, restored comparison references,
+interrupted evolution claims, true calendar-month ends, contradictory metadata,
+legacy uncertainty and restoration. The originally failing reproduction is retained
+locally as holdout-interval-probe.log; the corrected cases are in the regression
+suite. This addresses observation extents, not independent correctness of all
+higher-timeframe trading signals or proof of isolation from external research.

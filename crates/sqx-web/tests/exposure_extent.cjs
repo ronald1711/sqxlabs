@@ -1,0 +1,12 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const vm=require('node:vm');
+const source=fs.readFileSync('crates/sqx-web/assets/workspace.js','utf8');
+const context=vm.createContext({});
+vm.runInContext(source.slice(source.indexOf('function exposureLabel('),source.indexOf('async function showExperiment()')),context);
+const label=context.exposureLabel;
+for(const complete of [undefined,false])assert.match(label({classification:'no_known_registry_overlap',observation_extent_complete:complete}),/AUDIT INCOMPLETE/);
+assert.match(label({classification:'known_reuse_or_disclosed_exposure',observation_extent_complete:false}),/EXPLORATORY ONLY/);
+assert.match(label({classification:'no_known_registry_overlap',observation_extent_complete:true}),/independence is not proven/);
+assert.match(label(null),/not recorded/);
+console.log('Holdout exposure labels preserve missing duration and legacy uncertainty.');

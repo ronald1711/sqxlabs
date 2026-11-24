@@ -25,7 +25,7 @@ pub struct EvolutionStatus {pub job_id:String,pub committed_generations:usize,pu
 #[serde(deny_unknown_fields)]
 struct GenerationClaim {schema:u32,job_id:String,sequence:usize,previous:Option<String>,generation:usize,population_size:usize}
 #[derive(Debug,Clone,Serialize)]
-pub struct EvolutionExposure {pub job_id:String,pub instrument:sqx_core::Instrument,pub start:i64,pub end:i64,pub claimed_generations:usize}
+pub struct EvolutionExposure {pub job_id:String,pub instrument:sqx_core::Instrument,pub start:i64,pub end:i64,pub claimed_generations:usize,pub extent_known:bool}
 /// Portable raw JSON preserves exact hashed bytes, including floating-point spellings.
 #[derive(Debug,Clone,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -57,6 +57,8 @@ impl EvolutionBackup {
   if self.schema!=1 || crate::archive::content_id(self.job_json.as_bytes())!=self.job_id{return Err("Evolution backup job integrity failure".into());}
   let job:EvolutionJob=serde_json::from_str(&self.job_json).map_err(err)?;
   if job.schema!=1 || job.initial.generation()!=0 || job.initial.is_complete(){return Err("Invalid initial evolution job".into());}
+  let (_,last)=job.initial.observation_range().ok_or("Evolution dataset is empty")?;
+  crate::observation::end(last,job.initial.backtest_config().bar_duration_ms,&job.context["timeframe"])?;
   let mut previous:Option<&str>=None;let mut state=&job.initial;let mut records=Vec::new();
   for (sequence,(hash,raw)) in self.generations.iter().enumerate(){
    if crate::archive::content_id(raw.as_bytes())!=*hash{return Err("Evolution backup generation integrity failure".into());}
@@ -95,6 +97,8 @@ impl EvolutionJobs {
   if encode(&context)?.len()>1024*1024{return Err("Evolution context exceeds 1 MiB".into());}
   if engine_id.trim().is_empty() || request_key.trim().is_empty() || request_key.len()>256{return Err("Engine identity and bounded request key are required".into());}
   if state.generation()!=0 || state.is_complete(){return Err("A new evolution job requires an initial checkpoint".into());}
+  let (_,last)=state.observation_range().ok_or("Evolution dataset is empty")?;
+  crate::observation::end(last,state.backtest_config().bar_duration_ms,&context["timeframe"])?;
   let job=EvolutionJob{schema:1,engine_id:engine_id.into(),request_key:request_key.into(),initial:state.clone(),context};
   let bytes=encode(&job)?;let expected_id=crate::archive::content_id(&bytes);
   fs::create_dir_all(self.archive.root()).map_err(err)?;
@@ -164,7 +168,7 @@ impl EvolutionJobs {
      let claim:GenerationClaim=serde_json::from_slice(&bytes).map_err(err)?;if claim.schema!=1 || claim.job_id!=id || claim.sequence!=sequence{return Err("Invalid evolution claim".into());}count=count.max(sequence+1);
     }
    }
-   if count>0{let (start,end)=job.initial.observation_range().ok_or("Evolution dataset is empty")?;output.push(EvolutionExposure{job_id:id.into(),instrument:job.initial.instrument().clone(),start,end,claimed_generations:count});}
+   if count>0{let (start,last)=job.initial.observation_range().ok_or("Evolution dataset is empty")?;let (end,extent_known)=crate::observation::end(last,job.initial.backtest_config().bar_duration_ms,&job.context["timeframe"])?;output.push(EvolutionExposure{job_id:id.into(),instrument:job.initial.instrument().clone(),start,end,claimed_generations:count,extent_known});}
   }
   output.sort_by(|a,b|a.job_id.cmp(&b.job_id));Ok(output)
  }
@@ -282,4 +286,21 @@ mod tests {
   reopened.advance(&id,"engine",0).unwrap();assert_eq!(reopened.exposure().unwrap()[0].claimed_generations,1);
   std::fs::remove_dir_all(root).unwrap();
  }
+ #[test]
+ fn hourly_evolution_claim_includes_the_last_candle_contents(){
+  use crate::experiment::{Experiments,ExperimentData,ExperimentPlan};
+  use sqx_core::{Bar,Instrument};use sqx_backtest::BacktestConfig;use sqx_optimizer::{GeneratorConfig,GeneticConfig,Fitness};
+  let root=std::env::temp_dir().join(format!("sqx-ga-extent-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+  let bars=vec![Bar::new(3600000,1.0,1.0,1.0,1.0,1.0)];let instrument=Instrument::fx("EURUSD");let mut config=BacktestConfig::default();config.bar_duration_ms=Some(3600000);
+  let state=EvolutionState::new(42,&GeneratorConfig::default(),&GeneticConfig::default(),Fitness::NetProfit,&bars,&instrument,&config,252.0).unwrap();let jobs=EvolutionJobs::new(&root);
+  assert!(jobs.create_with_context("engine","bad",&state,json!({"timeframe":"M1"})).is_err());
+  let id=jobs.create_with_context("engine","claim",&state,json!({"timeframe":"H1"})).unwrap();jobs.claim(&id,0,None,&state).unwrap();
+  let data=ExperimentData{bars:(0..100).map(|i|Bar::new(i*60000,1.0,1.0,1.0,1.0,1.0)).collect(),instrument,provenance:json!({"timeframe":"M1"})};
+  let mut config=BacktestConfig::default();config.bar_duration_ms=Some(60000);
+  let plan=ExperimentPlan{schema:1,engine_id:"engine".into(),dataset_id:String::new(),holdout_start:70,config,min_development_trades:1,min_holdout_trades:1,periods_per_year:525600.0,prior_exposure_disclosed:false};
+  let experiments=Experiments::new(&root);let experiment=experiments.create(&data,plan).unwrap();let audit=experiments.status(&experiment).unwrap()["current_exposure_audit"].clone();
+  assert_eq!(audit["classification"],"known_reuse_or_disclosed_exposure");assert_eq!(audit["known_overlaps"][0]["end"],7199999);assert_eq!(audit["observation_extent_complete"],true);
+  std::fs::remove_dir_all(root).unwrap();
+ }
+
 }
