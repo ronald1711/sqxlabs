@@ -59,6 +59,16 @@ remaining execution assumptions and unsupported cases are visible.
 
 - [ ] Provide durable trial accounting on every research entry point, including
   CLI, MCP, pipelines, optimization and robustness operations.
+  Robustness-library checkpoints expose synchronous what-if/retest starts,
+  full outcomes, sampled strategies/offsets and explicit skipped trials. Observer
+  failure aborts before subsequent evaluation. Standalone CLI robustness now
+  archives its frozen request, ordered journal and complete report through the
+  shared pipeline recovery/backup protocol. A process-kill test deletes both
+  original source files and the archive, restores a portable backup, resumes,
+  and compares the completion identity with an uninterrupted frozen replay.
+  Disk/power-loss, scale and other entry points remain open. Trade-manipulation checkpoints also
+  expose selected ordered input indices and each outcome/overflow, preserving
+  the previous seeded sampling sequence even with duplicate trade IDs.
   CLI pipelines retain exact engine bytes, frozen inputs/configuration/seed,
   a pre-execution start record, ordered stage/family events, per-build/retest
   starts and outcomes, and the full returned report before reporting errors.

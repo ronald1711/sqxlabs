@@ -21,6 +21,9 @@ pub enum TaskKind {
     Optimize { windows: usize, candidates: usize },
     /// Standalone generated search: a fresh seeded family in each training window.
     DiscoverWalkForward { windows: usize, candidates: usize, oos_fraction: f64 },
+    Robustness { strategy: Strategy, scenarios: Vec<(f64,f64,f64)>, mc_runs: usize,
+        mc_seed:u64, skip_probability:f64, retest_runs:usize, retest_seed:u64,
+        windows:usize, candidates:usize, oos_fraction:f64 },
     GoToTask { index: usize },
 }
 
@@ -41,6 +44,8 @@ pub struct Pipeline {
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PipelineReport {
     #[serde(skip_serializing_if="Option::is_none")]
+    pub robustness: Option<RobustnessStudy>,
+    #[serde(skip_serializing_if="Option::is_none")]
     pub discovery: Option<sqx_optimizer::WalkForwardReport>,
     pub retests: Vec<RetestEvaluation>,
     pub builds: Vec<BuildEvaluation>,
@@ -48,6 +53,15 @@ pub struct PipelineReport {
     pub errors: Vec<String>,
     pub databank: Vec<Strategy>,
     pub log: Vec<String>,
+}
+
+#[derive(Debug,Clone,serde::Serialize)]
+pub struct RobustnessStudy {
+    pub base:sqx_backtest::BacktestResult,
+    pub what_if:Vec<sqx_robustness::WhatIfRow>,
+    pub monte_carlo:Option<sqx_robustness::MonteCarloReport>,
+    pub retest:Option<sqx_robustness::RetestReport>,
+    pub walk_forward:Option<sqx_optimizer::WalkForwardReport>,
 }
 
 #[derive(Debug,Clone,serde::Serialize)]
@@ -97,6 +111,9 @@ pub fn run(
 #[derive(Debug,serde::Serialize)]
 #[serde(tag="kind",rename_all="snake_case")]
 pub enum PipelineEvent<'a> {
+    RobustnessBaseStarted { step:usize, strategy:&'a Strategy },
+    RobustnessBaseOutcome { step:usize, result:&'a sqx_backtest::BacktestResult },
+    RobustnessScenario { step:usize, event:sqx_robustness::RobustnessEvent<'a> },
     StepStarted { step:usize, task_index:usize, task:&'a Task, inputs:&'a [Strategy] },
     BuildFamily { step:usize, candidates:&'a [Strategy] },
     BuildStarted { step:usize, candidate_index:usize, strategy:&'a Strategy },
@@ -117,6 +134,9 @@ pub fn run_observed(
     observer:&mut impl FnMut(PipelineEvent<'_>)->Result<(),String>,
 )->Result<PipelineReport,String> {
     let failure=|error:String| Ok(PipelineReport{errors:vec![error],..Default::default()});
+    if pipeline.tasks.iter().any(|t|matches!(t.kind,TaskKind::Robustness{..})) && pipeline.tasks.len()!=1 {
+        return failure("Robustness studies must be standalone tasks; they do not select a deployable strategy".into());
+    }
     if pipeline.tasks.iter().any(|t|matches!(t.kind,TaskKind::DiscoverWalkForward{..})) && pipeline.tasks.len()!=1 {
         return failure("Generated walk-forward must be a standalone task; it does not select a single deployable strategy".into());
     }
@@ -132,7 +152,7 @@ pub fn run_observed(
             _=>{}
         }
     }
-    let mut retests=Vec::new();let mut builds=Vec::new();let mut optimizations=Vec::new();let mut errors=Vec::new();let mut discovery=None;
+    let mut retests=Vec::new();let mut builds=Vec::new();let mut optimizations=Vec::new();let mut errors=Vec::new();let mut discovery=None;let mut robustness=None;
     let mut rng = StdRng::seed_from_u64(seed);
     let mut databank: Vec<Strategy> = Vec::new();
     let mut log = Vec::new();
@@ -142,6 +162,27 @@ pub fn run_observed(
         steps += 1;
         observer(PipelineEvent::StepStarted{step:steps,task_index:pc,task:&pipeline.tasks[pc],inputs:&databank})?;
         match &pipeline.tasks[pc].kind {
+            TaskKind::Robustness{strategy,scenarios,mc_runs,mc_seed,skip_probability,retest_runs,retest_seed,windows,candidates,oos_fraction}=>{
+                observer(PipelineEvent::RobustnessBaseStarted{step:steps,strategy})?;
+                let base=backtest(strategy,bars,instrument,config);
+                observer(PipelineEvent::RobustnessBaseOutcome{step:steps,result:&base})?;
+                if !base.errors.is_empty(){
+                    errors.extend(base.errors.iter().cloned());
+                    robustness=Some(RobustnessStudy{base,what_if:vec![],monte_carlo:None,retest:None,walk_forward:None});
+                }else{
+                    let what_if=sqx_robustness::what_if_observed(strategy,bars,instrument,config,scenarios,&mut |event|observer(PipelineEvent::RobustnessScenario{step:steps,event}))?;
+                    let mc=sqx_robustness::monte_carlo_trade_manipulation_observed(&base.trades,*mc_runs,*skip_probability,*mc_seed,&mut |event|observer(PipelineEvent::RobustnessScenario{step:steps,event}))?;
+                    let retest=sqx_robustness::monte_carlo_retest_observed(strategy,bars,instrument,config,*retest_runs,*retest_seed,&mut |event|observer(PipelineEvent::RobustnessScenario{step:steps,event}))?;
+                    let wf=sqx_optimizer::walk_forward_generated_observed(bars,instrument,config,periods_per_year,gen,*windows,*oos_fraction,*candidates,seed,&sqx_optimizer::WalkForwardCriteria::default(),&mut |event|observer(PipelineEvent::WalkForward{step:steps,candidate_index:0,event}))?;
+                    for (index,row) in what_if.iter().enumerate(){errors.extend(row.errors.iter().map(|e|format!("What-if scenario {index}: {e}")));}
+                    errors.extend(mc.errors.iter().map(|e|format!("Monte Carlo: {e}")));
+                    errors.extend(retest.errors.iter().map(|e|format!("MC retest: {e}")));
+                    errors.extend(wf.errors.iter().map(|e|format!("Walk-forward: {e}")));
+                    robustness=Some(RobustnessStudy{base,what_if,monte_carlo:Some(mc),retest:Some(retest),walk_forward:Some(wf)});
+                }
+                log.push("Robustness study completed; inspect errors and scenario evidence before use".into());
+                pc+=1;
+            },
             TaskKind::DiscoverWalkForward{windows,candidates,oos_fraction}=>{
                 let report=sqx_optimizer::walk_forward_generated_observed(bars,instrument,config,periods_per_year,gen,*windows,*oos_fraction,*candidates,seed,&sqx_optimizer::WalkForwardCriteria::default(),&mut |event|observer(PipelineEvent::WalkForward{step:steps,candidate_index:0,event}))?;
                 errors.extend(report.errors.iter().cloned());
@@ -229,7 +270,7 @@ pub fn run_observed(
     }
     log.push(format!("Pipeline {} after {} steps; {} strategies in databank",if pc<pipeline.tasks.len(){"stopped at its limit"}else{"finished"}, steps, databank.len()));
     if pc<pipeline.tasks.len(){errors.push("Pipeline step limit reached before completion".into());}
-    Ok(PipelineReport {errors,retests,builds,optimizations,discovery,databank, log })
+    Ok(PipelineReport {errors,retests,builds,optimizations,discovery,robustness,databank, log })
 }
 
 /// A default demo pipeline: Build -> Retest -> Optimize.

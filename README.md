@@ -146,12 +146,12 @@ cargo run -q -p sqx-cli -- robustness --symbol EURUSD --timeframe M1 --strategy 
 # Nonzero exit on invalid computation; exit 0 alone does not certify sufficient trade evidence.
 cargo run -q -p sqx-cli -- optimize --symbol EURUSD --timeframe M1 --data data/eurusd_sample.csv --windows 6 --oos 0.25
 
-# generate and optimize archive their inputs and executions in data/research.
-# Use the printed Optimization checkpoint run_id with the shared recovery commands:
+# generate, optimize and robustness archive inputs and executions in data/research.
+# Use the printed checkpoint run_id with the shared recovery commands:
 cargo run -q -p sqx-cli -- pipeline-history --run-id <checkpoint-id>
 cargo run -q -p sqx-cli -- replay-pipeline --run-id <checkpoint-id> --resume
 # Recovery requires the exact original executable; rebuilding can change its identity.
-# export-pipeline / import-pipeline also support these standalone optimization archives.
+# export-pipeline / import-pipeline also support these standalone study archives.
 
 # portfolio: best subset of generated strategies (equal weights + correlation)
 cargo run -q -p sqx-cli -- portfolio --symbol EURUSD --timeframe M1 --data data/eurusd_sample.csv --count 300 --top 12
@@ -262,6 +262,19 @@ before that failure. The combined `robustness` context includes stage-labelled
 `errors`, including unavailable Monte Carlo distributions and incomplete retest
 coverage. A successful exit means the calculations completed; it does not certify
 sufficient trade evidence, an untouched holdout or suitability for live trading.
+
+Standalone CLI `robustness` saves its exact executable identity, input data,
+strategy, configuration and seeds before simulation (`--archive-dir` defaults to
+`data/research`). Its journal retains the base result, each what-if configuration
+and result, ordered Monte Carlo trade selections, retest strategies and offsets,
+skipped/invalid outcomes, and walk-forward candidate and OOS executions. Storage
+failure stops the study. The shared recovery commands above verify the recorded
+prefix before appending missing events; recovery repeats computation and requires
+the original executable. Portable backup/restore and process interruption are
+tested; power-loss durability and large-study resource limits remain unverified.
+The walk-forward stage searches fresh generated candidates; it does not validate
+the supplied strategy out of sample. Standalone `montecarlo` and other entry
+points do not inherit this archival coverage automatically.
 
 CLI `crosscheck` uses `--manifest` instead of inferring instruments from a folder.
 The schema-1 manifest contains a `markets` array with explicit `symbol`, `data`

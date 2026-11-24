@@ -9,6 +9,7 @@ fn stress_and_portfolio_commands_bind_sources_and_reject_failed_execution(){
     let csv="timestamp,open,high,low,close,volume\n1700000000,150,151,149,150,1\n1700000060,150,151,149,150,1\n";fs::write(&data,csv).unwrap();
     let run=|name:&str,args:&[&str]|{
         let mut cmd=Command::new(env!("CARGO_BIN_EXE_sqx-cli"));cmd.arg(name).arg("--data").arg(&data);
+        if name=="robustness" {cmd.arg("--archive-dir").arg(root.join("archive"));}
         if name=="portfolio"{cmd.args(["--count","2"]);}else{cmd.arg("--strategy").arg(&strategy);if name=="montecarlo"{cmd.args(["--runs","2"]);}else{cmd.args(["--mc-runs","2","--retest-runs","2","--windows","2"]);}}
         cmd.args(args).output().unwrap()
     };
@@ -22,12 +23,34 @@ fn stress_and_portfolio_commands_bind_sources_and_reject_failed_execution(){
                 assert!(errors.iter().any(|e|e.as_str().unwrap().starts_with(stage)),"missing {stage}: {context}");
                 assert!(String::from_utf8_lossy(&output.stderr).contains(stage));
             }
+            let receipt:Value=serde_json::from_str(text.lines().find_map(|s|s.strip_prefix("Robustness archive: ")).expect("failed study still has a completion receipt")).unwrap();
+            let archive=sqx_project::archive::Archive::new(root.join("archive"));
+            let completed=archive.load(receipt["run_id"].as_str().unwrap()).unwrap();
+            let report=&completed.run.result["report"];
+            assert_eq!(report["errors"],context["errors"]);
+            assert_eq!(report["robustness"]["retest"]["skipped_runs"],2);
+            assert!(!report["robustness"]["monte_carlo"]["errors"].as_array().unwrap().is_empty());
+            let replay=Command::new(env!("CARGO_BIN_EXE_sqx-cli"))
+                .args(["replay-pipeline","--archive-dir"]).arg(root.join("archive"))
+                .args(["--run-id",receipt["started_run_id"].as_str().unwrap()]).output().unwrap();
+            assert!(replay.status.success(),"repeatability of an invalid study can still be checked: {}",String::from_utf8_lossy(&replay.stderr));
+            let replay:Value=serde_json::from_slice(&replay.stdout).unwrap();
+            assert_eq!(replay["completion_id"],receipt["run_id"]);
+            assert_eq!(replay["execution_valid"],false,"repeatability must not promote invalid research");
         }
         assert_eq!(context["symbol"],"USDJPY");assert_eq!(context["config"]["account"]["currency"],"JPY");assert_eq!(context["config"]["bar_duration_ms"],60000);
         let invalid=run(name,&["--symbol","USDJPY","--timeframe","M5","--allow-data-gaps"]);assert!(!invalid.status.success());assert!(String::from_utf8_lossy(&invalid.stderr).contains("overlapping candle"));
     }
     let mut bad=json!(sqx_strategy::Strategy::new("invalid size"));bad["money_management"]=json!({"FixedSize":{"size":0.0}});fs::write(&strategy,bad.to_string()).unwrap();
     let failed=run("montecarlo",&["--symbol","USDJPY","--timeframe","M1"]);assert!(!failed.status.success(),"{}",String::from_utf8_lossy(&failed.stdout));assert!(failed.stdout.is_empty(),"failed simulation must not become a Monte Carlo report");
+    let failed=run("robustness",&["--symbol","USDJPY","--timeframe","M1"]);assert!(!failed.status.success());
+    let stdout=String::from_utf8(failed.stdout).unwrap();
+    let receipt:Value=serde_json::from_str(stdout.lines().find_map(|s|s.strip_prefix("Robustness archive: ")).expect("invalid base execution is archived")).unwrap();
+    let archive=sqx_project::archive::Archive::new(root.join("archive"));
+    let completed=archive.load(receipt["run_id"].as_str().unwrap()).unwrap();
+    let study=&completed.run.result["report"]["robustness"];
+    assert!(!study["base"]["errors"].as_array().unwrap().is_empty());
+    assert!(study["monte_carlo"].is_null());assert!(study["retest"].is_null());assert!(study["walk_forward"].is_null());
     fs::remove_dir_all(root).unwrap();
 }
 

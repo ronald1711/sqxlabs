@@ -13,7 +13,7 @@ use sqx_core::{Bar, Instrument};
 use sqx_strategy::{ProfitTarget, StopLoss, Strategy};
 
 /// One what-if scenario: re-run the backtest with different costs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct WhatIfRow {
     pub errors: Vec<String>,
     pub spread: f64,
@@ -21,6 +21,21 @@ pub struct WhatIfRow {
     pub commission: f64,
     pub net_profit: f64,
     pub profit_factor: f64,
+}
+
+/// Ordered, synchronous checkpoints for a caller's durable journal. A failed
+/// observer aborts before any subsequent evaluation; no persistence is implied
+/// merely by using the compatibility APIs without an observer.
+#[derive(Debug, serde::Serialize)]
+pub enum RobustnessEvent<'a> {
+    WhatIfStarted { index: usize, config: &'a BacktestConfig },
+    WhatIfOutcome { index: usize, result: &'a sqx_backtest::BacktestResult, row: &'a WhatIfRow },
+    RetestStarted { index: usize, start_offset: usize, strategy: &'a Strategy },
+    RetestSkipped { index: usize, start_offset: usize, available_bars: usize },
+    RetestOutcome { index: usize, result: &'a sqx_backtest::BacktestResult, errors: &'a [String] },
+    /// Indices refer to positions in the frozen input array, not broker trade IDs.
+    TradeManipulationStarted { index: usize, trade_indices: &'a [usize] },
+    TradeManipulationOutcome { index: usize, sample: Option<&'a MonteCarloSample>, errors: &'a [String] },
 }
 
 /// Re-run the strategy under a set of cost scenarios (spread, slippage, commission).
@@ -31,18 +46,30 @@ pub fn what_if(
     base: &BacktestConfig,
     scenarios: &[(f64, f64, f64)],
 ) -> Vec<WhatIfRow> {
+    what_if_observed(strategy,bars,instrument,base,scenarios,&mut |_|Ok(()))
+        .expect("infallible what-if observer")
+}
+
+pub fn what_if_observed(
+    strategy: &Strategy, bars: &[Bar], instrument: &Instrument,
+    base: &BacktestConfig, scenarios: &[(f64,f64,f64)],
+    observer: &mut impl FnMut(RobustnessEvent<'_>)->Result<(),String>,
+) -> Result<Vec<WhatIfRow>,String> {
     let mut out = Vec::new();
-    for &(spread, slippage, commission) in scenarios {
+    for (index,&(spread, slippage, commission)) in scenarios.iter().enumerate() {
         let cfg = BacktestConfig {
             spread_points: spread,
             slippage_points: slippage,
             commission_per_lot: commission,
             ..base.clone()
         };
+        observer(RobustnessEvent::WhatIfStarted{index,config:&cfg})?;
         let r = backtest(strategy, bars, instrument, &cfg);
-        out.push(summarize_cost_scenario(&r,spread,slippage,commission));
+        let row=summarize_cost_scenario(&r,spread,slippage,commission);
+        observer(RobustnessEvent::WhatIfOutcome{index,result:&r,row:&row})?;
+        out.push(row);
     }
-    out
+    Ok(out)
 }
 
 fn summarize_cost_scenario(result:&sqx_backtest::BacktestResult,spread:f64,slippage:f64,commission:f64)->WhatIfRow {
@@ -58,7 +85,7 @@ fn summarize_cost_scenario(result:&sqx_backtest::BacktestResult,spread:f64,slipp
 }
 
 /// Distribution summary of a Monte Carlo retest.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct RetestReport {
     /// Seed and sampled offsets identify the experiment, including skipped runs.
     pub seed: u64,
@@ -88,16 +115,26 @@ pub fn monte_carlo_retest(
     runs: usize,
     seed: u64,
 ) -> RetestReport {
+    monte_carlo_retest_observed(strategy,bars,instrument,base,runs,seed,&mut |_|Ok(()))
+        .expect("infallible retest observer")
+}
+
+pub fn monte_carlo_retest_observed(
+    strategy:&Strategy, bars:&[Bar], instrument:&Instrument, base:&BacktestConfig,
+    runs:usize, seed:u64,
+    observer:&mut impl FnMut(RobustnessEvent<'_>)->Result<(),String>,
+) -> Result<RetestReport,String> {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut skipped_runs=0;let mut invalid_runs=0;let mut errors=Vec::new();
     let mut start_offsets=Vec::new();
     let mut nets = Vec::new();
     let mut dds = Vec::new();
     let skip_max = (bars.len() / 10).max(1);
-    for _ in 0..runs {
+    for index in 0..runs {
         let skip = rng.gen_range(0..skip_max);
         start_offsets.push(skip);
         if bars.len()-skip < 50 {
+            observer(RobustnessEvent::RetestSkipped{index,start_offset:skip,available_bars:bars.len()-skip})?;
             skipped_runs+=1;
             continue;
         }
@@ -108,20 +145,19 @@ pub fn monte_carlo_retest(
         if let Some(pt) = s.profit_target {
             s.profit_target = Some(jitter_pt(pt, &mut rng));
         }
+        observer(RobustnessEvent::RetestStarted{index,start_offset:skip,strategy:&s})?;
         let r = backtest_window(&s, bars, skip, instrument, base);
         let mut run_errors=r.errors.clone();
         if let Err(error)=sqx_metrics::validate_observations(&r){run_errors.push(error);}
+        let net=r.trades.iter().map(|t| t.pnl).sum::<f64>();
+        let drawdown=max_drawdown_equity(&r.equity, base.initial_deposit);
+        if run_errors.is_empty() && (!net.is_finite() || !drawdown.is_finite() || !r.final_equity.is_finite()) {
+            run_errors.push("Retest produced nonfinite accounting or drawdown".into());
+        }
+        observer(RobustnessEvent::RetestOutcome{index,result:&r,errors:&run_errors})?;
         if !run_errors.is_empty() {
             invalid_runs+=1;
             for error in run_errors { if !errors.contains(&error) {errors.push(error);} }
-            continue;
-        }
-        let net=r.trades.iter().map(|t| t.pnl).sum::<f64>();
-        let drawdown=max_drawdown_equity(&r.equity, base.initial_deposit);
-        if !net.is_finite() || !drawdown.is_finite() || !r.final_equity.is_finite() {
-            invalid_runs+=1;
-            let error="Retest produced nonfinite accounting or drawdown".to_string();
-            if !errors.contains(&error){errors.push(error);}
             continue;
         }
         nets.push(net);
@@ -144,7 +180,7 @@ pub fn monte_carlo_retest(
     };
     if skipped_runs>0 {errors.push(format!("Incomplete retest coverage: {skipped_runs} of {runs} sampled windows have fewer than 50 bars; distribution unavailable"));}
     if runs_n==0 && errors.is_empty() {errors.push("No retest runs could be evaluated; at least 50 bars per sampled window are required".into());}
-    RetestReport {
+    Ok(RetestReport {
         seed,start_offsets,warmup_policy:"historical prefix; flat at trading start; previous-close signal may fill at start open",
         requested_runs:runs,skipped_runs,invalid_runs,errors,
         runs: runs_n,
@@ -153,7 +189,7 @@ pub fn monte_carlo_retest(
         net_profit_95pct: pct(&nets, 0.95),
         losing_runs_pct: losing,
         max_dd_95pct: pct(&dds, 0.95),
-    }
+    })
 }
 
 fn jitter_sl(sl: StopLoss, rng: &mut StdRng) -> StopLoss {
@@ -226,24 +262,42 @@ pub fn monte_carlo_trade_manipulation(
     skip_prob: f64,
     seed: u64,
 ) -> MonteCarloReport {
+    monte_carlo_trade_manipulation_observed(trades,runs,skip_prob,seed,&mut |_|Ok(()))
+        .expect("infallible trade-manipulation observer")
+}
+
+/// Publish each selected ordered path before calculating it, then its outcome.
+/// Invalid inputs produce a report with errors and no scenario events.
+pub fn monte_carlo_trade_manipulation_observed(
+    trades:&[Trade], runs:usize, skip_prob:f64, seed:u64,
+    observer:&mut impl FnMut(RobustnessEvent<'_>)->Result<(),String>,
+) -> Result<MonteCarloReport,String> {
     let mut errors=Vec::new();
     if trades.is_empty(){errors.push("No trades available for Monte Carlo resampling".into());}
     if runs==0{errors.push("Monte Carlo requires at least one run".into());}
     if !skip_prob.is_finite() || !(0.0..=1.0).contains(&skip_prob){errors.push("skip_prob must be finite and between zero and one".into());}
     if trades.iter().any(|trade| !trade.pnl.is_finite()){errors.push("Trade PnL must be finite".into());}
-    if !errors.is_empty() { return invalid_monte_carlo(errors); }
+    if !errors.is_empty() { return Ok(invalid_monte_carlo(errors)); }
     let mut rng = StdRng::seed_from_u64(seed);
     let keep = (1.0 - skip_prob).clamp(0.0, 1.0);
     let mut nets = Vec::with_capacity(runs);
     let mut dds = Vec::with_capacity(runs);
     let mut samples = Vec::with_capacity(runs);
     for run_index in 0..runs {
-        let mut seq: Vec<f64> = trades.iter().filter(|_| rng.gen_bool(keep)).map(|t| t.pnl).collect();
-        seq.shuffle(&mut rng);
+        let mut indices:Vec<usize>=(0..trades.len()).filter(|_|rng.gen_bool(keep)).collect();
+        indices.shuffle(&mut rng);
+        observer(RobustnessEvent::TradeManipulationStarted{index:run_index,trade_indices:&indices})?;
+        let seq:Vec<f64>=indices.iter().map(|&index|trades[index].pnl).collect();
         let net: f64 = seq.iter().sum();
         let drawdown=max_drawdown(&seq);
-        if !net.is_finite() || !drawdown.is_finite(){return invalid_monte_carlo(vec!["Monte Carlo arithmetic overflow; no valid distribution produced".into()]);}
-        samples.push(MonteCarloSample{run_index,included_trades:seq.len(),net_profit:net,max_drawdown:drawdown});
+        if !net.is_finite() || !drawdown.is_finite(){
+            let errors=vec!["Monte Carlo arithmetic overflow; no valid distribution produced".into()];
+            observer(RobustnessEvent::TradeManipulationOutcome{index:run_index,sample:None,errors:&errors})?;
+            return Ok(invalid_monte_carlo(errors));
+        }
+        let sample=MonteCarloSample{run_index,included_trades:seq.len(),net_profit:net,max_drawdown:drawdown};
+        observer(RobustnessEvent::TradeManipulationOutcome{index:run_index,sample:Some(&sample),errors:&[]})?;
+        samples.push(sample);
         nets.push(net);
         dds.push(drawdown);
     }
@@ -253,7 +307,7 @@ pub fn monte_carlo_trade_manipulation(
     let pct = |v: &[f64], p: f64| v[((v.len() - 1) as f64 * p).round() as usize];
     let losing = nets.iter().filter(|n| **n < 0.0).count() as f64 / runs as f64 * 100.0;
 
-    MonteCarloReport {
+    Ok(MonteCarloReport {
         samples,errors:Vec::new(),runs,
         net_profit_5pct: pct(&nets, 0.05),
         net_profit_50pct: pct(&nets, 0.50),
@@ -264,7 +318,7 @@ pub fn monte_carlo_trade_manipulation(
         positive_runs_pct:nets.iter().filter(|n|**n>0.0).count() as f64/runs as f64*100.0,
         flat_runs_pct:nets.iter().filter(|n|**n==0.0).count() as f64/runs as f64*100.0,
         max_drawdown_95pct: pct(&dds, 0.95),
-    }
+    })
 }
 
 fn invalid_monte_carlo(errors:Vec<String>)->MonteCarloReport {

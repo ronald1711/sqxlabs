@@ -2152,6 +2152,7 @@ fn research_list_json(state:&State)->String{
                 match tasks.filter(|tasks|tasks.len()==1).and_then(|tasks|tasks.first()).map(|task|&task["kind"]) {
                     Some(task) if task.get("Generate").is_some()=>"generation",
                     Some(task) if task.get("DiscoverWalkForward").is_some()=>"walk_forward",
+                    Some(task) if task.get("Robustness").is_some()=>"robustness",
                     _=>"pipeline",
                 }
             }else{""};

@@ -59,6 +59,27 @@ resolved by a later increment. The numbered requirements above remain unchanged.
 | 5. Research validity | Walk-forward warms from history, carries capital and records candidate outcomes/selection; an independent integer-price SMA fixture checks segmented selection and capital. Holdout audits include declared candle extents, assistant/crosscheck/comparison/evolution exposure and MCP generation phases; record counts remain distinct from independent trial counts. Commitment evidence survives experiment restore. | Complete durable trial accounting across every entry point and independent boundary/evidence review. Search-history completeness and no-known-overlap labels do not establish untouched data outside the registry. |
 | 6. Operational workspace | Resumable evolution and MCP generation, raw backups, saved comparisons and bounded assistant tools have tests. UI trade explanations show protection, financing, stop-out and settlement; overview explains limited evidence. A 15-window read-only live capture matched all 45 bid candles but failed the declared conversion freshness limit at 13 USDJPY events; it retained legacy account binding. A separate fingerprint-bound recording resumed across processes. A prospective five-window capture passed observed OHLC/freshness checks; seven execution cases matched independent arithmetic, while one absent SMA signal left execution coverage incomplete. HTTP remote addresses are rejected. | Broader live recording/outage/power-loss validation, complete evidence/recovery UI, AI provider-conversation recovery, known-strategy paper reconciliation and export parity. Remote authenticated service is not supported. |
 
+### Standalone robustness recovery evidence (2026-11-24)
+
+CLI `robustness` now archives frozen inputs and ordered scenario checkpoints
+through the shared pipeline protocol. Its process-kill test exports a partial
+study, deletes the source files and original archive, restores the backup and
+resumes to the same completion identity as an uninterrupted frozen replay.
+Observer failures are injected at every pipeline event boundary. Failed studies
+retain their errors, including skipped retests and unavailable distributions;
+successful replay of those studies still reports `execution_valid: false`.
+Invalid base executions are retained without producing downstream statistics.
+
+At `316610c`, `cargo test --workspace` passed 446 tests with zero failures or
+ignored tests. Subsequent failure-archive assertions passed in both CLI stress
+tests, and `cargo build --workspace` passed. The dashboard recovery check and
+indicator evidence-index check also passed. These are local checks, not a claim
+of remote release approval or independent trading correctness. The web robustness
+endpoint still archives after computation; standalone Monte Carlo and remaining
+entry points need durable trial accounting. Power-loss and large-study behavior
+remain unverified. The CLI's generated walk-forward stage is a separate candidate
+search, not an out-of-sample evaluation of the supplied strategy.
+
 ### Recovery integration evidence (2026-11-24)
 
 Integration PR #1 merged into `main` as `072f4f7`, retaining all commits originally
