@@ -38,6 +38,7 @@ node crates/sqx-web/tests/entry_explanations.cjs
 node crates/sqx-web/tests/signal_explanations.cjs
 node crates/sqx-web/tests/assistant_evidence.cjs
 node crates/sqx-web/tests/assistant_trial_recovery.cjs
+node crates/sqx-web/tests/pipeline_recovery.cjs
 
 python3 -m unittest discover -s scripts/tests -v
 

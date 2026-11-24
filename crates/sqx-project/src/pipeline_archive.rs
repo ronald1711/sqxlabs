@@ -1,6 +1,6 @@
 //! Pipeline prefix inspection and deterministic recovery. Stored binaries are never executed.
 use serde_json::{json,Value};
-use sqx_project::archive::{Archive,ResearchBundle};
+use crate::archive::{Archive,ResearchBundle};
 use std::collections::BTreeMap;
 
 const SCOPE:&str="Ordered build/retest and walk-forward trial checkpoints, with full walk-forward execution outcomes. Recovery replays the saved prefix before appending missing events. Full-data discovery is exploratory, not an untouched holdout.";
@@ -19,7 +19,7 @@ fn lock_validated(archive:&Archive,id:&str)->Result<std::fs::File,String>{
 
 #[derive(serde::Serialize,serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct PortableRecord {run_id:String,run:sqx_project::archive::RunRecord}
+struct PortableRecord {run_id:String,run:crate::archive::RunRecord}
 #[derive(serde::Serialize,serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Backup {
@@ -30,7 +30,7 @@ struct Backup {
     completion:Option<PortableRecord>,
 }
 fn checksum(backup:&Backup)->Result<String,String>{
-    Ok(sqx_project::archive::content_id(&serde_json::to_vec(backup).map_err(|e|e.to_string())?))
+    Ok(crate::archive::content_id(&serde_json::to_vec(backup).map_err(|e|e.to_string())?))
 }
 
 pub fn export(archive:&Archive,id:&str)->Result<Value,String>{
@@ -143,6 +143,16 @@ fn load(archive:&Archive,id:&str)->Result<State,String>{
     Ok(State{root,events:ordered,completion})
 }
 
+/// Compact structural status; does not run the engine or return full event payloads.
+pub fn summary(archive:&Archive,id:&str)->Result<Value,String>{
+    let _guard=lock(archive,id)?;let state=load(archive,id)?;
+    Ok(json!({"started_run_id":id,"engine_id":state.root.run.engine_id,
+        "status":if state.completion.is_some(){"completion_recorded"}else{"incomplete"},
+        "completion_id":state.completion.as_ref().map(|r|&r.run_id),"event_count":state.events.len(),
+        "execution_valid":state.completion.as_ref().map(|r|r.run.result["report"]["errors"].as_array().is_some_and(|e|e.is_empty())),
+        "execution_replayed":false,"scope":"Ordered archive links checked; calculations have not been replayed and are not independently validated."}))
+}
+
 pub fn inspect(archive:&Archive,id:&str)->Result<Value,String>{
     let _guard=lock(archive,id)?;let state=load(archive,id)?;
     Ok(json!({"started_run_id":id,"status":if state.completion.is_some(){"completion_recorded"}else{"incomplete"},
@@ -158,7 +168,7 @@ pub fn recover(archive:&Archive,id:&str,resume:bool)->Result<Recovery,String>{
     let state=load(archive,id)?;
     let root=&state.root;
     let executable=std::fs::read(std::env::current_exe().map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
-    if sqx_project::archive::content_id(&executable)!=root.run.engine_id{return Err("Pipeline engine executable differs; use the exact recorded engine".into());}
+    if crate::archive::content_id(&executable)!=root.run.engine_id{return Err("Pipeline engine executable differs; use the exact recorded engine".into());}
     if !resume && state.completion.is_none(){return Err("Pipeline is incomplete; use --resume to replay its prefix and finish missing work".into());}
     let bars:Vec<sqx_core::Bar>=serde_json::from_value(root.dataset["bars"].clone()).map_err(|e|e.to_string())?;
     let instrument:sqx_core::Instrument=serde_json::from_value(root.dataset["instrument"].clone()).map_err(|e|e.to_string())?;

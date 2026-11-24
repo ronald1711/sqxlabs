@@ -1,5 +1,5 @@
 mod audit_log;
-mod pipeline_archive;
+use sqx_project::pipeline_archive;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};

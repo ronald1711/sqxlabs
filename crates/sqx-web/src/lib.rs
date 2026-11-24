@@ -181,6 +181,34 @@ mod tests {
     }
 
     #[test]
+    fn dashboard_pipeline_restores_and_recovers_without_live_data(){
+        let state=research_state();
+        let bars=vec![Bar::new(0,1.1,1.1,1.1,1.1,1.0),Bar::new(60000,1.1,1.1,1.1,1.1,1.0)];
+        let pipeline=sqx_pipeline::Pipeline{name:"dashboard recovery".into(),tasks:vec![sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::Build{count:2,keep:1}}]};
+        let id=state.archive.save(engine_identity().unwrap(),json!({"bars":bars,"instrument":Instrument::fx("EURUSD"),"timeframe":"M1"}),
+            json!({"pipeline":pipeline,"generator":sqx_optimizer::GeneratorConfig::default()}),
+            json!({"research_kind":"cli_pipeline_started","config":BacktestConfig::default(),"seed":42,"periods_per_year":525600.0}),json!({"status":"execution_not_recorded"})).unwrap();
+        let request=json!({"run_id":id}).to_string();
+        let status:serde_json::Value=serde_json::from_str(&pipeline_action_json("status",&request,&state)).unwrap();
+        assert_eq!(status["status"],"incomplete");assert_eq!(status["engine_matches"],true);
+        let denied:serde_json::Value=serde_json::from_str(&pipeline_action_json("replay",&request,&state)).unwrap();assert!(denied["error"].as_str().unwrap().contains("incomplete"));
+        let backup=pipeline_action_json("backup",&request,&state);
+        std::fs::remove_dir_all(state.archive.root()).unwrap();
+        let target=research_state();target.store.write().unwrap().series.clear();
+        let restored:serde_json::Value=serde_json::from_str(&pipeline_action_json("restore",&backup,&target)).unwrap();assert_eq!(restored["started_run_id"],id);
+        let resumed:serde_json::Value=serde_json::from_str(&pipeline_action_json("replay",&json!({"run_id":id,"resume":true}).to_string(),&target)).unwrap();
+        assert_eq!(resumed["matches"],true,"{resumed}");assert_eq!(resumed["execution_valid"],true);assert!(resumed["appended_events"].as_u64().unwrap()>0);
+        let again:serde_json::Value=serde_json::from_str(&pipeline_action_json("replay",&request,&target)).unwrap();assert_eq!(again["appended_events"],0);assert_eq!(again["completion_id"],resumed["completion_id"]);
+        let root=target.archive.load(&id).unwrap();
+        let wrong=target.archive.save("f".repeat(64),root.dataset,root.strategy,root.run.request,root.run.result).unwrap();
+        let wrong_request=json!({"run_id":wrong,"resume":true}).to_string();
+        let mismatch:serde_json::Value=serde_json::from_str(&pipeline_action_json("status",&wrong_request,&target)).unwrap();assert_eq!(mismatch["engine_matches"],false);
+        let before=target.archive.list().unwrap();
+        let rejected:serde_json::Value=serde_json::from_str(&pipeline_action_json("replay",&wrong_request,&target)).unwrap();assert!(rejected["error"].as_str().unwrap().contains("engine executable differs"));assert_eq!(target.archive.list().unwrap(),before);
+        std::fs::remove_dir_all(target.archive.root()).unwrap();
+    }
+
+    #[test]
     fn cli_pipeline_records_are_labeled_and_cannot_replay_as_single_backtests(){
         let state=research_state();
         for kind in ["cli_pipeline_started","cli_pipeline_event","cli_pipeline"] {
@@ -946,6 +974,10 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("GET", "/api/comparison") => ("200 OK", "application/json", comparison_read_json(&query_param(full_path,"id"),state)),
         ("POST", "/api/comparison/import") => ("200 OK", "application/json", comparison_import_json(body,state)),
         ("POST", "/api/comparison/restore") => ("200 OK", "application/json", comparison_restore_json(body,state)),
+        ("GET", "/api/pipeline/status") => ("200 OK", "application/json", pipeline_action_json("status",&json!({"run_id":query_param(full_path,"id")}).to_string(),state)),
+        ("GET", "/api/pipeline/backup") => ("200 OK", "application/json", pipeline_action_json("backup",&json!({"run_id":query_param(full_path,"id")}).to_string(),state)),
+        ("POST", "/api/pipeline/restore") => ("200 OK", "application/json", pipeline_action_json("restore",body,state)),
+        ("POST", "/api/pipeline/replay") => ("200 OK", "application/json", pipeline_action_json("replay",body,state)),
         ("GET", "/api/research/runs") => ("200 OK", "application/json", research_list_json(state)),
         ("GET", "/api/research/run") => ("200 OK", "application/json", match state.archive.load(&query_param(full_path,"id")) {Ok(bundle)=>json!(bundle).to_string(),Err(e)=>json!({"error":e}).to_string()}),
         ("POST", "/api/research/replay") => ("200 OK", "application/json", research_replay_json(body,state)),
@@ -2085,6 +2117,30 @@ fn archived_backtest_json(body: &str, state: &State) -> String {
     execute().unwrap_or_else(|e|json!({"error":format!("Research run could not be recorded: {e}")})).to_string()
 }
 
+fn pipeline_action_json(action:&str,body:&str,state:&State)->String {
+    let result=(||->Result<serde_json::Value,String>{
+        let value:serde_json::Value=serde_json::from_str(body).map_err(|e|e.to_string())?;
+        if action=="restore"{return sqx_project::pipeline_archive::import(&state.archive,value);}
+        let id=value["run_id"].as_str().ok_or("missing pipeline start ID")?;
+        match action {
+            "status"=>{
+                let mut status=sqx_project::pipeline_archive::summary(&state.archive,id)?;
+                status["engine_matches"]=json!(status["engine_id"]==engine_identity()?);Ok(status)
+            },
+            "backup"=>sqx_project::pipeline_archive::export(&state.archive,id),
+            "replay"=>{
+                let recovered=sqx_project::pipeline_archive::recover(&state.archive,id,value["resume"]==true)?;
+                Ok(json!({"started_run_id":id,"completion_id":recovered.completion_id,"matches":true,
+                    "replayed_events":recovered.replayed,"appended_events":recovered.appended,
+                    "execution_valid":recovered.report.errors.is_empty(),"errors":recovered.report.errors,
+                    "scope":"Exact-engine replay; not independent validation or untouched holdout evidence."}))
+            },
+            _=>Err("unknown pipeline action".into()),
+        }
+    })();
+    match result{Ok(value)=>value.to_string(),Err(error)=>json!({"error":error}).to_string()}
+}
+
 fn research_list_json(state:&State)->String{
     let list=||->Result<Vec<serde_json::Value>,String>{
         state.archive.list()?.iter().map(|id|{
@@ -2094,7 +2150,7 @@ fn research_list_json(state:&State)->String{
             let name=if pipeline{json!("CLI pipeline")}else{bundle.strategy["name"].clone()};
             let symbol=bundle.dataset.get("symbol").filter(|v|v.is_string()).cloned()
                 .unwrap_or_else(||bundle.dataset["instrument"]["name"].clone());
-            Ok(json!({"run_id":id,"name":name,"symbol":symbol,"dataset_id":bundle.run.dataset_id,"engine_id":bundle.run.engine_id,"metrics":bundle.run.result["metrics"],"kind":bundle.run.request.get("research_kind").and_then(|v|v.as_str()).unwrap_or("backtest")}))
+            Ok(json!({"run_id":id,"name":name,"symbol":symbol,"started_run_id":bundle.run.request["started_run_id"],"dataset_id":bundle.run.dataset_id,"engine_id":bundle.run.engine_id,"metrics":bundle.run.result["metrics"],"kind":bundle.run.request.get("research_kind").and_then(|v|v.as_str()).unwrap_or("backtest")}))
         }).collect()
     };
     match list(){Ok(runs)=>json!({"runs":runs}).to_string(),Err(e)=>json!({"error":e}).to_string()}

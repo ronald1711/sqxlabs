@@ -477,7 +477,9 @@ async function refreshResearchRuns() {
     if(response.error)throw new Error(response.error);
     $('research-runs').replaceChildren();
     if(!response.runs.length){$('research-runs').textContent='No saved research yet. Run a backtest to create an archived result.';return;}
+    const pipelineRoots=new Set(response.runs.filter(run=>run.kind==='cli_pipeline_started').map(run=>run.run_id));
     for(const run of response.runs){
+      if(['cli_pipeline_event','cli_pipeline'].includes(run.kind)&&pipelineRoots.has(run.started_run_id))continue;
       const card=document.createElement('div');card.className='run-card';
       const name=document.createElement('strong');name.textContent=run.name+' · '+run.symbol;
       const mcpGeneration=['mcp_generation','mcp_generation_started','mcp_generation_trial','mcp_generation_trial_started'].includes(run.kind);
@@ -485,8 +487,10 @@ async function refreshResearchRuns() {
       const pipelineLabel=run.kind==='cli_pipeline_started'?'Pipeline input checkpoint':run.kind==='cli_pipeline_event'?'Pipeline step record':'Pipeline completion record';
       const metadata=document.createElement('p');metadata.textContent='Run '+run.run_id.slice(0,12)+' · Dataset '+run.dataset_id.slice(0,12)+' · '+(cliPipeline?pipelineLabel:mcpGeneration?'MCP generation evidence ('+run.kind+')':run.kind==='cli_backtest_started'?'CLI input checkpoint':run.kind==='cli_backtest'?'CLI execution record':run.kind==='assistant_trial_started'?'AI trial input checkpoint':run.kind==='assistant_trial'?'AI trial execution':run.kind==='assistant_candidates'?'AI session evidence':run.kind==='pipeline'?'Pipeline report':run.kind==='robustness'?'Stress-test report':'Net '+fmt(run.metrics?.net_profit,2))+' · Not independently validated';
       const download=document.createElement('button');download.className='secondary';download.textContent='Download complete backup';
+      const pipelineRoot=run.kind==='cli_pipeline_started';
       if(mcpGeneration||cliPipeline)download.textContent='Download this record (not whole search)';
-      download.onclick=async()=>{try{const raw=await rawBackup('/api/research/run?id='+encodeURIComponent(run.run_id));downloadRawJson('sqxlabs-research-'+run.run_id+'.json',raw);}catch(e){announce(e.message);}};
+      if(pipelineRoot)download.textContent='Download whole pipeline backup';
+      download.onclick=async()=>{try{const raw=await rawBackup((pipelineRoot?'/api/pipeline/backup?id=':'/api/research/run?id=')+encodeURIComponent(run.run_id));downloadRawJson('sqxlabs-research-'+run.run_id+'.json',raw);}catch(e){announce(e.message);}};
       const replay=document.createElement('button');replay.className='secondary';replay.textContent='Verify replay';
       if(run.kind==='cli_backtest'||run.kind==='cli_backtest_started'){replay.disabled=true;replay.textContent='Dashboard replay unavailable for CLI records';}
       if(run.kind==='assistant_candidates'){replay.disabled=true;replay.textContent='Replay unavailable for AI sessions';}
@@ -510,6 +514,33 @@ async function refreshResearchRuns() {
         }catch(error){$('research-status').textContent='Could not complete saved research action: '+error.message;}
         finally{replay.disabled=false;}
       };
+      if(pipelineRoot){
+        let inspected=null;
+        replay.disabled=false;replay.textContent='Inspect pipeline';replay.title='Check saved progress before choosing replay or recovery.';
+        replay.onclick=async()=>{
+          replay.disabled=true;
+          try{
+            if(!inspected){
+              const status=await getJSON('/api/pipeline/status?id='+encodeURIComponent(run.run_id));
+              if(status.error)throw new Error(status.error);
+              if(!['incomplete','completion_recorded'].includes(status.status)||typeof status.engine_matches!=='boolean')throw new Error('Missing pipeline status confirmation.');
+              inspected=status;
+              metadata.textContent='Pipeline '+run.run_id.slice(0,12)+' · '+status.event_count+' saved steps · '+(status.status==='incomplete'?'Incomplete':status.execution_valid===true?'Completion recorded':'Completion recorded with errors')+' · Not independently validated';
+              replay.textContent=status.engine_matches?(status.status==='incomplete'?'Resume pipeline':'Verify pipeline replay'):'Original application build required';
+              $('research-status').textContent=status.engine_matches?'Saved links checked. Replay recomputes saved work and compares it before continuing; this can take several minutes.':'Saved links checked. Download and inspection are available, but replay requires the original application build. A backup does not install that build.';
+              return;
+            }
+            if(!inspected.engine_matches)return;
+            $('research-status').textContent='Recomputing the saved pipeline. If this connection is lost, inspect it again before recovery…';
+            const result=await postJSON('/api/pipeline/replay',JSON.stringify({run_id:run.run_id,resume:inspected.status==='incomplete'}));
+            if(result.error)throw new Error(result.error);
+            if(result.matches!==true||!result.completion_id)throw new Error('Pipeline completion was not confirmed.');
+            await refreshResearchRuns();
+            $('research-status').textContent=result.execution_valid===true?'Pipeline reproduced and saved. This verifies repeatability, not strategy robustness.':'Pipeline reproduced with execution errors. Treat this result as invalid.';
+          }catch(error){inspected=null;replay.textContent='Inspect pipeline';$('research-status').textContent='Pipeline action incomplete: '+error.message;}
+          finally{replay.disabled=inspected?.engine_matches===false;}
+        };
+      }
       card.append(name,metadata,download,document.createTextNode(' '),replay);$('research-runs').append(card);
     }
   } catch(e){$('research-status').textContent='Could not load saved research: '+e.message;}
@@ -519,10 +550,11 @@ $('research-restore').onchange=async function(){
   const file=this.files[0];if(!file)return;
   if(file.size>100*1024*1024){announce('This backup exceeds the browser restore limit of 100 MB.');return;}
   try{
-    const raw=await file.text();JSON.parse(raw);
-    const response=await postJSON('/api/research/restore',raw);
+    const raw=await file.text();const parsed=JSON.parse(raw);
+    const pipeline=parsed?.start?.run?.request?.research_kind==='cli_pipeline_started';
+    const response=await postJSON(pipeline?'/api/pipeline/restore':'/api/research/restore',raw);
     if(response.error)throw new Error(response.error);
-    $('research-status').textContent='Research backup restored and integrity checked. No existing run was overwritten.';
+    $('research-status').textContent=pipeline?'Whole pipeline restored and archive links checked. No calculations were run; replay requires the original application build.':'Research backup restored and integrity checked. No existing run was overwritten.';
     await refreshResearchRuns();
   }catch(e){announce('Could not restore research: '+e.message);}
 };

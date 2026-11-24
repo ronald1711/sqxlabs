@@ -69,3 +69,20 @@ All 48 training outcomes and the complete ordered event IDs match a separate
 uninterrupted execution; the final completion ID matches as well. This checks
 full archived executions rather than only aggregate profits. It does not cover
 power loss, disk-full interruption, large-search memory limits or broker parity.
+
+## Dashboard recovery
+
+Saved research groups a pipeline start and its linked events/completion into one
+card. Choose **Inspect pipeline** to check saved links and build compatibility;
+this does not run a strategy. A matching application build then offers **Resume
+pipeline** for incomplete work or **Verify pipeline replay** for a recorded
+completion. Execution errors stay visibly invalid even when replay matches.
+
+**Download whole pipeline backup** includes the linked records. The existing
+**Restore research backup** file picker recognizes this format and validates it
+before restoring; browser imports are limited to 100 MB. Backups preserve their
+original JSON bytes during browser transfer. Larger backups require the CLI.
+Neither restore nor inspection launches an archived executable. If a request is
+interrupted, inspect again: a still-running process holds the pipeline lock; an
+unfinished saved prefix remains recoverable. Dashboard and CLI share the same
+archive validation, writer lock and exact-engine recovery implementation.

@@ -74,7 +74,9 @@ remaining execution assumptions and unsupported cases are visible.
   destination events. A separate process-kill test inside walk-forward restores through the public
   backup commands and matches all 48 candidate outcomes and full event identities
   against an uninterrupted run. Engine/runtime transport, bounded-scale
-  validation, UI recovery and power-loss validation remain open.
+  validation and power-loss validation remain open. Dashboard pipeline inspection,
+  whole-backup transfer and exact-build recovery now use the shared CLI archive
+  implementation; broader recovery UX and large archives remain open.
 - [x] Preserve MCP generation execution failures in responses, exclude failed candidates from ranking and mark partial searches as errors. Durable generation accounting is implemented below; other MCP routes remain open.
 - [x] Stop MCP portfolio selection on failed or missing candidate evaluations and preserve error/selection context.
 - [x] Persist MCP generation inputs, per-candidate checkpoints and full results before ranking; inspect interrupted searches after restart without original CSV files. Replay and resume are tracked below; other MCP routes remain open.

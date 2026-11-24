@@ -104,3 +104,5 @@ pub mod evolution;
 pub mod assistant_trials;
 
 mod observation;
+
+pub mod pipeline_archive;

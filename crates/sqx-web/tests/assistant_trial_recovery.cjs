@@ -18,7 +18,7 @@ const button=i=>nodes['research-runs'].children[i].children.at(-1);
  assert.equal(button(0).textContent,'Restart frozen trial');assert.match(button(0).title,/Does not resume/);
  assert.equal(button(1).textContent,'Verify replay');assert.equal(button(2).disabled,true);
  for(let i=3;i<7;i++){assert.equal(button(i).disabled,true);assert.match(button(i).textContent,/unavailable for MCP/);assert(nodes['research-runs'].children[i].children.some(child=>child.textContent==='Download this record (not whole search)'));}
- for(let i=7;i<kinds.length;i++){
+ for(let i=8;i<kinds.length;i++){
   assert.equal(button(i).disabled,true);assert.equal(button(i).textContent,'Use CLI for pipeline recovery');
   assert.match(button(i).title,/single record is not a complete pipeline backup/);
   const card=nodes['research-runs'].children[i];
@@ -26,6 +26,7 @@ const button=i=>nodes['research-runs'].children[i].children.at(-1);
   assert.match(card.children[1].textContent,/Pipeline (input checkpoint|step record|completion record)/);
   assert(!card.children[1].textContent.includes('Net '));
  }
+ assert.equal(button(7).disabled,false);assert.equal(button(7).textContent,'Inspect pipeline');
  result={resumed:true,run_id:'r'.repeat(64),execution_valid:true};await button(0).onclick();
  assert.equal(posted.body.resume,true);assert.match(nodes['research-status'].textContent,/restarted and saved/);
  result={matches:true,execution_valid:false};await button(1).onclick();
