@@ -353,20 +353,35 @@ fn stress_recovery(montecarlo_only:bool){
     let mut command=Command::new(env!("CARGO_BIN_EXE_sqx-cli"));
     command.args([if montecarlo_only{"montecarlo"}else{"robustness"},"--data"]).arg(&data).arg("--strategy").arg(&strategy)
         .args(["--symbol","EURUSD","--timeframe","M1","--archive-dir"]).arg(root.join("archive"));
-    if montecarlo_only{command.args(["--runs","256","--skip","0.25","--seed","731"]);}else{command.args(["--mc-runs","16","--retest-runs","8","--windows","2"]);}
+    if montecarlo_only{command.args(["--runs","256","--skip","0.25","--seed","731"]);}else{command.args(["--mc-runs","256","--retest-runs","8","--windows","2"]);}
     let mut child=Child(command.stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
     let archive=Archive::new(root.join("archive"));let deadline=std::time::Instant::now()+std::time::Duration::from_secs(90);
+    // Do not validate the entire growing archive on each poll: a fast release
+    // process can finish while the parent repeatedly parses old shared inputs.
+    let mut seen=std::collections::BTreeSet::new();
     let start_id=loop{
-        let found=archive.list().unwrap_or_default().into_iter().find_map(|id|{
-            let b=archive.load(&id).ok()?;
-            (b.run.result["kind"]=="robustness_scenario" && b.run.result["event"].get("TradeManipulationOutcome").is_some())
-                .then(||b.run.request["started_run_id"].as_str().unwrap().to_owned())
-        });
+        let mut found=None;
+        if let Ok(entries)=fs::read_dir(archive.root().join("runs")){
+            for entry in entries{
+                let path=entry.unwrap().path();if path.extension().and_then(|v|v.to_str())!=Some("json"){continue;}
+                let id=path.file_stem().unwrap().to_str().unwrap().to_owned();
+                if !seen.insert(id.clone()){continue;}
+                let record=archive.load(&id).unwrap();
+                if record.run.result["kind"]=="robustness_scenario" && record.run.result["event"].get("TradeManipulationOutcome").is_some(){
+                    found=Some(record.run.request["started_run_id"].as_str().unwrap().to_owned());break;
+                }
+            }
+        }
         if let Some(id)=found{break id;}
         assert!(child.0.try_wait().unwrap().is_none(),"robustness finished before interruption");
         assert!(std::time::Instant::now()<deadline,"no Monte Carlo checkpoint");std::thread::sleep(std::time::Duration::from_millis(10));
     };
     child.0.kill().unwrap();child.0.wait().unwrap();
+    let partial:Vec<_>=archive.list().unwrap().iter().map(|id|archive.load(id).unwrap()).collect();
+    assert!(!partial.iter().any(|record|record.run.request["research_kind"]=="cli_pipeline"),"process must be killed before completion");
+    let retained_paths=partial.iter().filter(|record|record.run.result["event"].get("TradeManipulationOutcome").is_some()).count();
+    assert!((1..256).contains(&retained_paths),"must retain some paths and leave others for recovery, got {retained_paths}");
+
     let start=archive.load(&start_id).unwrap();fs::remove_file(data).unwrap();fs::remove_file(strategy).unwrap();portable_restore(&root,&start_id);
     let restored=Archive::new(root.join("restored"));
     let replay=|directory:&str|Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["replay-pipeline","--run-id",&start_id,"--resume","--archive-dir"]).arg(root.join(directory)).output().unwrap();
@@ -375,7 +390,7 @@ fn stress_recovery(montecarlo_only:bool){
     let done=restored.load(receipt["completion_id"].as_str().unwrap()).unwrap();
     let report=&done.run.result["report"]["robustness"];
     assert_eq!(report["what_if"].as_array().unwrap().len(),if montecarlo_only{0}else{5});
-    assert_eq!(report["monte_carlo"]["samples"].as_array().unwrap().len(),if montecarlo_only{256}else{16});
+    assert_eq!(report["monte_carlo"]["samples"].as_array().unwrap().len(),256);
     if montecarlo_only{
         assert!(report["retest"].is_null());assert!(report["walk_forward"].is_null());
         let bars:Vec<sqx_core::Bar>=serde_json::from_value(start.dataset["bars"].clone()).unwrap();
@@ -391,7 +406,7 @@ fn stress_recovery(montecarlo_only:bool){
         let b=restored.load(id.as_str().unwrap()).unwrap();
         for (i,key) in ["WhatIfOutcome","TradeManipulationOutcome","RetestOutcome"].iter().enumerate(){if b.run.result["event"].get(key).is_some(){counts[i]+=1;}}
     }
-    assert_eq!(counts,if montecarlo_only{[0,256,0]}else{[5,16,8]});
+    assert_eq!(counts,if montecarlo_only{[0,256,0]}else{[5,256,8]});
     let fresh=Archive::new(root.join("fresh"));fresh.restore(&start).unwrap();let out=replay("fresh");assert!(out.status.success());
     let receipt:Value=serde_json::from_slice(&out.stdout).unwrap();assert_eq!(receipt["completion_id"],done.run_id);
     let before=restored.list().unwrap();let out=replay("restored");assert!(out.status.success());assert_eq!(restored.list().unwrap(),before);
