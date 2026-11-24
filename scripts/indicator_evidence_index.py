@@ -8,6 +8,7 @@ TESTS = ROOT / "crates/sqx-indicators/tests"
 # Explicitly reviewed references only. Unknown catalog entries remain unindexed.
 # This indexes mathematical functions, not strategy-dispatch parameter wiring.
 GROUPS = [
+    ("DeMarker", "reference", "demarker_requires_actual_movements_and_matches_independent_ratios", "Fixed arithmetic; periods 1/2; N+1-bar warmup; local flat neutral value"),
     ("SMA EMA", "talib_crosscheck", "sma_and_ema_match", "Rust ta-lib; periods 3/10/20; SMA seeds and warmup"),
     ("RSI", "talib_crosscheck", "rsi_matches_wilder", "Rust ta-lib; periods 2/14; non-flat Wilder case"),
     ("ATR", "talib_crosscheck", "atr_matches_wilder", "Rust ta-lib; periods 14/20; Wilder smoothing"),

@@ -177,3 +177,32 @@ fn tii_current_baseline_and_two_to_one_periods_have_independent_values(){
         let short=ind::tii(&closes,period);assert_eq!(short.len(),closes.len());assert!(short.iter().all(|v|v.is_nan()));
     }
 }
+
+#[test]
+fn demarker_requires_actual_movements_and_matches_independent_ratios() {
+    // MetaTrader formula: sum positive high changes / (that sum + sum
+    // positive low declines), over N actual movements, requiring N+1 bars.
+    // https://www.metatrader5.com/en/terminal/help/indicators/oscillators/demarker
+    // DeMax = [3,0,4,0]; DeMin = [1,2,0,3].
+    let high=[10.0,13.0,12.0,16.0,15.0];
+    let low=[5.0,4.0,2.0,3.0,0.0];
+    assert_series(&ind::demarker(&high,&low,2),&[f64::NAN,f64::NAN,0.5,2.0/3.0,4.0/7.0]);
+    assert_series(&ind::demarker(&high,&low,1),&[f64::NAN,0.75,0.0,1.0,0.0]);
+    assert!(ind::demarker(&[],&[],2).is_empty());
+    assert!(ind::demarker(&high,&low,0).iter().all(|v|v.is_nan()));
+    // No movement gives the explicitly local neutral convention, after warmup.
+    assert_series(&ind::demarker(&[10.0;4],&[5.0;4],2),&[f64::NAN,f64::NAN,0.5,0.5]);
+}
+
+#[test]
+fn demarker_missing_extrema_invalidate_movements_and_recover() {
+    for missing in [f64::NAN,f64::INFINITY,f64::NEG_INFINITY] {
+        for bad_high in [false,true] {
+            let mut high=[10.0,13.0,12.0,16.0,15.0,18.0];
+            let mut low=[5.0,4.0,2.0,3.0,0.0,1.0];
+            if bad_high { high[1]=missing; } else { low[1]=missing; }
+            // Movements 1/2 cannot be classified; first complete pair is 3/4.
+            assert_series(&ind::demarker(&high,&low,2),&[f64::NAN,f64::NAN,f64::NAN,f64::NAN,4.0/7.0,0.5]);
+        }
+    }
+}

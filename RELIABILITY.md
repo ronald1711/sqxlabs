@@ -104,7 +104,19 @@ now been addressed in the report (see the later verification entry). Remaining
 priorities include durable per-execution checkpoints and complete account/order
 records. Actual broker correspondence remains unproven without independent fixtures.
 
-## MACD reference scope (2026-11-24)
+## Indicator arithmetic reference scope (2026-11-24)
+
+DeMarker follow-up: a fixed arithmetic reference exposed a fabricated early value
+because the first unclassifiable movement was initialized to zero. Missing/nonfinite
+extrema also became zero movements through false comparisons. Both regressions
+failed before repair. Movement buffers now start undefined and require finite
+current/previous extrema, so period N requires N+1 observations and a missing bar
+invalidates both adjacent movements. Complete later windows recover. The local
+flat-window neutral value remains 0.5 after warmup. The reference follows the
+[published formula](https://www.metatrader5.com/en/terminal/help/indicators/oscillators/demarker);
+no running-terminal comparison or platform initialization parity is claimed.
+Earlier backtests containing DeMarker may change and require their original engine
+for exact replay. The previous 439-test workspace result predates this repair.
 
 The former MACD check in `talib_crosscheck.rs` compared local MACD components
 with local EMA outputs. It is now named as an internal-consistency check rather

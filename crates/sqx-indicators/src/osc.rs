@@ -124,11 +124,14 @@ pub fn bulls_power(bars_high: &[f64], bars_close: &[f64]) -> Series {
 /// DeMarker oscillator.
 pub fn demarker(bars_high: &[f64], bars_low: &[f64], n: usize) -> Series {
     let len = bars_high.len();
-    let mut demax = vec![0.0; len];
-    let mut demin = vec![0.0; len];
+    // N classified movements require N+1 observations. Missing observations
+    // invalidate both adjacent movements instead of becoming zero changes.
+    let mut demax = vec![f64::NAN; len];
+    let mut demin = vec![f64::NAN; len];
     for i in 1..len {
-        if bars_high[i] > bars_high[i - 1] { demax[i] = bars_high[i] - bars_high[i - 1]; }
-        if bars_low[i] < bars_low[i - 1] { demin[i] = bars_low[i - 1] - bars_low[i]; }
+        if ![bars_high[i],bars_high[i-1],bars_low[i],bars_low[i-1]].iter().all(|v|v.is_finite()) { continue; }
+        demax[i] = (bars_high[i] - bars_high[i - 1]).max(0.0);
+        demin[i] = (bars_low[i - 1] - bars_low[i]).max(0.0);
     }
     let ma_max = sma(&demax, n);
     let ma_min = sma(&demin, n);

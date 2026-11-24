@@ -2,7 +2,7 @@
 
 Generated with `python3 scripts/indicator_evidence_index.py`; verify freshness with `--check`.
 
-All 179 registered indicator names are listed. 34 have a reviewed reference link; 145 remain unindexed. These are inventory counts, not validation percentages.
+All 179 registered indicator names are listed. 35 have a reviewed reference link; 144 remain unindexed. These are inventory counts, not validation percentages.
 
 A link identifies an existing test, not a successful test run. Rust `ta` and `ta-lib` are the packages pinned in Cargo.lock; this index does not imply execution of TA-Lib C or MT5.
 
@@ -44,7 +44,7 @@ Unindexed means evidence has not been reviewed here, not that no tests exist. Ev
 | AwesomeOsc | Not indexed | Review formula, conventions and independent reference |
 | BullsPower | Not indexed | Review formula, conventions and independent reference |
 | BearsPower | Not indexed | Review formula, conventions and independent reference |
-| DeMarker | Not indexed | Review formula, conventions and independent reference |
+| DeMarker | Partial reference indexed | Fixed arithmetic; periods 1/2; N+1-bar warmup; local flat neutral value; [test](crates/sqx-indicators/tests/reference.rs#L181) |
 | ParabolicSAR | Not indexed | Review formula, conventions and independent reference |
 | SuperTrend | Not indexed | Review formula, conventions and independent reference |
 | VWAP | Not indexed | Review formula, conventions and independent reference |
