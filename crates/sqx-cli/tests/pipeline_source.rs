@@ -74,7 +74,9 @@ fn interrupted_standalone_generation_preserves_all_trials_and_recovers() {
 
 fn interrupted_generation_recovery(standalone:bool) {
     use std::process::Stdio;
-    let root=std::env::temp_dir().join(format!("sqx-pipeline-kill-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    // Parallel cases can observe the same clock tick in the same test process.
+    // Include the route and a random identity instead of using time as uniqueness.
+    let root=std::env::temp_dir().join(format!("sqx-pipeline-kill-{}-{:032x}",if standalone{"generate"}else{"pipeline"},rand::random::<u128>()));
     fs::create_dir_all(&root).unwrap();
     let csv=root.join("bars.csv");
     let mut data="timestamp,open,high,low,close,volume\n".to_string();
