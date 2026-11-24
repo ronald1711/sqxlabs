@@ -319,7 +319,14 @@ frozen inputs. The running executable must match the original engine. Candidate,
 search and result relationships are checked before execution; conflicting saved
 outcomes are never replaced. This does not advance other candidates or complete
 the search, and successful replay is not independent correctness evidence.
-Whole-search resume and durable capture of the other MCP tools remain unavailable.
+`generation_resume` with `search_id` replays recorded candidate outcomes and then
+finishes missing candidates from the frozen family. It requires the original
+engine and an exclusive process lock; an active search is refused. Repeating it
+verifies completed work without creating a new search or duplicate result records.
+A completion record means all evaluations were saved; failures still produce a
+tool error and do not become valid strategies. Recovery replays the saved prefix
+rather than skipping its computations. Durable capture of other MCP tools remains
+unavailable.
 Dashboard downloads preserve one record, not the whole linked search; JSON
 research backups do not include the retained executable.
 

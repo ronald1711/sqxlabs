@@ -4016,3 +4016,37 @@ Validation: 12 MCP unit tests and the separate-process interruption/replay/resta
 test passed in both debug and release; the locked workspace build passed. The
 preceding published commit b0bd715 passed all four Linux/macOS CI jobs and profile
 comparisons in run 45390250514; that run predates the new archive/replay work.
+
+### Whole-search MCP recovery with replayed prefix and process exclusion
+
+`generation_resume` accepts only a saved search ID. It validates the frozen search
+kind, engine, bounds, inputs and candidate/result relationships, replays prior
+outcomes byte-for-byte, then saves missing candidate outcomes and a completion
+record. The original generation path uses the same executor. Existing results
+are never replaced; mismatching outcomes, conflicting completion records and
+completed searches with missing results fail closed. Repeated successful recovery
+replays all outcomes and returns the same completion without new search/result
+records. Previously completed computations are deliberately replayed, not skipped.
+
+Generation, full recovery and single-candidate restart share a nonblocking OS
+file lock for that search. A competing writer is refused; a dead process releases
+the lock even though its lock file remains. Read-only replay remains available.
+A completed record means evaluation coverage, not that all candidates were valid.
+Responses include verified/new result counts, failures and a valid-only ranking;
+failures retain the MCP error status. No stored executable is launched.
+
+Unit coverage includes interrupted-prefix recovery, conflicting completion
+evidence, duplicate recovery without extra records and writer exclusion. A
+separate-process fixture kills a 64-candidate generation, removes its source CSV,
+restarts/replays a candidate, recovers the full search and compares every outcome
+with a fresh uninterrupted search under the same engine and seed. This is
+repeatability/recovery evidence, not an independent trading-model reference.
+Portable linked-search backup, all other MCP research routes and full programme
+provenance/independent execution validation remain open.
+
+Validation: all 13 MCP unit tests and the expanded separate-process recovery test
+passed in debug and release; the locked workspace build passed. The 64-candidate
+process fixture compared every serialized candidate outcome and checked a
+repeated full recovery creates no extra result records. It took approximately
+94 seconds in debug and 9 seconds in release on this machine. No new independent
+broker-execution evidence is claimed.

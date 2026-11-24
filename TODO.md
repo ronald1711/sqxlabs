@@ -54,8 +54,9 @@ remaining execution assumptions and unsupported cases are visible.
   CLI, MCP, pipelines, optimization and robustness operations.
 - [x] Preserve MCP generation execution failures in responses, exclude failed candidates from ranking and mark partial searches as errors. Durable MCP trial accounting remains open.
 - [x] Stop MCP portfolio selection on failed or missing candidate evaluations and preserve error/selection context.
-- [x] Persist MCP generation inputs, per-candidate checkpoints and full results before ranking; inspect interrupted searches after restart without original CSV files. Replay/resume and other MCP routes remain open.
+- [x] Persist MCP generation inputs, per-candidate checkpoints and full results before ranking; inspect interrupted searches after restart without original CSV files. Replay and resume are tracked below; other MCP routes remain open.
 - [x] Replay or explicitly restart one archived MCP generation candidate with engine/search/input relationship checks, preserving conflicting outcomes and incomplete search status.
+- [x] Resume a frozen MCP generation search under an exclusive process lock, replaying stored outcomes before completing missing candidates; preserve conflicts and deduplicate repeated recovery.
 - [ ] Retain successful, rejected, failed and interrupted trials before selection;
   distinguish archive record counts from independent trial counts.
 - [ ] Independently review walk-forward boundaries, warmup, capital continuity,

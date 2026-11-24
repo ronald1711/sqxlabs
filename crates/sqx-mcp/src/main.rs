@@ -84,6 +84,7 @@ fn error_json(id: Value, code: i64, message: &str) -> Value {
 
 fn tools_list() -> Vec<Value> {
     let mut tools=vec![
+        json!({"name":"generation_resume","description":"Replay recorded candidates and finish missing candidates of one frozen MCP search. Requires the original engine; refuses an active search. Repeated calls verify completed work without creating a new search. Completion is coverage, not independent validation.","inputSchema":{"type":"object","properties":{"search_id":{"type":"string"}},"required":["search_id"],"additionalProperties":false}}),
         json!({"name":"generation_trial","description":"Replay a saved MCP generation trial result, or explicitly restart one trial checkpoint with restart=true. Requires the original running engine; never executes stored binaries, advances other candidates or completes a search.","inputSchema":{"type":"object","properties":{"run_id":{"type":"string"},"restart":{"type":"boolean","default":false}},"required":["run_id"],"additionalProperties":false}}),
         json!({"name":"generation_history","description":"Inspect saved MCP generation searches and recorded trial progress without executing strategies. Pending records do not prove process liveness. The storage directory is configured by the server operator.","inputSchema":{"type":"object","properties":{}}}),
         json!({
@@ -161,6 +162,14 @@ fn call_tool(params: &Value) -> Value {
         "questdb_bars" => tool_questdb_bars(&args),
         "backtest" => tool_backtest(&args),
         "generate" => tool_generate(&args),
+        "generation_resume" => {
+            if !args.as_object().is_some_and(|object|object.len()==1 && object.contains_key("search_id")){return err_result("Only search_id is accepted".into());}
+            let id=match args["search_id"].as_str(){Some(id)=>id,None=>return err_result("search_id must be a string".into())};
+            match generation_archive::resume_search(&generation_archive::configured_archive(),id) {
+                Ok(report)=>{let invalid=report["invalid"].as_u64().unwrap_or(1)>0;let mut result=text_result(report.to_string());if invalid{result["isError"]=json!(true);}result},
+                Err(error)=>err_result(error),
+            }
+        },
         "generation_trial" => {
             if !args.as_object().is_some_and(|object|object.keys().all(|key|matches!(key.as_str(),"run_id"|"restart"))) {
                 return err_result("Only run_id and restart are accepted; frozen inputs cannot be overridden".into());

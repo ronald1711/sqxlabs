@@ -28,30 +28,103 @@ where F:FnMut(&Strategy,&[Bar],&Instrument,&BacktestConfig)->sqx_backtest::Backt
     let family=json!({"name":"MCP generation candidate family","candidates":strategies});
     let request=json!({"research_kind":"mcp_generation_started","attempt_id":attempt_id,"seed":seed,"config":config,"periods_per_year":pyp,"context":context,"fitness":"ProfitFactor","min_trades":5});
     let search_id=archive.save(engine.clone(),dataset.clone(),family.clone(),request.clone(),json!({"status":"execution_not_recorded"}))?;
-    let mut run=||->Result<(Vec<BatchEvaluation>,String),String>{
-        let mut evaluations=Vec::with_capacity(strategies.len());
-        let mut trials=Vec::with_capacity(strategies.len());
-        for (candidate_index,strategy) in strategies.iter().enumerate() {
-            let strategy_json=serde_json::to_value(strategy).map_err(|e|e.to_string())?;
-            let mut trial_request=json!({"research_kind":"mcp_generation_trial_started","search_id":search_id,"candidate_index":candidate_index,"config":config,"periods_per_year":pyp});
-            let checkpoint=archive.save(engine.clone(),dataset.clone(),strategy_json.clone(),trial_request.clone(),json!({"status":"execution_not_recorded"}))?;
-            let result=evaluate(strategy,bars,instrument,config);
-            let (evaluation,outcome)=trial_outcome(strategy,result,bars.len(),pyp);
-            trial_request["research_kind"]=json!("mcp_generation_trial");
-            trial_request["started_run_id"]=json!(checkpoint);
-            let result_id=archive.save(engine.clone(),dataset.clone(),strategy_json,trial_request,outcome)?;
-            trials.push(json!({"candidate_index":candidate_index,"checkpoint_id":checkpoint,"result_id":result_id}));
-            evaluations.push(evaluation);
-        }
-        // No selection is returned unless every candidate outcome is durable.
-        let mut completed_request=request.clone();
-        completed_request["research_kind"]=json!("mcp_generation");
-        completed_request["started_run_id"]=json!(search_id);
-        let completion=archive.save(engine.clone(),dataset.clone(),family.clone(),completed_request,json!({"status":"evaluations_recorded","trials":trials}))?;
-        Ok((evaluations,completion))
-    };
-    run().map(|(evaluations,completion)|(evaluations,search_id.clone(),completion))
+    continue_search(archive,&search_id,&engine,&mut evaluate)
+        .map(|(evaluations,completion,_,_)|(evaluations,search_id.clone(),completion))
         .map_err(|error|format!("search {search_id}: {error}; inspect generation_history before retrying"))
+}
+
+fn search_lock(archive:&Archive,id:&str)->Result<std::fs::File,String> {
+    archive.load(id)?; // Validate the content-addressed identifier before using it as a path.
+    let directory=archive.root().join("mcp-generation-locks");std::fs::create_dir_all(&directory).map_err(|e|e.to_string())?;
+    let file=std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(directory.join(id)).map_err(|e|e.to_string())?;
+    file.try_lock().map_err(|e|format!("Search is active or its process lock is unavailable: {e}"))?;
+    Ok(file) // OS releases the lock on process death; file existence is not liveness.
+}
+
+fn continue_search<F>(archive:&Archive,search_id:&str,engine:&str,evaluate:&mut F)
+ ->Result<(Vec<BatchEvaluation>,String,usize,usize),String>
+where F:FnMut(&Strategy,&[Bar],&Instrument,&BacktestConfig)->sqx_backtest::BacktestResult {
+    let _lock=search_lock(archive,search_id)?;
+    let search=archive.load(search_id)?;
+    if search.run.engine_id!=engine{return Err("Search recovery requires the original engine executable".into());}
+    if search.run.request["research_kind"]!="mcp_generation_started" || search.run.result!=json!({"status":"execution_not_recorded"})
+        || search.run.request["fitness"]!="ProfitFactor" || search.run.request["min_trades"]!=5 {
+        return Err("Unsupported frozen generation search".into());
+    }
+    let strategies:Vec<Strategy>=serde_json::from_value(search.strategy["candidates"].clone()).map_err(|e|e.to_string())?;
+    if strategies.is_empty() || strategies.len()>2000{return Err("Frozen search candidate count must be between 1 and 2000".into());}
+    let bars:Vec<Bar>=serde_json::from_value(search.dataset["bars"].clone()).map_err(|e|e.to_string())?;
+    let instrument:Instrument=serde_json::from_value(search.dataset["instrument"].clone()).map_err(|e|e.to_string())?;
+    let config:BacktestConfig=serde_json::from_value(search.run.request["config"].clone()).map_err(|e|e.to_string())?;
+    let pyp=search.run.request["periods_per_year"].as_f64().filter(|p|p.is_finite()&&*p>0.0).ok_or("Invalid frozen annualization")?;
+    sqx_backtest::validate_backtest_inputs(&bars,&instrument,&config)?;
+    let mut existing=std::collections::BTreeMap::<usize,Vec<String>>::new();
+    let mut completions=Vec::new();
+    for id in archive.list()? {
+        let record=archive.load(&id)?;
+        if record.run.request["search_id"]==search_id {
+            if !matches!(record.run.request["research_kind"].as_str(),Some("mcp_generation_trial"|"mcp_generation_trial_started")) {return Err("Unknown record refers to generation search".into());}
+            let index=record.run.request["candidate_index"].as_u64().and_then(|n|usize::try_from(n).ok()).filter(|&n|n<strategies.len()).ok_or("Invalid recorded candidate index")?;
+            let expected=json!({"research_kind":"mcp_generation_trial_started","search_id":search_id,"candidate_index":index,"config":config,"periods_per_year":pyp});
+            let checkpoint=if record.run.request["research_kind"]=="mcp_generation_trial" {
+                archive.load(record.run.request["started_run_id"].as_str().ok_or("Result has no checkpoint")?)?
+            }else{record.clone()};
+            if checkpoint.run.request!=expected || checkpoint.run.result!=json!({"status":"execution_not_recorded"})
+                || checkpoint.run.engine_id!=engine || checkpoint.run.dataset_id!=search.run.dataset_id
+                || checkpoint.run.strategy_id!=sqx_project::archive::content_id(&serde_json::to_vec(&search.strategy["candidates"][index]).map_err(|e|e.to_string())?) {return Err("Trial checkpoint differs from frozen search".into());}
+            if record.run.request["research_kind"]=="mcp_generation_trial" {
+                if record.run.request!=completed_request(&checkpoint) || record.run.engine_id!=engine
+                    || record.run.dataset_id!=checkpoint.run.dataset_id || record.run.strategy_id!=checkpoint.run.strategy_id {return Err("Trial result differs from its checkpoint".into());}
+                existing.entry(index).or_default().push(id);
+            }
+        } else if record.run.request["research_kind"]=="mcp_generation" && record.run.request["started_run_id"]==search_id {
+            completions.push(record);
+        }
+    }
+    if !completions.is_empty() && existing.len()!=strategies.len(){return Err("Completed search has missing candidate results; recovery cannot silently replace them".into());}
+    let mut evaluations=Vec::with_capacity(strategies.len());let mut trials=Vec::with_capacity(strategies.len());
+    let mut verified=0;let mut new_results=0;
+    for (candidate_index,strategy) in strategies.iter().enumerate() {
+        let strategy_json=serde_json::to_value(strategy).map_err(|e|e.to_string())?;
+        let request=json!({"research_kind":"mcp_generation_trial_started","search_id":search_id,"candidate_index":candidate_index,"config":config,"periods_per_year":pyp});
+        let checkpoint_id=archive.save(engine.into(),search.dataset.clone(),strategy_json.clone(),request,json!({"status":"execution_not_recorded"}))?;
+        let checkpoint=archive.load(&checkpoint_id)?;
+        let (evaluation,outcome)=trial_outcome(strategy,evaluate(strategy,&bars,&instrument,&config),bars.len(),pyp);
+        let outcome_bytes=serde_json::to_vec(&outcome).map_err(|e|e.to_string())?;
+        let result_id=if let Some(ids)=existing.get(&candidate_index) {
+            for id in ids {
+                let recorded=archive.load(id)?;
+                if recorded.run.request!=completed_request(&checkpoint) || serde_json::to_vec(&recorded.run.result).map_err(|e|e.to_string())?!=outcome_bytes {
+                    return Err(format!("Replay differs at candidate {candidate_index}; no replacement outcome or search completion was published"));
+                }
+            }
+            verified+=1;ids[0].clone()
+        }else{
+            let id=archive.save(engine.into(),search.dataset.clone(),strategy_json,completed_request(&checkpoint),outcome)?;
+            new_results+=1;id
+        };
+        trials.push(json!({"candidate_index":candidate_index,"checkpoint_id":checkpoint_id,"result_id":result_id}));
+        evaluations.push(evaluation);
+    }
+    let mut request=search.run.request.clone();request["research_kind"]=json!("mcp_generation");request["started_run_id"]=json!(search_id);
+    let outcome=json!({"status":"evaluations_recorded","trials":trials});
+    for completed in completions {
+        if completed.run.engine_id!=engine || completed.run.dataset_id!=search.run.dataset_id || completed.run.strategy_id!=search.run.strategy_id
+            || completed.run.request!=request || serde_json::to_vec(&completed.run.result).map_err(|e|e.to_string())?!=serde_json::to_vec(&outcome).map_err(|e|e.to_string())? {
+            return Err("Recorded search completion conflicts with verified trials".into());
+        }
+    }
+    let completion=archive.save(engine.into(),search.dataset,search.strategy,request,outcome)?;
+    Ok((evaluations,completion,verified,new_results))
+}
+
+/// Replay saved outcomes and finish missing candidates under an exclusive OS lock.
+pub fn resume_search(archive:&Archive,id:&str)->Result<Value,String> {
+    let engine=archive.retain_current_engine()?;
+    let (evaluations,completion,verified,new_results)=continue_search(archive,id,&engine,&mut backtest)?;
+    let failed:Vec<_>=evaluations.iter().enumerate().filter(|(_,row)|!row.errors.is_empty()).map(|(index,row)|json!({"candidate_index":index,"strategy":row.strategy,"errors":row.errors})).collect();
+    let ranked=sqx_optimizer::rank(evaluations.iter().filter(|row|row.errors.is_empty()).map(|row|(row.strategy.clone(),row.metrics)).collect(),Fitness::ProfitFactor,5);
+    Ok(json!({"search_id":id,"completion_id":completion,"evaluations_recorded":evaluations.len(),"previous_results_replayed":verified,"new_results_recorded":new_results,"invalid":failed.len(),"failures":failed,"eligible":ranked.len(),"top_candidates":ranked.iter().take(10).map(|(strategy,metrics)|json!({"strategy":strategy,"metrics":metrics})).collect::<Vec<_>>(),"scope":"Saved outcomes were replayed before completing missing candidates. Completion means evaluation coverage, not valid execution, independent trials, untouched holdout or independent correctness. Repeated recovery replays recorded work without creating a new search."}))
 }
 
 fn trial_outcome(strategy:&Strategy,result:sqx_backtest::BacktestResult,bar_count:usize,pyp:f64)->(BatchEvaluation,Value) {
@@ -83,6 +156,7 @@ pub fn replay_trial(archive:&Archive,id:&str,restart:bool)->Result<Value,String>
         archive.load(record.run.request["started_run_id"].as_str().ok_or("Result has no checkpoint identity")?)?
     };
     let search=archive.load(checkpoint.run.request["search_id"].as_str().ok_or("Trial has no search identity")?)?;
+    let _lock=if restart {Some(search_lock(archive,&search.run_id)?)}else{None};
     if checkpoint.run.request["research_kind"]!="mcp_generation_trial_started" || search.run.request["research_kind"]!="mcp_generation_started" {
         return Err("Invalid trial/search checkpoint kinds".into());
     }
@@ -167,6 +241,29 @@ mod tests {
     impl Temp {fn new()->Self{Self(std::env::temp_dir().join(format!("sqx-mcp-generation-{:032x}",rand::random::<u128>())))} }
     impl Drop for Temp {fn drop(&mut self){let _=std::fs::remove_dir_all(&self.0);}}
     fn bars()->Vec<Bar>{vec![Bar::new(0,1.0,1.1,0.9,1.0,1.0),Bar::new(60000,1.0,1.1,0.9,1.0,1.0)]}
+    #[test]
+    fn whole_search_recovery_replays_prefix_and_finishes_once_under_an_exclusive_lock(){
+        let temp=Temp::new();let archive=Archive::new(&temp.0);
+        let strategies=vec![Strategy::new("first"),Strategy::new("interrupted"),Strategy::new("remaining")];
+        assert!(std::panic::catch_unwind(||execute_using(&archive,&strategies,&bars(),&Instrument::fx("EURUSD"),&BacktestConfig::default(),252.0,42,&json!({"timeframe":"M1"}),|s,b,i,c|{
+            assert_ne!(s.name,"interrupted","injected interruption");backtest(s,b,i,c)
+        })).is_err());
+        let report=history(&archive).unwrap();let id=report["searches"].as_object().unwrap().keys().next().unwrap();
+        let guard=search_lock(&archive,id).unwrap();
+        assert!(resume_search(&archive,id).unwrap_err().contains("active"));
+        let checkpoint=report["searches"][id]["trial_checkpoints"][0]["checkpoint_id"].as_str().unwrap();
+        assert!(replay_trial(&archive,checkpoint,true).unwrap_err().contains("active"));
+        drop(guard);
+        let recovered=resume_search(&archive,id).unwrap();
+        assert_eq!(recovered["evaluations_recorded"],3);assert_eq!(recovered["previous_results_replayed"],1);assert_eq!(recovered["new_results_recorded"],2);
+        assert_eq!(recovered["invalid"],0);assert_eq!(recovered["eligible"],0);
+        let before=archive.list().unwrap();let repeated=resume_search(&archive,id).unwrap();
+        assert_eq!(repeated["completion_id"],recovered["completion_id"]);assert_eq!(repeated["previous_results_replayed"],3);assert_eq!(repeated["new_results_recorded"],0);
+        assert_eq!(archive.list().unwrap(),before);
+        let completion=archive.load(recovered["completion_id"].as_str().unwrap()).unwrap();let mut broken=completion.run.result.clone();broken["trials"]=json!([]);
+        archive.save(completion.run.engine_id,completion.dataset,completion.strategy,completion.run.request,broken).unwrap();
+        let before=archive.list().unwrap();assert!(resume_search(&archive,id).unwrap_err().contains("completion conflicts"));assert_eq!(archive.list().unwrap(),before);
+    }
     #[test]
     fn replay_checks_relationships_and_restart_never_overwrites_a_conflicting_result(){
         let temp=Temp::new();let archive=Archive::new(&temp.0);
