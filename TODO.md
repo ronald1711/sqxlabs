@@ -82,7 +82,10 @@ remaining execution assumptions and unsupported cases are visible.
   Reusing that ID finds the original immutable study even after source deletion
   and backup restore; conflicting input reuse is rejected. Request creation is
   protected by a process lock. Distinct IDs still represent distinct research
-  attempts; closing/clearing the browser session requires finding the study in
+  attempts. Portable imports reject conflicting request IDs before record
+  publication, sharing the creation lock; concurrent import is tested. Existing
+  ambiguous archives are preserved but cannot silently select a study on retry.
+  Closing/clearing the browser session requires finding the study in
   Saved research rather than relying on the browser's retry identity.
   CLI pipelines retain exact engine bytes, frozen inputs/configuration/seed,
   a pre-execution start record, ordered stage/family events, per-build/retest

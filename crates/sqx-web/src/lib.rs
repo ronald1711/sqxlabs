@@ -802,6 +802,21 @@ mod tests {
         request["name"]=json!("changed inputs");
         let conflict:serde_json::Value=serde_json::from_str(&robustness_json(&request.to_string(),&restored)).unwrap();assert!(conflict["error"].as_str().unwrap().contains("different inputs"));assert_eq!(restored.archive.list().unwrap().len(),1);
         request["request_key"]=json!("../invalid");assert!(reserve_stress_request(&request,&restored).is_err());
+        // Two valid content-addressed starts can arrive from separate backups.
+        // Keep both as evidence, but never pick one arbitrarily on a retry.
+        let original=start.run.request["web_request"].clone();
+        let mut conflicting_request=start.run.request.clone();conflicting_request["attempt_id"]=json!("another-archived-attempt");
+        let conflicting_id=state.archive.save(start.run.engine_id.clone(),start.dataset.clone(),start.strategy.clone(),conflicting_request,start.run.result.clone()).unwrap();
+        assert_ne!(conflicting_id,id);
+        let conflicting_bundle=state.archive.load(&conflicting_id).unwrap();
+        let rejected:serde_json::Value=serde_json::from_str(&research_restore_json(&serde_json::to_string(&conflicting_bundle).unwrap(),&restored)).unwrap();
+        assert!(rejected["error"].as_str().unwrap().contains("conflicts with an existing study"));assert_eq!(restored.archive.list().unwrap().len(),1);
+        // Simulate a pre-existing ambiguous archive through the low-level content store.
+        restored.archive.restore(&conflicting_bundle).unwrap();
+        let before=restored.archive.list().unwrap();
+        let ambiguous:serde_json::Value=serde_json::from_str(&robustness_json(&original.to_string(),&restored)).unwrap();
+        assert!(ambiguous["error"].as_str().unwrap().contains("Conflicting studies"));assert!(ambiguous.get("archive").is_none());
+        assert_eq!(restored.archive.list().unwrap(),before,"conflict must not execute, delete or replace either study");
         std::fs::remove_dir_all(state.archive.root()).unwrap();std::fs::remove_dir_all(restored.archive.root()).unwrap();
     }
 
@@ -1022,7 +1037,7 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("GET", "/api/research/runs") => ("200 OK", "application/json", research_list_json(state)),
         ("GET", "/api/research/run") => ("200 OK", "application/json", match state.archive.load(&query_param(full_path,"id")) {Ok(bundle)=>json!(bundle).to_string(),Err(e)=>json!({"error":e}).to_string()}),
         ("POST", "/api/research/replay") => ("200 OK", "application/json", research_replay_json(body,state)),
-        ("POST", "/api/research/restore") => ("200 OK", "application/json", match serde_json::from_str::<sqx_project::archive::ResearchBundle>(body).map_err(|e|e.to_string()).and_then(|b|state.archive.restore(&b)){Ok(id)=>json!({"run_id":id}).to_string(),Err(e)=>json!({"error":e}).to_string()}),
+        ("POST", "/api/research/restore") => ("200 OK", "application/json", research_restore_json(body,state)),
         ("POST", "/api/generate") => ("200 OK", "application/json", generate_json(body, state)),
         ("POST", "/api/portfolio") => ("200 OK", "application/json", portfolio_json(body, state)),
         ("POST", "/api/pseudocode") => ("200 OK", "application/json", pseudocode_json(body)),
@@ -1805,15 +1820,25 @@ fn research_data_quality(series:&SymbolSeries, request:&serde_json::Value, as_of
     Ok(quality)
 }
 
+fn research_restore_json(body:&str,state:&State)->String {
+    let result=(||->Result<String,String>{
+        let bundle:sqx_project::archive::ResearchBundle=serde_json::from_str(body).map_err(|e|e.to_string())?;
+        let _request_guard=if bundle.run.request["research_kind"]=="cli_pipeline_started" && bundle.run.request["origin"]=="web_robustness" {
+            let (guard,existing)=reserve_stress_request(&bundle.run.request["web_request"],state)?;
+            if existing.is_some_and(|id|id!=bundle.run_id){return Err("Restored stress-test request key conflicts with an existing study".into());}
+            guard
+        }else{None};
+        state.archive.restore(&bundle)
+    })();
+    match result{Ok(id)=>json!({"run_id":id}).to_string(),Err(error)=>json!({"error":error}).to_string()}
+}
+
 // Serialize creation for a caller-supplied request identity. The identity is
 // carried inside the immutable start record, so backup/restore retains it.
 fn reserve_stress_request(value:&serde_json::Value,state:&State)->Result<(Option<std::fs::File>,Option<String>),String>{
     let Some(key)=value.get("request_key") else{return Ok((None,None));};
-    let key=key.as_str().filter(|s|!s.is_empty() && s.len()<=128 && s.bytes().all(|b|b.is_ascii_alphanumeric() || b==b'-')).ok_or("Invalid stress-test request key")?;
-    let locks=state.archive.root().join("stress-request-locks");std::fs::create_dir_all(&locks).map_err(|e|e.to_string())?;
-    let file=std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true)
-        .open(locks.join(sqx_project::archive::content_id(key.as_bytes()))).map_err(|e|e.to_string())?;
-    file.try_lock().map_err(|e|format!("Stress-test request creation is busy or unavailable; retry the same request key: {e}"))?;
+    let key=key.as_str().ok_or("Invalid stress-test request key")?;
+    let file=sqx_project::pipeline_archive::stress_request_lock(&state.archive,key)?;
     let mut existing=None;
     for id in state.archive.list()? {
         let record=state.archive.load(&id)?;

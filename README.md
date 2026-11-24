@@ -298,6 +298,10 @@ same ID are rejected. This lookup does not resume execution automatically: inspe
 the saved study and explicitly resume if needed. Closing or clearing the browser
 session loses this retry identity, so use Saved research to locate earlier work.
 Different request IDs remain separate research attempts.
+Portable restore rejects a request ID that already belongs to another study
+before publishing research records. Concurrent restore and request creation use
+the same process lock. If conflicting studies already exist in an older archive,
+retry refuses to choose one; both remain available as evidence for inspection.
 
 CLI `crosscheck` uses `--manifest` instead of inferring instruments from a folder.
 The schema-1 manifest contains a `markets` array with explicit `symbol`, `data`
