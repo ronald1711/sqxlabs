@@ -103,6 +103,17 @@ pub fn walk_forward_candidates_observed(bars:&[Bar],instrument:&Instrument,confi
     walk_forward_observed(bars,instrument,config,periods_per_year,&GeneratorConfig::default(),windows,oos_fraction,candidates.len(),seed,criteria,Some(candidates),observer)
 }
 
+/// Observe generated walk-forward research without changing its random stream:
+/// each window has its own generated family, published before any evaluation.
+/// An observer error aborts execution immediately and must not be treated as a
+/// completed report. Callers retaining events can replay the exact seeded prefix.
+#[allow(clippy::too_many_arguments)]
+pub fn walk_forward_generated_observed(bars:&[Bar],instrument:&Instrument,config:&BacktestConfig,periods_per_year:f64,
+    gen_config:&GeneratorConfig,windows:usize,oos_fraction:f64,candidates_per_window:usize,seed:u64,criteria:&WalkForwardCriteria,
+    observer:&mut impl FnMut(WalkForwardEvent<'_>)->Result<(),String>)->Result<WalkForwardReport,String> {
+    walk_forward_observed(bars,instrument,config,periods_per_year,gen_config,windows,oos_fraction,candidates_per_window,seed,criteria,None,observer)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn walk_forward_impl(bars:&[Bar],instrument:&Instrument,config:&BacktestConfig,periods_per_year:f64,
     gen_config:&GeneratorConfig,windows:usize,oos_fraction:f64,candidates_per_window:usize,seed:u64,criteria:&WalkForwardCriteria,
