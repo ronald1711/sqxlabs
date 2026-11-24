@@ -234,3 +234,8 @@ remaining execution assumptions and unsupported cases are visible.
 
 Do not mark this checklist complete solely because existing tests are green.
 See [README.md](README.md) for operation and [ci/README.md](ci/README.md) for checks.
+
+- [x] Keep MCP robustness walk-forward candidates within the supplied strategy's
+  exit-distance family, with the original strategy first in every window.
+  A regression reproduces the former unrelated-control failure; all 17 MCP tests
+  pass. Durable checkpoints for MCP robustness remain outstanding.

@@ -370,6 +370,12 @@ Successful research responses include `research_context` with the quality report
 full supplied calendar, cutoff time, symbol, timeframe and simulation settings.
 These checks do not establish broker execution parity or an untouched holdout.
 
+MCP `robustness` uses the supplied strategy as its walk-forward control and
+varies only exit distances within the same rule family. It no longer substitutes
+unrelated generated strategies. This route still lacks durable study checkpoints;
+its walk-forward results are neither untouched-holdout nor independent execution
+evidence.
+
 MCP `generate` automatically retains its engine, frozen candidate family and input
 data, per-candidate checkpoints and full results before ranking. Storage defaults
 to `data/research` relative to the server's working directory; the server operator

@@ -13,7 +13,7 @@ use sqx_backtest::{backtest, BacktestConfig};
 use sqx_core::{Bar, Instrument, Timeframe};
 use sqx_data::{read_csv_bars, DataStore, QuestdbClient, QuestdbConfig};
 use sqx_metrics::{compute as compute_metrics, Metrics};
-use sqx_optimizer::{rank, random_strategy, walk_forward, Fitness, GeneratorConfig};
+use sqx_optimizer::{rank, random_strategy, Fitness, GeneratorConfig};
 use sqx_robustness::{monte_carlo_retest, monte_carlo_trade_manipulation, what_if};
 use sqx_strategy::Strategy;
 
@@ -126,7 +126,7 @@ fn tools_list() -> Vec<Value> {
         }),
         json!({
             "name": "robustness",
-            "description": "Run the robustness cross-check set (what-if, MC trade, MC retest, walk-forward) on CSV or QuestDB data.",
+            "description": "Run what-if, MC trade, MC retest and walk-forward of the supplied strategy and exit-distance variants on CSV or QuestDB data. This is not untouched-holdout or independent execution evidence.",
             "inputSchema": { "type": "object", "properties": { "source": {"type":"string","enum":["csv","questdb"],"description":"CSV when data is present; otherwise QuestDB. CSV requires explicit symbol and timeframe."}, "config": { "type": "object", "description": "BacktestConfig: initial_deposit, spread_points, slippage_points, commission_per_lot and account (currency, max_leverage, stop_out_ratio, financing and historical conversion_rates)." }, "data": { "type": "string" }, "symbol": { "type": "string" }, "timeframe": { "type": "string" }, "limit": { "type": "integer" }, "strategy": { "type": "object" } }, "required": ["strategy"] }
         }),
     ];
@@ -525,12 +525,17 @@ fn tool_robustness(args: &Value) -> Value {
     lines.push(format!("mc_retest assumptions: seed {}; {}",rt.seed,rt.warmup_policy));
     lines.push(format!("mc_retest coverage: requested {}, skipped {}, invalid {}; issues: {:?}",rt.requested_runs,rt.skipped_runs,rt.invalid_runs,rt.errors));
     lines.push(format!("mc_retest: median_net={:.2} losing={:.1}%", rt.net_profit_50pct, rt.losing_runs_pct));
-    let gen = GeneratorConfig::default();
-    let wf = walk_forward(&bars, &inst, &cfg, pyp, &gen, 4, 0.25, 20, 42);
-    lines.push(format!("walk_forward (trade-count evidence is not a robustness certificate): {}", serde_json::to_string(&wf).unwrap_or_else(|e|format!("report serialization failed: {e}"))));
+    let (wf,wf_errors)=match sqx_optimizer::exit_parameter_family(&strategy,20,42){
+        Ok(family)=>{
+            let report=sqx_optimizer::walk_forward_candidates(&bars,&inst,&cfg,pyp,&family,4,0.25,42,&sqx_optimizer::WalkForwardCriteria::default());
+            (json!(report),report.errors)
+        },
+        Err(error)=>(json!({"errors":[error.clone()]}),vec![error]),
+    };
+    lines.push(format!("walk_forward (supplied strategy and exit-distance variants; not untouched-holdout or independent execution evidence): {wf}"));
     errors.extend(mc.errors.iter().map(|error|format!("Monte Carlo: {error}")));
     errors.extend(rt.errors.iter().map(|error|format!("MC retest: {error}")));
-    errors.extend(wf.errors.iter().map(|error|format!("Walk-forward: {error}")));
+    errors.extend(wf_errors.iter().map(|error|format!("Walk-forward: {error}")));
     let mut context=quality;
     context["errors"]=json!(errors);
     let mut response=research_result(lines.join("\n"),context,&symbol,timeframe,&cfg);
@@ -604,6 +609,27 @@ mod tests {
         let failed=generation_result(vec![evaluation("failed",10.0,3.0,vec!["failed".into()])],7,json!({}),"EURUSD",Timeframe::M1,&BacktestConfig::default());
         assert_eq!(failed["isError"],true);assert!(failed.to_string().contains("eligible for ranking: 0"));
     }
+    #[test]
+    fn robustness_walkforward_keeps_the_supplied_rule_tree(){
+        let path=std::env::temp_dir().join(format!("sqx-mcp-family-{:032x}.csv",rand::random::<u128>()));
+        let mut csv="timestamp,open,high,low,close,volume\n".to_string();
+        for i in 0..400{csv.push_str(&format!("{},1.1,1.101,1.099,1.1,1\n",1700000000+i*60));}std::fs::write(&path,csv).unwrap();
+        let mut strategy=Strategy::new("supplied MCP control");strategy.long=true;strategy.short=false;
+        strategy.stop_loss=Some(sqx_strategy::StopLoss::Points(20.0));strategy.profit_target=Some(sqx_strategy::ProfitTarget::Points(30.0));
+        strategy.signals.push(sqx_strategy::Signal::new(sqx_strategy::SignalKind::LongEntry,vec![sqx_strategy::Condition::new(sqx_strategy::Operand::Const(1.0),sqx_strategy::Comparator::Gt,sqx_strategy::Operand::Const(0.0))],sqx_strategy::Join::And));
+        let original=json!(strategy);
+        let response=call_tool(&json!({"name":"robustness","arguments":{"data":path,"symbol":"EURUSD","timeframe":"M1","strategy":strategy}}));std::fs::remove_file(path).unwrap();
+        let text=response["content"][0]["text"].as_str().unwrap();
+        let line=text.lines().find(|line|line.starts_with("walk_forward (")).expect("walk-forward report retained");
+        let report:Value=serde_json::from_str(line.split_once(": ").unwrap().1).unwrap();
+        assert_eq!(report["window_results"].as_array().unwrap().len(),4);
+        for window in report["window_results"].as_array().unwrap(){
+            let candidates=window["candidate_evaluations"].as_array().unwrap();assert_eq!(candidates.len(),20);
+            assert_eq!(candidates[0]["strategy"],original,"the control must be the supplied strategy");
+            for candidate in candidates{let mut value=candidate["strategy"].clone();for key in ["name","stop_loss","profit_target"]{value[key]=original[key].clone();}assert_eq!(value,original,"unrelated rules must not enter a robustness family");}
+        }
+    }
+
     #[test]
     fn failed_robustness_stages_are_protocol_errors_with_context(){
         let path=std::env::temp_dir().join(format!("sqx-mcp-stress-{}-{}.csv",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
