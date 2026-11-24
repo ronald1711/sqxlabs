@@ -319,6 +319,15 @@ frozen inputs. The running executable must match the original engine. Candidate,
 search and result relationships are checked before execution; conflicting saved
 outcomes are never replaced. This does not advance other candidates or complete
 the search, and successful replay is not independent correctness evidence.
+`generation_export` with `search_id` returns one JSON backup containing the frozen
+search and all linked checkpoints, candidate results and completion records.
+Export takes the search writer lock, rejects missing/conflicting relationships,
+and preserves incomplete status. Failed and rejected candidates remain included.
+It does not run strategies or include engine binaries, unrelated experiment or
+holdout records. Content hashes are not authenticated provenance. A dedicated
+whole-search import operation and representative-size transport tests remain open;
+this is not yet the complete backup/restore workflow.
+
 `generation_resume` with `search_id` replays recorded candidate outcomes and then
 finishes missing candidates from the frozen family. It requires the original
 engine and an exclusive process lock; an active search is refused. Repeating it

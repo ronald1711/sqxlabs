@@ -70,7 +70,9 @@ remaining execution assumptions and unsupported cases are visible.
 - [ ] Export and restore a complete MCP generation search, including the frozen
   candidate family, every checkpoint/result (including rejected and failed
   candidates), and completion links. A single-record download is not this backup.
-  Take the export under the existing search lock; validate content identities and
+  MCP `generation_export` now exports under the existing search lock and checks
+  linked identities; dedicated whole-search import and scale validation remain open.
+  Validate content identities and
   cross-record relationships before publishing restored runs. Reject missing or
   conflicting linked records, retain incomplete-search status, and test recovery
   after deleting the original store and CSV. Keep executable transport explicit;

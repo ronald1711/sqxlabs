@@ -86,6 +86,7 @@ fn tools_list() -> Vec<Value> {
     let mut tools=vec![
         json!({"name":"generation_resume","description":"Replay recorded candidates and finish missing candidates of one frozen MCP search. Requires the original engine; refuses an active search. Repeated calls verify completed work without creating a new search. Completion is coverage, not independent validation.","inputSchema":{"type":"object","properties":{"search_id":{"type":"string"}},"required":["search_id"],"additionalProperties":false}}),
         json!({"name":"generation_trial","description":"Replay a saved MCP generation trial result, or explicitly restart one trial checkpoint with restart=true. Requires the original running engine; never executes stored binaries, advances other candidates or completes a search.","inputSchema":{"type":"object","properties":{"run_id":{"type":"string"},"restart":{"type":"boolean","default":false}},"required":["run_id"],"additionalProperties":false}}),
+        json!({"name":"generation_export","description":"Export all linked records of one frozen generation search under its writer lock. Includes failed/rejected candidates and incomplete status; excludes engine binaries and unrelated experiments. Does not execute or independently validate strategies.","inputSchema":{"type":"object","properties":{"search_id":{"type":"string"}},"required":["search_id"],"additionalProperties":false}}),
         json!({"name":"generation_history","description":"Inspect saved MCP generation searches and recorded trial progress without executing strategies. Pending records do not prove process liveness. The storage directory is configured by the server operator.","inputSchema":{"type":"object","properties":{}}}),
         json!({
             "name": "list_indicators",
@@ -179,6 +180,13 @@ fn call_tool(params: &Value) -> Value {
             match generation_archive::replay_trial(&generation_archive::configured_archive(),id,restart) {
                 Ok(report)=>{let invalid=report["matches"]==false || report["execution_valid"]==false;let mut result=text_result(report.to_string());if invalid{result["isError"]=json!(true);}result},
                 Err(error)=>err_result(error),
+            }
+        },
+        "generation_export" => {
+            if !args.as_object().is_some_and(|object|object.len()==1 && object.contains_key("search_id")){return err_result("Only search_id is accepted".into());}
+            let id=match args["search_id"].as_str(){Some(id)=>id,None=>return err_result("search_id must be a string".into())};
+            match generation_archive::export_search(&generation_archive::configured_archive(),id) {
+                Ok(backup)=>text_result(backup.to_string()),Err(error)=>err_result(error),
             }
         },
         "generation_history" => match generation_archive::history(&generation_archive::configured_archive()) {
