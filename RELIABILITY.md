@@ -3757,3 +3757,69 @@ fixture with archive replay and future-price invariance. GitHub run 45380020385
 for the preceding frozen-input commit 12c4185 passed all four Linux/macOS profile
 jobs and both debug/release trace comparisons; this is not CI evidence for the
 later durable-import change.
+
+### Isolated MT5 reference compiler feasibility
+
+A fresh Wine prefix and a separate copy of the installed MetaEditor executable
+compiled a minimal tester-only initialization probe. The UTF-16 compiler log
+reported zero errors and warnings and produced an EX5 artifact. The Wine process
+returned 1 despite this successful compiler result; exit status alone is not a
+usable compilation success criterion for this installation. Local inventory
+records executable, source and output hashes under
+`work/mt5-validation/isolated-tester/inventory.json`.
+
+Only the editor executable was copied: no account configuration, credentials,
+terminal history or trading program was imported. No terminal or expert was
+executed. This establishes isolated compilation feasibility only, not tester
+execution or strategy parity. Next evidence must include frozen custom-symbol
+data, explicit instrument/account/tester configuration, guarded reference source,
+the actual tester report and a per-event comparison against SqxLabs. Local agents
+must be explicit and remote/cloud agents disabled in that separate environment.
+The shared SiliconMT5 terminal remains read-only.
+
+Official compiler and portable-mode documentation:
+https://www.metatrader5.com/en/metaeditor/help/beginning/integration_ide
+https://www.metatrader5.com/en/metaeditor/help/beginning/open
+
+The subsequent isolated bootstrap probe copied terminal/tester executables only,
+compiled a no-order custom-symbol import script (120 synthetic M1 bars and 480
+bid/ask ticks), and launched the separate terminal with a startup script config.
+The script checks its isolated installation path and absence of an account login
+before any custom-symbol writes, and checks tick readback before publishing its
+ready marker. Compilation reported zero errors/warnings. The terminal log proved
+startup in the isolated directory but contained no script execution evidence, and
+no ready marker appeared. Thus custom-data import has **not** been established.
+The isolated terminal process was identified by its exact executable path and
+stopped (exit 143); the shared terminal was not signalled. The local MCP endpoint
+returned HTTP 401 to an unauthenticated discovery request; no authenticated tools
+or account operations were attempted. Diagnose startup-script prerequisites before
+claiming a usable tester reference. Probe files remain local under `work/`.
+
+Adding an explicit EURUSD startup chart and enabling program execution (with live
+trading and DLL imports still disabled) produced a script-loaded log entry. An
+entry marker placed before the import was absent, as was the import-ready marker.
+A separately compiled minimal no-order expert also loaded but produced no
+initialization marker. This narrows the failure to program startup/execution
+rather than demonstrating an import-function failure; its cause remains unknown.
+The local `bootstrap-diagnosis.json` records these observations and the log hash.
+Script probe terminals were stopped using their verified isolated executable
+paths. The minimal-expert terminal exited on its own with code 0; its final log
+reported expert removal and MQL5.community authorization failure. Neither a clean
+process exit nor the loaded entry establishes execution of the probe handler.
+No account login, remote agent or live order was used. The fixture remains
+unvalidated and must not be consumed as independent execution evidence.
+
+### Symmetric tick stop-gap arithmetic reference
+
+`sqx-backtest/tests/stop_gap_reference.rs` specifies EURUSD bid/ask quotes in
+integer 1e-5 price units, a USD 10,000 account, 0.1 lot, a ten-pip stop,
+one-pip adverse slippage at both ends and USD 7 round-trip commission per lot.
+Long and short gaps each lose USD 24.70 (240 price units at USD 0.10 per unit,
+plus USD 0.70 commission). Assertions cover actual quote timestamps, entry and
+gap-exit prices, stop reason, trade PnL, single cash settlement and USD 9,975.30
+final equity. An intentionally different configured spread checks that supplied
+tick bid/ask is not charged a second synthetic spread. Expected values are fixed
+independent arithmetic, not copied from engine output. This is an execution-model
+contract test, not MT5/broker execution evidence or proof of all stop behaviours.
+The targeted test passed in both debug and release profiles. No engine behaviour
+was changed by this addition.
