@@ -37,3 +37,21 @@ uninterrupted search, reject a changed event and wrong engine, verify lock
 exclusion, and ensure repeated replay adds no records. This is internal
 reproducibility evidence, not independent execution validation or untouched
 holdout certification. Data from the entire pipeline is prior exposure.
+
+## Portable whole-search backup
+
+```sh
+sqx-cli export-pipeline --archive-dir /path/to/archive --run-id START_ID > pipeline-backup.json
+sqx-cli import-pipeline --archive-dir /path/to/restored --input pipeline-backup.json
+```
+
+Export includes the frozen inputs once, all ordered events, and completion when
+present. Import checks the checksum, content identities and the combined incoming
+and existing event graph before publishing records. Repeat import is idempotent;
+completion is published last. A storage failure may leave a recoverable prefix.
+Neither operation installs or executes an engine. Keep the original executable
+and its runtime separately if replay is required. Checksums detect corruption,
+not an untrusted author's fabricated results. Exported JSON can contain private
+market data and strategy definitions; store it accordingly. Interrupted exports
+must be repeated; partial JSON is not a backup. Large-archive performance and
+power-loss recovery remain outside the tested coverage.

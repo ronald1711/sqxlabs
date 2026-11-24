@@ -489,6 +489,16 @@ enum Cmd {
         #[arg(long, default_value="data/research")] archive_dir:PathBuf,
         #[arg(long)] run_id:String,
     },
+    /// Export a whole pipeline backup as JSON on stdout (no executable included).
+    ExportPipeline {
+        #[arg(long, default_value="data/research")] archive_dir:PathBuf,
+        #[arg(long)] run_id:String,
+    },
+    /// Validate and restore a whole pipeline backup without executing it.
+    ImportPipeline {
+        #[arg(long, default_value="data/research")] archive_dir:PathBuf,
+        #[arg(long)] input:PathBuf,
+    },
     /// Replay an exact-engine pipeline, optionally finishing its incomplete prefix.
     ReplayPipeline {
         #[arg(long, default_value="data/research")] archive_dir:PathBuf,
@@ -1203,6 +1213,17 @@ fn main() -> Result<()> {
         Cmd::PipelineHistory{archive_dir,run_id}=>{
             let archive=sqx_project::archive::Archive::new(archive_dir);
             println!("{}",pipeline_archive::inspect(&archive,&run_id).map_err(anyhow::Error::msg)?);
+            Ok(())
+        },
+        Cmd::ExportPipeline{archive_dir,run_id}=>{
+            let archive=sqx_project::archive::Archive::new(archive_dir);
+            println!("{}",pipeline_archive::export(&archive,&run_id).map_err(anyhow::Error::msg)?);
+            Ok(())
+        },
+        Cmd::ImportPipeline{archive_dir,input}=>{
+            let archive=sqx_project::archive::Archive::new(archive_dir);
+            let value=serde_json::from_slice(&std::fs::read(input)?)?;
+            println!("{}",pipeline_archive::import(&archive,value).map_err(anyhow::Error::msg)?);
             Ok(())
         },
         Cmd::ReplayPipeline{archive_dir,run_id,resume}=>{

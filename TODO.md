@@ -6,6 +6,10 @@ requirements and evidence audit in [RELIABILITY.md](RELIABILITY.md).
 
 Local MT5 integration evidence and completion gates: [MT5_VALIDATION.md](MT5_VALIDATION.md).
 
+User priority (2026-11-24): temporarily defer further MT5 work. Continue research
+reproducibility, recovery, walk-forward/holdout and evidence visibility. Deferred
+MT5 checks remain incomplete; this changes work order, not validation claims.
+
 ## P0 — Independently validate execution
 
 - [ ] Resolve the observed USDJPY/EUR margin conversion-route discrepancy against
@@ -64,7 +68,10 @@ remaining execution assumptions and unsupported cases are visible.
   engine before adding missing events, under an exclusive process lock. A
   separate-process kill/restore/resume fixture matches an uninterrupted search;
   repeat recovery deduplicates and conflicting/tampered prefixes are rejected.
-  Whole-search portable backup, per-walk-forward-trial recovery, bounded-scale
+  Whole-search JSON export/import now validates checksums, event links and the
+  merged destination graph before publication; repeat imports deduplicate.
+  Tests reject corruption, missing completion dependencies and conflicting
+  destination events. Engine/runtime transport, per-walk-forward-trial recovery, bounded-scale
   validation, UI recovery and power-loss validation remain open.
 - [x] Preserve MCP generation execution failures in responses, exclude failed candidates from ranking and mark partial searches as errors. Durable generation accounting is implemented below; other MCP routes remain open.
 - [x] Stop MCP portfolio selection on failed or missing candidate evaluations and preserve error/selection context.

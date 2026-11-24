@@ -7,11 +7,92 @@ const SCOPE:&str="Ordered build/retest checkpoints and outcomes; optimization is
 
 fn lock(archive:&Archive,id:&str)->Result<std::fs::File,String>{
     archive.load(id)?;
+    lock_validated(archive,id)
+}
+fn lock_validated(archive:&Archive,id:&str)->Result<std::fs::File,String>{
     let directory=archive.root().join("pipeline-locks");
     std::fs::create_dir_all(&directory).map_err(|e|e.to_string())?;
     let file=std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(directory.join(id)).map_err(|e|e.to_string())?;
     file.try_lock().map_err(|e|format!("Pipeline is active or its process lock is unavailable: {e}"))?;
     Ok(file)
+}
+
+#[derive(serde::Serialize,serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PortableRecord {run_id:String,run:sqx_project::archive::RunRecord}
+#[derive(serde::Serialize,serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Backup {
+    schema:u32,
+    checksum:String,
+    start:ResearchBundle,
+    events:Vec<PortableRecord>,
+    completion:Option<PortableRecord>,
+}
+fn checksum(backup:&Backup)->Result<String,String>{
+    Ok(sqx_project::archive::content_id(&serde_json::to_vec(backup).map_err(|e|e.to_string())?))
+}
+
+pub fn export(archive:&Archive,id:&str)->Result<Value,String>{
+    let _guard=lock(archive,id)?;let state=load(archive,id)?;
+    let mut events=Vec::new();
+    for (event_id,_) in &state.events {
+        let bundle=archive.load(event_id)?;
+        events.push(PortableRecord{run_id:bundle.run_id,run:bundle.run});
+    }
+    let mut backup=Backup{schema:1,checksum:String::new(),start:state.root,events,
+        completion:state.completion.map(|b|PortableRecord{run_id:b.run_id,run:b.run})};
+    backup.checksum=checksum(&backup)?;
+    serde_json::to_value(backup).map_err(|e|e.to_string())
+}
+
+/// Validate the complete incoming and merged graph before publishing any record.
+/// Storage failure during publication can leave a prefix; importing again is safe.
+pub fn import(archive:&Archive,value:Value)->Result<Value,String>{
+    let mut backup:Backup=serde_json::from_value(value).map_err(|e|e.to_string())?;
+    if backup.schema!=1 {return Err("Unsupported pipeline backup schema".into());}
+    let expected=std::mem::take(&mut backup.checksum);
+    if checksum(&backup)?!=expected {return Err("Pipeline backup checksum mismatch".into());}
+    let path=std::env::temp_dir().join(format!("sqx-pipeline-import-{:032x}",rand::random::<u128>()));
+    let mut builder=std::fs::DirBuilder::new();
+    #[cfg(unix)] {use std::os::unix::fs::DirBuilderExt;builder.mode(0o700);}
+    builder.create(&path).map_err(|e|e.to_string())?;
+    struct Temporary(std::path::PathBuf);
+    impl Drop for Temporary {fn drop(&mut self){let _=std::fs::remove_dir_all(&self.0);}}
+    let _temporary=Temporary(path.clone());let staging=Archive::new(path);
+    staging.restore(&backup.start)?;
+    let mut incoming=vec![backup.start.run_id.clone()];
+    for record in backup.events.iter().chain(backup.completion.iter()) {
+        if incoming.contains(&record.run_id){return Err("Duplicate pipeline backup record".into());}
+        let bundle=ResearchBundle{run_id:record.run_id.clone(),run:record.run.clone(),dataset:backup.start.dataset.clone(),strategy:backup.start.strategy.clone()};
+        staging.restore(&bundle)?;incoming.push(record.run_id.clone());
+    }
+    let id=&backup.start.run_id;
+    let state=load(&staging,id)?;
+    if state.events.len()!=backup.events.len() || state.completion.is_some()!=backup.completion.is_some(){
+        return Err("Backup contains unrelated or incorrectly classified records".into());
+    }
+    // Validate container order as well as the stored sequence/previous links.
+    if state.events.iter().map(|(id,_)|id).ne(backup.events.iter().map(|e|&e.run_id)) {
+        return Err("Backup events are not in recorded order".into());
+    }
+    let _guard=lock_validated(archive,id)?; // ID was verified by restore/load above.
+    let existing=archive.list()?;
+    for record_id in &existing {
+        let record=archive.load(record_id)?;
+        if record.run_id==*id || record.run.request["started_run_id"]==*id {staging.restore(&record)?;}
+    }
+    let merged=load(&staging,id)?;
+    let mut published=0;
+    // Completion goes last, after every linked input/event has been published.
+    for record_id in &incoming {
+        archive.restore(&staging.load(record_id)?)?;
+        if !existing.contains(record_id){published+=1;}
+    }
+    Ok(json!({"started_run_id":id,"published_records":published,"event_count":merged.events.len(),
+        "status":if merged.completion.is_some(){"completion_recorded"}else{"incomplete"},
+        "engine_bytes_included":false,"execution_replayed":false,
+        "scope":"Content identities and merged prefix links verified before publication. Storage failures may leave a recoverable prefix; no executable is installed or launched."}))
 }
 
 fn event_request(root:&ResearchBundle,sequence:usize,previous:Option<&String>)->Value{
@@ -110,4 +191,47 @@ pub fn recover(archive:&Archive,id:&str,resume:bool)->Result<Recovery,String>{
         done.run_id
     }else{archive.save(root.run.engine_id.clone(),root.dataset.clone(),root.strategy.clone(),completion_request(root),result)?};
     Ok(Recovery{report,completion_id,replayed:state.events.len(),appended})
+}
+
+#[cfg(test)]
+mod backup_tests {
+    use super::*;
+    #[test]
+    fn portable_prefix_completion_and_conflict_validation() {
+        let dir=std::env::temp_dir().join(format!("sqx-backup-test-{:032x}",rand::random::<u128>()));
+        let source=Archive::new(dir.join("source"));let target=Archive::new(dir.join("target"));
+        let id=source.save("a".repeat(64),json!({"bars":[]}),json!({}),
+            json!({"research_kind":"cli_pipeline_started","config":{},"seed":42}),
+            json!({"status":"execution_not_recorded"})).unwrap();
+        let root=source.load(&id).unwrap();
+        let event=source.save(root.run.engine_id.clone(),root.dataset.clone(),root.strategy.clone(),
+            event_request(&root,0,None),json!({"kind":"step_started"})).unwrap();
+        let prefix=export(&source,&id).unwrap();
+        assert_eq!(import(&target,prefix.clone()).unwrap()["status"],"incomplete");
+        assert_eq!(import(&target,prefix.clone()).unwrap()["published_records"],0);
+        let done=source.save(root.run.engine_id.clone(),root.dataset.clone(),root.strategy.clone(),
+            completion_request(&root),json!({"event_ids":[event],"report":{}})).unwrap();
+        let complete=export(&source,&id).unwrap();
+        std::fs::remove_dir_all(source.root()).unwrap();
+        assert_eq!(import(&target,complete.clone()).unwrap()["published_records"],1);
+        assert_eq!(inspect(&target,&id).unwrap()["completion_id"],done);
+        // An older valid prefix can safely be imported over a completed archive.
+        assert_eq!(import(&target,prefix).unwrap()["status"],"completion_recorded");
+        let empty=Archive::new(dir.join("empty"));
+        let mut damaged=complete.clone();damaged["events"][0]["run"]["result"]=json!({"changed":true});
+        assert!(import(&empty,damaged).unwrap_err().contains("checksum"));
+        assert!(empty.list().unwrap().is_empty());
+        // Even with a fresh checksum, an incomplete completion graph is rejected.
+        let mut missing:Backup=serde_json::from_value(complete.clone()).unwrap();
+        missing.events.clear();missing.checksum.clear();missing.checksum=checksum(&missing).unwrap();
+        assert!(import(&empty,serde_json::to_value(missing).unwrap()).is_err());
+        assert!(empty.list().unwrap().is_empty());
+        let conflict=Archive::new(dir.join("conflict"));conflict.restore(&root).unwrap();
+        conflict.save(root.run.engine_id.clone(),root.dataset.clone(),root.strategy.clone(),
+            event_request(&root,0,None),json!({"different":true})).unwrap();
+        let before=conflict.list().unwrap();
+        assert!(import(&conflict,complete).unwrap_err().contains("Conflicting"));
+        assert_eq!(conflict.list().unwrap(),before);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
