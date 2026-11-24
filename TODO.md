@@ -83,7 +83,11 @@ remaining execution assumptions and unsupported cases are visible.
 - [ ] Independently review walk-forward boundaries, warmup, capital continuity,
   minimum evidence thresholds and untouched-holdout handling across all routes.
   A separate integer-price SMA3 fixture now checks segmented selection, warmup,
-  costs and carried capital; broader configurations and holdout remain open.
+  costs and carried capital. A hand-calculated EURUSD/USD holdout fixture checks
+  SMA3 warmup, first-boundary fills, long/short spread and commission, fresh
+  holdout capital, future-data isolation and persisted commitment after restart.
+  Broader configurations, independent platform agreement and untouched-data
+  provenance beyond the local protocol remain open.
 - [x] Classify all MCP generation phases in holdout exposure audits, keep record counts separate from trial counts, and preserve committed exposure after restore.
 - [x] Include all markets from archived CLI crosschecks, including checkpoints and failures, in holdout exposure audits and restored commitment evidence.
 - [x] Audit complete declared candle intervals across experiment, crosscheck, backtest, comparison and evolution evidence; surface missing legacy durations and retain uncertainty through restore.
