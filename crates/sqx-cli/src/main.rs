@@ -10,11 +10,11 @@ use sqx_backtest::{backtest, backtest_ticks, BacktestConfig, BacktestResult};
 use sqx_core::{Bar, Instrument, Timeframe};
 use sqx_data::{DataStore, QuestdbClient, QuestdbConfig};
 use sqx_metrics::{compute as compute_metrics, render as render_metrics};
-use sqx_optimizer::{genetic_evolve_observed, rank, random_strategy, walk_forward, Fitness, GeneticConfig, GeneratorConfig};
+use sqx_optimizer::{genetic_evolve_observed, rank, random_strategy, Fitness, GeneticConfig, GeneratorConfig};
 use sqx_project::{Databank, MetricSummary, Project, StrategyRecord};
 use sqx_export::{export_report as export_strategy, Engine};
 use sqx_portfolio::{backtest_all, best_subset, combine, equal_weights};
-use sqx_robustness::{monte_carlo_retest, monte_carlo_trade_manipulation, what_if};
+use sqx_robustness::monte_carlo_trade_manipulation;
 use sqx_strategy::{render as render_pseudocode, Strategy};
 
 #[derive(Parser)]
@@ -529,6 +529,8 @@ enum Cmd {
     },
     /// Full robustness cross-check set for one strategy.
     Robustness {
+        #[arg(long, default_value = "data/research")]
+        archive_dir: PathBuf,
         #[command(flatten)]
         research:ResearchOptions,
         #[arg(long)]
@@ -1286,30 +1288,44 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Cmd::Robustness { research, strategy, data, mc_runs, retest_runs, windows } => {
+        Cmd::Robustness { archive_dir, research, strategy, data, mc_runs, retest_runs, windows } => {
             let s: Strategy = load_strategy(&strategy)?;
             let bars = load_bars(&data)?;
             let (inst,cfg,mut context)=research.prepare(&bars)?;
             let pyp = resolve_periods_per_year(bars.len(), 0.0, &bars);
-            let base = backtest(&s, &bars, &inst, &cfg);
+            let gen=GeneratorConfig::default();
+            let pipeline=sqx_pipeline::Pipeline{name:"Standalone robustness study".into(),tasks:vec![sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::Robustness{
+                strategy:s,scenarios:vec![(1.0,0.0,0.0),(2.0,0.0,0.0),(2.0,1.0,0.0),(3.0,1.0,5.0),(5.0,2.0,10.0)],
+                mc_runs,mc_seed:42,skip_probability:0.1,retest_runs,retest_seed:7,windows,candidates:20,oos_fraction:0.25,
+            }}]};
+            let archive=sqx_project::archive::Archive::new(&archive_dir);
+            let engine=archive.retain_current_engine().map_err(anyhow::Error::msg)?;
+            let dataset=serde_json::json!({"bars":bars,"instrument":inst,"timeframe":context["timeframe"],"source_context":context});
+            let specification=serde_json::json!({"pipeline":pipeline,"generator":gen});
+            let request=serde_json::json!({"research_kind":"cli_pipeline_started","attempt_id":format!("{:032x}",rand::random::<u128>()),"config":cfg,"seed":42,"periods_per_year":pyp});
+            let started=archive.save(engine,dataset,specification,request,serde_json::json!({"status":"execution_not_recorded"})).map_err(anyhow::Error::msg)?;
+            println!("Robustness checkpoint: {}",serde_json::json!({"run_id":started,"root":archive_dir}));
+            std::io::Write::flush(&mut std::io::stdout())?;
+            let recovered=pipeline_archive::recover(&archive,&started,true).map_err(|e|anyhow!("Robustness stopped; use pipeline-history or replay-pipeline --resume with its checkpoint: {e}"))?;
+            println!("Robustness archive: {}",serde_json::json!({"run_id":recovered.completion_id,"started_run_id":started,"root":archive_dir,"replay_available":true}));
+            let study=recovered.report.robustness.ok_or_else(||anyhow!("Robustness did not execute: {}",recovered.report.errors.join("; ")))?;
+            let base=&study.base;
             if !base.errors.is_empty(){return Err(anyhow!(base.errors.join("; ")));}
             let base_m = compute_metrics(&base, bars.len(), pyp);
             println!("Base: net {:.2} PF {:.2} DD {:.2}% trades {:.0}", base_m.net_profit, base_m.profit_factor, base_m.max_drawdown_pct, base_m.number_of_trades);
-            let scenarios = [(1.0, 0.0, 0.0), (2.0, 0.0, 0.0), (2.0, 1.0, 0.0), (3.0, 1.0, 5.0), (5.0, 2.0, 10.0)];
-            let rows = what_if(&s, &bars, &inst, &cfg, &scenarios);
+            let rows = &study.what_if;
             println!("What-if:");
-            for r in &rows {
+            for r in rows {
                 if !r.errors.is_empty(){println!("  Invalid scenario: {}",r.errors.join("; "));continue;}
                 println!("  spread={:.0} slip={:.0} comm={:.0} -> net {:.2} PF {:.2}", r.spread, r.slippage, r.commission, r.net_profit, r.profit_factor);
             }
-            let mc = monte_carlo_trade_manipulation(&base.trades, mc_runs, 0.1, 42);
+            let mc=study.monte_carlo.as_ref().ok_or_else(||anyhow!("Missing archived trade-manipulation report"))?;
             println!("{}",sqx_robustness::render(&mc));
-            let rt = monte_carlo_retest(&s, &bars, &inst, &cfg, retest_runs, 7);
+            let rt=study.retest.as_ref().ok_or_else(||anyhow!("Missing archived retest report"))?;
             println!("MC retest assumptions: seed {}; {}",rt.seed,rt.warmup_policy);
             println!("MC retest coverage: requested {}, skipped {}, invalid {}; issues: {:?}",rt.requested_runs,rt.skipped_runs,rt.invalid_runs,rt.errors);
             println!("MC retest: runs {} net5% {:.2} net50% {:.2} net95% {:.2} losing {:.1}%", rt.runs, rt.net_profit_5pct, rt.net_profit_50pct, rt.net_profit_95pct, rt.losing_runs_pct);
-            let gen = GeneratorConfig::default();
-            let wf = walk_forward(&bars, &inst, &cfg, pyp, &gen, windows, 0.25, 20, 42);
+            let wf=study.walk_forward.as_ref().ok_or_else(||anyhow!("Missing archived walk-forward report"))?;
             println!("Walk-forward: {} windows, OOS net {:.2} PF {:.2}, evidence sufficient: {}, attempted candidates: {}, issues: {:?}", wf.windows, wf.oos_net_profit, wf.oos_profit_factor, wf.evidence_sufficient, wf.candidates_attempted, wf.errors);
             context["monte_carlo"]=serde_json::json!({"seed":42,"requested_runs":mc_runs,"errors":mc.errors});
             context["mc_retest"]=serde_json::json!({"seed":7,"requested_runs":rt.requested_runs,"skipped_runs":rt.skipped_runs,"invalid_runs":rt.invalid_runs,"errors":rt.errors});

@@ -85,7 +85,7 @@ fn summarize_cost_scenario(result:&sqx_backtest::BacktestResult,spread:f64,slipp
 }
 
 /// Distribution summary of a Monte Carlo retest.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct RetestReport {
     /// Seed and sampled offsets identify the experiment, including skipped runs.
     pub seed: u64,

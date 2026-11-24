@@ -9,6 +9,7 @@ fn stress_and_portfolio_commands_bind_sources_and_reject_failed_execution(){
     let csv="timestamp,open,high,low,close,volume\n1700000000,150,151,149,150,1\n1700000060,150,151,149,150,1\n";fs::write(&data,csv).unwrap();
     let run=|name:&str,args:&[&str]|{
         let mut cmd=Command::new(env!("CARGO_BIN_EXE_sqx-cli"));cmd.arg(name).arg("--data").arg(&data);
+        if name=="robustness" {cmd.arg("--archive-dir").arg(root.join("archive"));}
         if name=="portfolio"{cmd.args(["--count","2"]);}else{cmd.arg("--strategy").arg(&strategy);if name=="montecarlo"{cmd.args(["--runs","2"]);}else{cmd.args(["--mc-runs","2","--retest-runs","2","--windows","2"]);}}
         cmd.args(args).output().unwrap()
     };
