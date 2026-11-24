@@ -77,8 +77,21 @@ indicator evidence-index check also passed. These are local checks, not a claim
 of remote release approval or independent trading correctness. The web robustness
 endpoint still archives after computation; standalone Monte Carlo and remaining
 entry points need durable trial accounting. Power-loss and large-study behavior
-remain unverified. The CLI's generated walk-forward stage is a separate candidate
-search, not an out-of-sample evaluation of the supplied strategy.
+remain unverified. At that revision, the CLI's generated walk-forward stage was a
+separate candidate search, not an out-of-sample evaluation of the supplied strategy.
+
+The candidate-linkage regression subsequently reproduced unrelated rule trees and
+direction flags in that stage. The corrected path freezes the supplied strategy
+as its first control and derives only declared parameter/SL/PT variants, recording
+the entire family before any walk-forward evaluation. Focused pipeline checks
+cover unchanged rules, the control in every window, family publication order,
+storage failure at every event boundary, and recorded family-configuration failure.
+This establishes candidate linkage, not untouched-data provenance or independent
+execution correctness. Earlier archives retain their original engine semantics.
+The regression failed before the change. After correction, both pipeline
+robustness tests, all six CLI pipeline/source/recovery tests, both CLI stress
+tests and the workspace build passed locally. The real interruption test still
+restores and resumes to the same completion identity as its uninterrupted control.
 
 ### Web stress-test interruption evidence (2026-11-24)
 

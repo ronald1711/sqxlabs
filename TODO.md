@@ -133,6 +133,10 @@ remaining execution assumptions and unsupported cases are visible.
   distinguish archive record counts from independent trial counts.
 - [ ] Independently review walk-forward boundaries, warmup, capital continuity,
   minimum evidence thresholds and untouched-holdout handling across all routes.
+  Standalone CLI robustness now links walk-forward to a frozen family of the
+  supplied strategy instead of generating unrelated rules; the original is
+  retained as the control. Candidate linkage and fail-fast journaling are tested,
+  but they do not establish that the OOS data were untouched during development.
   A separate integer-price SMA3 fixture now checks segmented selection, warmup,
   costs and carried capital. A hand-calculated EURUSD/USD holdout fixture checks
   SMA3 warmup, first-boundary fills, long/short spread and commission, fresh

@@ -178,7 +178,15 @@ pub fn run_observed(
                     let mc=sqx_robustness::monte_carlo_trade_manipulation_observed(&base.trades,*mc_runs,*skip_probability,*mc_seed,&mut |event|observer(PipelineEvent::RobustnessScenario{step:steps,event}))?;
                     let (retest,wf)=if let TaskKind::Robustness{retest_runs,retest_seed,windows,candidates,oos_fraction,..}=&pipeline.tasks[pc].kind {
                         let retest=sqx_robustness::monte_carlo_retest_observed(strategy,bars,instrument,config,*retest_runs,*retest_seed,&mut |event|observer(PipelineEvent::RobustnessScenario{step:steps,event}))?;
-                        let wf=sqx_optimizer::walk_forward_generated_observed(bars,instrument,config,periods_per_year,gen,*windows,*oos_fraction,*candidates,seed,&sqx_optimizer::WalkForwardCriteria::default(),&mut |event|observer(PipelineEvent::WalkForward{step:steps,candidate_index:0,event}))?;
+                        let family=match sqx_optimizer::parameter_family(strategy,*candidates,seed,&gen.param_ranges){
+                            Ok(family)=>family,
+                            Err(error)=>{
+                                observer(PipelineEvent::OptimizeFailure{step:steps,candidate_index:0,original:strategy,error:&error})?;
+                                return Err(format!("Robustness walk-forward family could not be prepared: {error}"));
+                            }
+                        };
+                        observer(PipelineEvent::OptimizeFamily{step:steps,candidate_index:0,original:strategy,family:&family})?;
+                        let wf=sqx_optimizer::walk_forward_candidates_observed(bars,instrument,config,periods_per_year,&family,*windows,*oos_fraction,seed,&sqx_optimizer::WalkForwardCriteria::default(),&mut |event|observer(PipelineEvent::WalkForward{step:steps,candidate_index:0,event}))?;
                         (Some(retest),Some(wf))
                     }else{(None,None)};
                     for (index,row) in what_if.iter().enumerate(){errors.extend(row.errors.iter().map(|e|format!("What-if scenario {index}: {e}")));}

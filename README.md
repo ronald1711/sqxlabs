@@ -272,8 +272,15 @@ failure stops the study. The shared recovery commands above verify the recorded
 prefix before appending missing events; recovery repeats computation and requires
 the original executable. Portable backup/restore and process interruption are
 tested; power-loss durability and large-study resource limits remain unverified.
-The walk-forward stage searches fresh generated candidates; it does not validate
-the supplied strategy out of sample. Standalone `montecarlo` and other entry
+The CLI walk-forward stage freezes the supplied strategy plus seeded SL/PT-distance
+variants (up to 20 candidates, distances varied within ±20%). The unchanged strategy
+is always the first control. Entry/exit rules, sizing, schedules, directions and
+confirmation remain intact; without SL/PT distances, the family contains only the
+original. Selection uses each training window before its OOS evaluation. This
+does not establish an untouched holdout if the strategy was developed using those
+data. Older archived versions generated unrelated candidates in this stage and
+must not be interpreted as walk-forward validation of the supplied strategy;
+their original executable is required for replay. Standalone `montecarlo` and other entry
 points do not inherit this archival coverage automatically.
 
 Web stress tests now use the same checkpoint/recovery protocol for their six
