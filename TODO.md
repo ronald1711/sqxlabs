@@ -59,6 +59,11 @@ remaining execution assumptions and unsupported cases are visible.
 
 - [ ] Provide durable trial accounting on every research entry point, including
   CLI, MCP, pipelines, optimization and robustness operations.
+  Robustness-library groundwork now exposes synchronous what-if/retest starts,
+  full outcomes, sampled strategies/offsets and explicit skipped trials. Observer
+  failure aborts before subsequent evaluation. This is not durable storage yet:
+  the standalone CLI robustness route still needs its frozen request, journal,
+  replay/resume and backup integration, and trade-manipulation checkpoints.
   CLI pipelines retain exact engine bytes, frozen inputs/configuration/seed,
   a pre-execution start record, ordered stage/family events, per-build/retest
   starts and outcomes, and the full returned report before reporting errors.

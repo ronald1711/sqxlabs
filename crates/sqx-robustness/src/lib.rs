@@ -13,7 +13,7 @@ use sqx_core::{Bar, Instrument};
 use sqx_strategy::{ProfitTarget, StopLoss, Strategy};
 
 /// One what-if scenario: re-run the backtest with different costs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct WhatIfRow {
     pub errors: Vec<String>,
     pub spread: f64,
@@ -21,6 +21,18 @@ pub struct WhatIfRow {
     pub commission: f64,
     pub net_profit: f64,
     pub profit_factor: f64,
+}
+
+/// Ordered, synchronous checkpoints for a caller's durable journal. A failed
+/// observer aborts before any subsequent evaluation; no persistence is implied
+/// merely by using the compatibility APIs without an observer.
+#[derive(Debug, serde::Serialize)]
+pub enum RobustnessEvent<'a> {
+    WhatIfStarted { index: usize, config: &'a BacktestConfig },
+    WhatIfOutcome { index: usize, result: &'a sqx_backtest::BacktestResult, row: &'a WhatIfRow },
+    RetestStarted { index: usize, start_offset: usize, strategy: &'a Strategy },
+    RetestSkipped { index: usize, start_offset: usize, available_bars: usize },
+    RetestOutcome { index: usize, result: &'a sqx_backtest::BacktestResult, errors: &'a [String] },
 }
 
 /// Re-run the strategy under a set of cost scenarios (spread, slippage, commission).
@@ -31,18 +43,30 @@ pub fn what_if(
     base: &BacktestConfig,
     scenarios: &[(f64, f64, f64)],
 ) -> Vec<WhatIfRow> {
+    what_if_observed(strategy,bars,instrument,base,scenarios,&mut |_|Ok(()))
+        .expect("infallible what-if observer")
+}
+
+pub fn what_if_observed(
+    strategy: &Strategy, bars: &[Bar], instrument: &Instrument,
+    base: &BacktestConfig, scenarios: &[(f64,f64,f64)],
+    observer: &mut impl FnMut(RobustnessEvent<'_>)->Result<(),String>,
+) -> Result<Vec<WhatIfRow>,String> {
     let mut out = Vec::new();
-    for &(spread, slippage, commission) in scenarios {
+    for (index,&(spread, slippage, commission)) in scenarios.iter().enumerate() {
         let cfg = BacktestConfig {
             spread_points: spread,
             slippage_points: slippage,
             commission_per_lot: commission,
             ..base.clone()
         };
+        observer(RobustnessEvent::WhatIfStarted{index,config:&cfg})?;
         let r = backtest(strategy, bars, instrument, &cfg);
-        out.push(summarize_cost_scenario(&r,spread,slippage,commission));
+        let row=summarize_cost_scenario(&r,spread,slippage,commission);
+        observer(RobustnessEvent::WhatIfOutcome{index,result:&r,row:&row})?;
+        out.push(row);
     }
-    out
+    Ok(out)
 }
 
 fn summarize_cost_scenario(result:&sqx_backtest::BacktestResult,spread:f64,slippage:f64,commission:f64)->WhatIfRow {
@@ -88,16 +112,26 @@ pub fn monte_carlo_retest(
     runs: usize,
     seed: u64,
 ) -> RetestReport {
+    monte_carlo_retest_observed(strategy,bars,instrument,base,runs,seed,&mut |_|Ok(()))
+        .expect("infallible retest observer")
+}
+
+pub fn monte_carlo_retest_observed(
+    strategy:&Strategy, bars:&[Bar], instrument:&Instrument, base:&BacktestConfig,
+    runs:usize, seed:u64,
+    observer:&mut impl FnMut(RobustnessEvent<'_>)->Result<(),String>,
+) -> Result<RetestReport,String> {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut skipped_runs=0;let mut invalid_runs=0;let mut errors=Vec::new();
     let mut start_offsets=Vec::new();
     let mut nets = Vec::new();
     let mut dds = Vec::new();
     let skip_max = (bars.len() / 10).max(1);
-    for _ in 0..runs {
+    for index in 0..runs {
         let skip = rng.gen_range(0..skip_max);
         start_offsets.push(skip);
         if bars.len()-skip < 50 {
+            observer(RobustnessEvent::RetestSkipped{index,start_offset:skip,available_bars:bars.len()-skip})?;
             skipped_runs+=1;
             continue;
         }
@@ -108,20 +142,19 @@ pub fn monte_carlo_retest(
         if let Some(pt) = s.profit_target {
             s.profit_target = Some(jitter_pt(pt, &mut rng));
         }
+        observer(RobustnessEvent::RetestStarted{index,start_offset:skip,strategy:&s})?;
         let r = backtest_window(&s, bars, skip, instrument, base);
         let mut run_errors=r.errors.clone();
         if let Err(error)=sqx_metrics::validate_observations(&r){run_errors.push(error);}
+        let net=r.trades.iter().map(|t| t.pnl).sum::<f64>();
+        let drawdown=max_drawdown_equity(&r.equity, base.initial_deposit);
+        if run_errors.is_empty() && (!net.is_finite() || !drawdown.is_finite() || !r.final_equity.is_finite()) {
+            run_errors.push("Retest produced nonfinite accounting or drawdown".into());
+        }
+        observer(RobustnessEvent::RetestOutcome{index,result:&r,errors:&run_errors})?;
         if !run_errors.is_empty() {
             invalid_runs+=1;
             for error in run_errors { if !errors.contains(&error) {errors.push(error);} }
-            continue;
-        }
-        let net=r.trades.iter().map(|t| t.pnl).sum::<f64>();
-        let drawdown=max_drawdown_equity(&r.equity, base.initial_deposit);
-        if !net.is_finite() || !drawdown.is_finite() || !r.final_equity.is_finite() {
-            invalid_runs+=1;
-            let error="Retest produced nonfinite accounting or drawdown".to_string();
-            if !errors.contains(&error){errors.push(error);}
             continue;
         }
         nets.push(net);
@@ -144,7 +177,7 @@ pub fn monte_carlo_retest(
     };
     if skipped_runs>0 {errors.push(format!("Incomplete retest coverage: {skipped_runs} of {runs} sampled windows have fewer than 50 bars; distribution unavailable"));}
     if runs_n==0 && errors.is_empty() {errors.push("No retest runs could be evaluated; at least 50 bars per sampled window are required".into());}
-    RetestReport {
+    Ok(RetestReport {
         seed,start_offsets,warmup_policy:"historical prefix; flat at trading start; previous-close signal may fill at start open",
         requested_runs:runs,skipped_runs,invalid_runs,errors,
         runs: runs_n,
@@ -153,7 +186,7 @@ pub fn monte_carlo_retest(
         net_profit_95pct: pct(&nets, 0.95),
         losing_runs_pct: losing,
         max_dd_95pct: pct(&dds, 0.95),
-    }
+    })
 }
 
 fn jitter_sl(sl: StopLoss, rng: &mut StdRng) -> StopLoss {
