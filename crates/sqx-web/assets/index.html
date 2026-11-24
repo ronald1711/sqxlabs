@@ -1442,12 +1442,16 @@ function robustnessArchiveNotice(d) {
   if(d.archive && d.archive.started_run_id)return '<p class="muted">Saved stress-test study: '+escapeHtml(d.archive.started_run_id)+'. Open Saved research runs to inspect progress, download the complete backup, or resume with the original application build. Replay verifies repeatability, not independent correctness.</p>';
   return d.archive && d.archive.run_id ? '<p class="muted">Saved research run: '+escapeHtml(d.archive.run_id)+'. Open Saved research runs to inspect, back up or replay this report.</p>' : '';
 }
+let robustnessRequestPending=false;
 async function requestRobustness(strategy) {
+  if(robustnessRequestPending)return {error:'A stress test is already awaiting a response in this page. Wait for its result or inspect Saved research runs; no additional study was started.'};
   var body;
   try { body=Object.assign({},strategy,{symbol:selectedSymbol()},settings()); }
   catch(e) { return {error:'Correct the simulation settings: '+e.message}; }
+  robustnessRequestPending=true;
   try { return await postJSON('/api/robustness',JSON.stringify(body)); }
   catch(e) { return {error:'The response could not be received. The stress test may still be running or have saved partial progress; refresh Saved research runs and inspect its status before retrying.'}; }
+  finally { robustnessRequestPending=false; }
 }
 function robustnessQuickSummary(d,name) {
   var html=robustnessArchiveNotice(d);

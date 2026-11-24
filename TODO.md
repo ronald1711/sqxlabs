@@ -77,6 +77,9 @@ remaining execution assumptions and unsupported cases are visible.
   CSV, restores through the web API into an empty server, and resumes all 2,016
   events while preserving the saved prefix. Responsive progress/cancellation,
   power loss and large-study limits still need verification.
+  The browser now rejects additional stress-test starts while one request in
+  that page is awaiting a response. Duplicate requests across tabs or after an
+  uncertain response still need a durable request-identity protocol.
   CLI pipelines retain exact engine bytes, frozen inputs/configuration/seed,
   a pre-execution start record, ordered stage/family events, per-build/retest
   starts and outcomes, and the full returned report before reporting errors.
