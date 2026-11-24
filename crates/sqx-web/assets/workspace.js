@@ -480,12 +480,15 @@ async function refreshResearchRuns() {
     for(const run of response.runs){
       const card=document.createElement('div');card.className='run-card';
       const name=document.createElement('strong');name.textContent=run.name+' · '+run.symbol;
-      const metadata=document.createElement('p');metadata.textContent='Run '+run.run_id.slice(0,12)+' · Dataset '+run.dataset_id.slice(0,12)+' · '+(run.kind==='cli_backtest_started'?'CLI input checkpoint':run.kind==='cli_backtest'?'CLI execution record':run.kind==='assistant_trial_started'?'AI trial input checkpoint':run.kind==='assistant_trial'?'AI trial execution':run.kind==='assistant_candidates'?'AI session evidence':run.kind==='pipeline'?'Pipeline report':run.kind==='robustness'?'Stress-test report':'Net '+fmt(run.metrics?.net_profit,2))+' · Not independently validated';
+      const mcpGeneration=['mcp_generation','mcp_generation_started','mcp_generation_trial','mcp_generation_trial_started'].includes(run.kind);
+      const metadata=document.createElement('p');metadata.textContent='Run '+run.run_id.slice(0,12)+' · Dataset '+run.dataset_id.slice(0,12)+' · '+(mcpGeneration?'MCP generation evidence ('+run.kind+')':run.kind==='cli_backtest_started'?'CLI input checkpoint':run.kind==='cli_backtest'?'CLI execution record':run.kind==='assistant_trial_started'?'AI trial input checkpoint':run.kind==='assistant_trial'?'AI trial execution':run.kind==='assistant_candidates'?'AI session evidence':run.kind==='pipeline'?'Pipeline report':run.kind==='robustness'?'Stress-test report':'Net '+fmt(run.metrics?.net_profit,2))+' · Not independently validated';
       const download=document.createElement('button');download.className='secondary';download.textContent='Download complete backup';
+      if(mcpGeneration)download.textContent='Download this record (not whole search)';
       download.onclick=async()=>{try{const raw=await rawBackup('/api/research/run?id='+encodeURIComponent(run.run_id));downloadRawJson('sqxlabs-research-'+run.run_id+'.json',raw);}catch(e){announce(e.message);}};
       const replay=document.createElement('button');replay.className='secondary';replay.textContent='Verify replay';
       if(run.kind==='cli_backtest'||run.kind==='cli_backtest_started'){replay.disabled=true;replay.textContent='Dashboard replay unavailable for CLI records';}
       if(run.kind==='assistant_candidates'){replay.disabled=true;replay.textContent='Replay unavailable for AI sessions';}
+      if(mcpGeneration){replay.disabled=true;replay.textContent='Replay unavailable for MCP generation';}
       const restartTrial=run.kind==='assistant_trial_started';
       if(restartTrial){replay.textContent='Restart frozen trial';replay.title='Runs this backtest from the beginning using saved inputs. Does not resume the AI conversation.';}
       replay.onclick=async()=>{

@@ -13,9 +13,11 @@ use sqx_backtest::{backtest, BacktestConfig};
 use sqx_core::{Bar, Instrument, Timeframe};
 use sqx_data::{read_csv_bars, DataStore, QuestdbClient, QuestdbConfig};
 use sqx_metrics::{compute as compute_metrics, Metrics};
-use sqx_optimizer::{backtest_batch_detailed, rank, random_strategy, walk_forward, Fitness, GeneratorConfig};
+use sqx_optimizer::{rank, random_strategy, walk_forward, Fitness, GeneratorConfig};
 use sqx_robustness::{monte_carlo_retest, monte_carlo_trade_manipulation, what_if};
 use sqx_strategy::Strategy;
+
+mod generation_archive;
 
 const PROTOCOL: &str = "2024-11-05";
 
@@ -82,6 +84,7 @@ fn error_json(id: Value, code: i64, message: &str) -> Value {
 
 fn tools_list() -> Vec<Value> {
     let mut tools=vec![
+        json!({"name":"generation_history","description":"Inspect saved MCP generation searches and recorded trial progress without executing strategies. Pending records do not prove process liveness. The storage directory is configured by the server operator.","inputSchema":{"type":"object","properties":{}}}),
         json!({
             "name": "list_indicators",
             "description": "List the indicator building-block catalog.",
@@ -157,6 +160,9 @@ fn call_tool(params: &Value) -> Value {
         "questdb_bars" => tool_questdb_bars(&args),
         "backtest" => tool_backtest(&args),
         "generate" => tool_generate(&args),
+        "generation_history" => match generation_archive::history(&generation_archive::configured_archive()) {
+            Ok(history)=>text_result(history.to_string()),Err(error)=>err_result(error),
+        },
         "portfolio" => tool_portfolio(&args),
         "robustness" => tool_robustness(&args),
         _ => err_result(format!("unknown tool: {name}")),
@@ -355,7 +361,12 @@ fn tool_generate(args: &Value) -> Value {
     let pyp = pyp_for(&bars);
     let cfg=match simulation_config(args,timeframe){Ok(config)=>config,Err(error)=>return err_result(error)};
     if let Err(error)=sqx_backtest::validate_backtest_inputs(&bars,&inst,&cfg){return err_result(error);}
-    let evaluations = backtest_batch_detailed(&strategies, &bars, &inst, &cfg, pyp);
+    let mut quality=quality;quality["timeframe"]=json!(timeframe);
+    let archive=generation_archive::configured_archive();
+    let (evaluations,search_id,completion_id)=match generation_archive::execute(&archive,&strategies,&bars,&inst,&cfg,pyp,seed,&quality) {
+        Ok(value)=>value,Err(error)=>return err_result(format!("Generation evidence could not be recorded: {error}")),
+    };
+    quality["generation_archive"]=json!({"search_id":search_id,"completion_id":completion_id,"root":archive.root(),"inspection_tool":"generation_history"});
     generation_result(evaluations,seed,quality,&symbol,timeframe,&cfg)
 }
 
@@ -374,7 +385,7 @@ fn generation_result(evaluations:Vec<sqx_optimizer::BatchEvaluation>,seed:u64,mu
     for (i,(s,m)) in ranked.iter().take(10).enumerate() {
         lines.push(format!("{}. {} net={:.2} pf={:.2} trades={:.0}",i+1,s.name,m.net_profit,m.profit_factor,m.number_of_trades));
     }
-    context["generation"]=json!({"seed":seed,"attempted":attempted,"invalid":invalid,"eligible":eligible,"below_ranking_criteria":attempted-invalid-eligible,"min_trades":5,"fitness":"ProfitFactor","candidate_failures":failures,"scope":"Returned execution diagnostics, not a durable trial ledger. Successful non-selected candidate records and interrupted work are not archived by this tool."});
+    context["generation"]=json!({"seed":seed,"attempted":attempted,"invalid":invalid,"eligible":eligible,"below_ranking_criteria":attempted-invalid-eligible,"min_trades":5,"fitness":"ProfitFactor","candidate_failures":failures,"scope":"Evaluation counts are not independent trials. When generation_archive is present, full candidate checkpoints/results were saved before ranking; a pending checkpoint is not proof of process liveness or completion."});
     let mut response=research_result(lines.join("\n"),context,symbol,timeframe,cfg);
     if invalid>0 {response["isError"]=json!(true);}
     response

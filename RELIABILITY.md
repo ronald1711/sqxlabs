@@ -3944,3 +3944,45 @@ portfolio/account validation remain open.
 
 Validation: all six MCP tests passed in debug and release;
 `cargo build --workspace` passed. No independent portfolio parity is claimed.
+
+### Durable MCP generation checkpoints before selection
+
+MCP generation now retains exact engine bytes and an immutable search checkpoint
+with the full frozen candidate family, bars, instrument, timeframe/calendar,
+configuration, seed and research context. Every candidate gets a checkpoint before
+execution and a complete backtest/metrics/error/eligibility record immediately
+afterwards. Only after all results are durable is the evaluation-completion record
+published and ranking returned. Execution is sequential at this entry point so a
+write failure stops subsequent work; other optimizer callers retain their existing
+parallel behavior. Repeated requests have distinct random attempt identities; the
+strategy generation seed and backtest calculations are unchanged.
+
+The server-controlled SQX_MCP_RESEARCH_DIR selects storage (default data/research);
+tool callers cannot override it. The generation_history tool reads content-verified
+records and reports planned candidates, trial checkpoints, results, completion
+records and orphaned records. It does not execute or resume anything, certify
+relationships/replay, authenticate origin, or infer worker liveness. Research
+context points to the saved search/completion identities. Full retained candidate
+results now include failures and non-selected candidates for this route.
+
+Tests reopen a completed mixed-validity search, distinguish repeated requests,
+refuse execution on checkpoint storage failure and simulate a mid-candidate
+interruption. A separate process test kills a real MCP generation after initial
+trial publication, deletes the source CSV and inspects the incomplete search in
+a fresh server process: prior results survive without a completion claim.
+Single-trial replay/restart, completed selection reconstruction, all other MCP
+routes, broader conversion/recording provenance and whole-programme trial coverage
+remain open. This does not establish market execution correctness.
+
+A result-write failure regression also proves the next candidate is not executed;
+its existing checkpoint survives when the simulated storage outage is removed.
+Shared-dashboard listing labels these MCP records explicitly, disables unsupported
+replay/restart, and labels a download as one record rather than a whole-search
+backup. The backend independently rejects unsupported replay.
+
+Validation: workspace tests and build passed with the lockfile; final MCP tests
+(10 unit cases plus the separate-process kill/inspection test) passed in debug
+and release. The added dashboard refusal test, report JavaScript syntax and
+recovery UI checks passed. No new browser interaction or independent broker
+comparison is claimed for this increment. Whole-search portable backup and
+restore of linked trial records remain open.

@@ -170,6 +170,17 @@ mod tests {
     }
 
     #[test]
+    fn mcp_generation_records_do_not_offer_dashboard_replay(){
+        let state=research_state();
+        for kind in ["mcp_generation","mcp_generation_started","mcp_generation_trial","mcp_generation_trial_started"] {
+            let id=state.archive.save(engine_identity().unwrap(),json!({}),json!({}),json!({"research_kind":kind}),json!({})).unwrap();
+            let response:serde_json::Value=serde_json::from_str(&research_replay_json(&json!({"run_id":id}).to_string(),&state)).unwrap();
+            assert!(response["error"].as_str().unwrap().contains("dashboard replay and restart are not implemented"),"{response}");
+        }
+        std::fs::remove_dir_all(state.archive.root()).unwrap();
+    }
+
+    #[test]
     fn assistant_candidate_archive_survives_restore_without_live_data(){
         let state=research_state();
         let series=state.store.read().unwrap().series[0].clone();
@@ -2166,6 +2177,9 @@ fn research_replay_json(body:&str,state:&State)->String{
         let id=value.get("run_id").and_then(|v|v.as_str()).ok_or("missing run_id")?;
         let bundle=state.archive.load(id)?;
         if bundle.run.engine_id!=engine_identity()?{return Err("The engine executable differs from the recorded run. Use the matching build; the original report remains available.".into());}
+        if matches!(bundle.run.request["research_kind"].as_str(),Some("mcp_generation"|"mcp_generation_started"|"mcp_generation_trial"|"mcp_generation_trial_started")) {
+            return Err("MCP generation records are available for inspection; dashboard replay and restart are not implemented for these records.".into());
+        }
         if matches!(bundle.run.request["research_kind"].as_str(),Some("cli_backtest"|"cli_backtest_started")) {return Err("CLI backtest records contain full inputs and execution evidence; dashboard replay is not implemented for this record type.".into());}
         if matches!(bundle.run.request["research_kind"].as_str(),Some("assistant_trial"|"assistant_trial_started")) {
             return sqx_project::assistant_trials::execute(&state.archive,id,&engine_identity()?,value["resume"]==true);

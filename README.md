@@ -304,6 +304,19 @@ Successful research responses include `research_context` with the quality report
 full supplied calendar, cutoff time, symbol, timeframe and simulation settings.
 These checks do not establish broker execution parity or an untouched holdout.
 
+MCP `generate` automatically retains its engine, frozen candidate family and input
+data, per-candidate checkpoints and full results before ranking. Storage defaults
+to `data/research` relative to the server's working directory; the server operator
+can set `SQX_MCP_RESEARCH_DIR` to an absolute persistent directory. Storage failure
+aborts the search. `generation_history` discovers saved searches after a lost
+response or process restart, without loading the original CSV or contacting QuestDB.
+Keep this archive private: it contains market data, strategy rules and account
+settings. Repeated requests receive distinct search identities and are not
+automatically independent trials. Missing results do not prove that a process
+stopped. Single-trial replay/resume and durable capture of the other MCP tools
+remain unavailable. Dashboard downloads preserve one record, not the whole linked
+search; JSON research backups do not include the retained executable.
+
 CSV with header `timestamp,open,high,low,close,volume`, timestamp in unix
 seconds. `data/eurusd_sample.csv` is a 2000-bar synthetic EURUSD sample.
 
