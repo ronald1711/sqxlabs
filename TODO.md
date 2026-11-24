@@ -59,8 +59,13 @@ remaining execution assumptions and unsupported cases are visible.
   restore test preserves the frozen family and completed build outcomes without
   fabricating completion. Restored event/start/result records disclose holdout
   exposure; counts are records, not independent trials. Optimization checkpoints
-  are still per family, not per walk-forward trial. Automatic resume/replay,
-  concurrent-writer coordination and power-loss validation remain open.
+  are still per family, not per walk-forward trial. CLI `pipeline-history` checks
+  prefix links; `replay-pipeline --resume` replays the prefix with the exact
+  engine before adding missing events, under an exclusive process lock. A
+  separate-process kill/restore/resume fixture matches an uninterrupted search;
+  repeat recovery deduplicates and conflicting/tampered prefixes are rejected.
+  Whole-search portable backup, per-walk-forward-trial recovery, bounded-scale
+  validation, UI recovery and power-loss validation remain open.
 - [x] Preserve MCP generation execution failures in responses, exclude failed candidates from ranking and mark partial searches as errors. Durable generation accounting is implemented below; other MCP routes remain open.
 - [x] Stop MCP portfolio selection on failed or missing candidate evaluations and preserve error/selection context.
 - [x] Persist MCP generation inputs, per-candidate checkpoints and full results before ranking; inspect interrupted searches after restart without original CSV files. Replay and resume are tracked below; other MCP routes remain open.

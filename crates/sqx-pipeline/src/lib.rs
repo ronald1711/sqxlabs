@@ -13,7 +13,7 @@ use sqx_robustness::monte_carlo_trade_manipulation;
 use sqx_strategy::Strategy;
 
 /// One pipeline step.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TaskKind {
     Build { count: usize, keep: usize },
     Retest { mc_runs: usize, min_positive_pct: f64 },
@@ -22,13 +22,13 @@ pub enum TaskKind {
 }
 
 /// A named task.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Task {
     pub kind: TaskKind,
 }
 
 /// A custom project pipeline.
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Pipeline {
     pub name: String,
     pub tasks: Vec<Task>,

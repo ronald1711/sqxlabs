@@ -1,4 +1,5 @@
 mod audit_log;
+mod pipeline_archive;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
@@ -482,6 +483,18 @@ enum Cmd {
         manifest: PathBuf,
         #[arg(long, default_value_t = 5)]
         min_trades: usize,
+    },
+    /// Inspect immutable pipeline events without running calculations.
+    PipelineHistory {
+        #[arg(long, default_value="data/research")] archive_dir:PathBuf,
+        #[arg(long)] run_id:String,
+    },
+    /// Replay an exact-engine pipeline, optionally finishing its incomplete prefix.
+    ReplayPipeline {
+        #[arg(long, default_value="data/research")] archive_dir:PathBuf,
+        /// ID of the pipeline start record, not its completion record.
+        #[arg(long)] run_id:String,
+        #[arg(long)] resume:bool,
     },
     /// Run a custom-project pipeline: Build -> Retest -> Optimize.
     Pipeline {
@@ -1187,6 +1200,20 @@ fn main() -> Result<()> {
             if invalid>0 {anyhow::bail!("crosscheck contains invalid simulations; inspect per-market errors");}
             Ok(())
         }
+        Cmd::PipelineHistory{archive_dir,run_id}=>{
+            let archive=sqx_project::archive::Archive::new(archive_dir);
+            println!("{}",pipeline_archive::inspect(&archive,&run_id).map_err(anyhow::Error::msg)?);
+            Ok(())
+        },
+        Cmd::ReplayPipeline{archive_dir,run_id,resume}=>{
+            let archive=sqx_project::archive::Archive::new(archive_dir);
+            let recovered=pipeline_archive::recover(&archive,&run_id,resume).map_err(anyhow::Error::msg)?;
+            println!("{}",serde_json::json!({"started_run_id":run_id,"completion_id":recovered.completion_id,
+                "replayed_events":recovered.replayed,"appended_events":recovered.appended,
+                "matches":true,"execution_valid":recovered.report.errors.is_empty(),"errors":recovered.report.errors,
+                "scope":"Recorded calculations reproduced; not independent validation or untouched holdout evidence."}));
+            Ok(())
+        },
         Cmd::Pipeline { archive_dir, data, research, seed, count, keep } => {
             let bars = load_bars(&data)?;
             let (inst,cfg,mut context)=research.prepare(&bars)?;
@@ -1197,25 +1224,15 @@ fn main() -> Result<()> {
             let engine=archive.retain_current_engine().map_err(anyhow::Error::msg)?;
             let dataset=serde_json::json!({"bars":bars,"instrument":inst,"timeframe":context["timeframe"],"source_context":context});
             let specification=serde_json::json!({"pipeline":pipeline,"generator":gen});
-            let mut request=serde_json::json!({"research_kind":"cli_pipeline_started","config":cfg,"seed":seed,"periods_per_year":pyp});
+            let request=serde_json::json!({"research_kind":"cli_pipeline_started","attempt_id":format!("{:032x}",rand::random::<u128>()),"config":cfg,"seed":seed,"periods_per_year":pyp});
             let started=archive.save(engine.clone(),dataset.clone(),specification.clone(),request.clone(),serde_json::json!({"status":"execution_not_recorded"})).map_err(anyhow::Error::msg)?;
             println!("Pipeline checkpoint: {}",serde_json::json!({"run_id":started,"root":archive_dir}));
             std::io::Write::flush(&mut std::io::stdout())?;
             println!("Pipeline: {}", pipeline.name);
-            let mut event_ids=Vec::new();
-            let report = sqx_pipeline::run_observed(&pipeline, &bars, &inst, &cfg, pyp, &gen, seed,&mut |event| {
-                let event_request=serde_json::json!({"research_kind":"cli_pipeline_event","config":cfg,
-                    "started_run_id":started,"sequence":event_ids.len(),"previous_event_id":event_ids.last()});
-                let outcome=serde_json::to_value(event).map_err(|e|e.to_string())?;
-                let id=archive.save(engine.clone(),dataset.clone(),specification.clone(),event_request,outcome)?;
-                event_ids.push(id);
-                Ok(())
-            }).map_err(|e|anyhow!("Pipeline stopped; archived prefix remains incomplete: {e}"))?;
-            request["research_kind"]=serde_json::json!("cli_pipeline");
-            request["started_run_id"]=serde_json::json!(started);
-            let result=serde_json::json!({"report":report,"event_ids":event_ids,"scope":"Ordered build/retest checkpoints and outcomes; optimization is recorded per family, not per walk-forward trial. A start record without a result is incomplete; automatic recovery and replay are not yet provided. Full-data discovery is exploratory, not an untouched holdout."});
-            let id=archive.save(engine,dataset,specification,request,result).map_err(anyhow::Error::msg)?;
-            println!("Pipeline archive: {}",serde_json::json!({"run_id":id,"root":archive_dir,"replay_available":false}));
+            let recovered=pipeline_archive::recover(&archive,&started,true)
+                .map_err(|e|anyhow!("Pipeline stopped; inspect its archived prefix: {e}"))?;
+            let report=recovered.report;
+            println!("Pipeline archive: {}",serde_json::json!({"run_id":recovered.completion_id,"root":archive_dir,"replay_available":true}));
             context["seed"]=serde_json::json!(seed);context["pipeline"]=serde_json::json!({"name":pipeline.name,"requested_candidates":count,"keep":keep,"build_evaluations":report.builds.len(),"retest_evaluations":report.retests.len(),"optimization_evaluations":report.optimizations.len(),"errors":report.errors});
             println!("Research context: {context}");
             if !report.errors.is_empty(){return Err(anyhow!(report.errors.join("; ")));}

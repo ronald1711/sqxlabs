@@ -1,0 +1,113 @@
+//! Pipeline prefix inspection and deterministic recovery. Stored binaries are never executed.
+use serde_json::{json,Value};
+use sqx_project::archive::{Archive,ResearchBundle};
+use std::collections::BTreeMap;
+
+const SCOPE:&str="Ordered build/retest checkpoints and outcomes; optimization is recorded per family, not per walk-forward trial. Recovery replays the saved prefix before appending missing events. Full-data discovery is exploratory, not an untouched holdout.";
+
+fn lock(archive:&Archive,id:&str)->Result<std::fs::File,String>{
+    archive.load(id)?;
+    let directory=archive.root().join("pipeline-locks");
+    std::fs::create_dir_all(&directory).map_err(|e|e.to_string())?;
+    let file=std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(directory.join(id)).map_err(|e|e.to_string())?;
+    file.try_lock().map_err(|e|format!("Pipeline is active or its process lock is unavailable: {e}"))?;
+    Ok(file)
+}
+
+fn event_request(root:&ResearchBundle,sequence:usize,previous:Option<&String>)->Value{
+    json!({"research_kind":"cli_pipeline_event","config":root.run.request["config"],
+        "started_run_id":root.run_id,"sequence":sequence,"previous_event_id":previous})
+}
+fn completion_request(root:&ResearchBundle)->Value{
+    let mut request=root.run.request.clone();
+    request["research_kind"]=json!("cli_pipeline");request["started_run_id"]=json!(root.run_id);request
+}
+
+struct State {root:ResearchBundle,events:Vec<(String,Value)>,completion:Option<ResearchBundle>}
+fn load(archive:&Archive,id:&str)->Result<State,String>{
+    let root=archive.load(id)?;
+    if root.run.request["research_kind"]!="cli_pipeline_started" || root.run.result!=json!({"status":"execution_not_recorded"}){
+        return Err("Expected a pipeline start record".into());
+    }
+    let mut events=BTreeMap::new();let mut completion=None;
+    for record_id in archive.list()?{
+        let record=archive.load(&record_id)?;
+        if record.run.request["started_run_id"]!=id {continue;}
+        if record.run.engine_id!=root.run.engine_id || record.run.dataset_id!=root.run.dataset_id || record.run.strategy_id!=root.run.strategy_id{
+            return Err("Pipeline record input/engine identities differ".into());
+        }
+        match record.run.request["research_kind"].as_str(){
+            Some("cli_pipeline_event")=>{
+                let sequence=record.run.request["sequence"].as_u64().and_then(|n|usize::try_from(n).ok()).ok_or("Invalid event sequence")?;
+                if events.insert(sequence,(record.run_id,record.run.request,record.run.result)).is_some(){return Err("Conflicting pipeline events at the same sequence".into());}
+            },
+            Some("cli_pipeline")=>{
+                if record.run.request!=completion_request(&root) || completion.replace(record).is_some(){return Err("Conflicting pipeline completion records".into());}
+            },
+            _=>return Err("Unknown record refers to this pipeline".into()),
+        }
+    }
+    let mut ordered=Vec::new();let mut previous=None;
+    for (sequence,(record_id,request,result)) in events{
+        if sequence!=ordered.len() || request!=event_request(&root,sequence,previous.as_ref()){
+            return Err("Missing, reordered or incorrectly linked pipeline event".into());
+        }
+        previous=Some(record_id.clone());ordered.push((record_id,result));
+    }
+    if let Some(done)=&completion{
+        if done.run.result["event_ids"]!=json!(ordered.iter().map(|(id,_)|id).collect::<Vec<_>>()){
+            return Err("Completion does not cover the exact recorded prefix".into());
+        }
+    }
+    Ok(State{root,events:ordered,completion})
+}
+
+pub fn inspect(archive:&Archive,id:&str)->Result<Value,String>{
+    let _guard=lock(archive,id)?;let state=load(archive,id)?;
+    Ok(json!({"started_run_id":id,"status":if state.completion.is_some(){"completion_recorded"}else{"incomplete"},
+        "completion_id":state.completion.as_ref().map(|r|&r.run_id),"event_count":state.events.len(),
+        "events":state.events.iter().enumerate().map(|(sequence,(id,event))|json!({"sequence":sequence,"run_id":id,"event":event})).collect::<Vec<_>>(),
+        "execution_replayed":false,"scope":"Hash/input identities and ordered prefix links checked; inspection alone does not verify recorded calculations or correctness."}))
+}
+
+pub struct Recovery {pub report:sqx_pipeline::PipelineReport,pub completion_id:String,pub replayed:usize,pub appended:usize}
+
+pub fn recover(archive:&Archive,id:&str,resume:bool)->Result<Recovery,String>{
+    let _guard=lock(archive,id)?;
+    let state=load(archive,id)?;
+    let root=&state.root;
+    let executable=std::fs::read(std::env::current_exe().map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+    if sqx_project::archive::content_id(&executable)!=root.run.engine_id{return Err("Pipeline engine executable differs; use the exact recorded engine".into());}
+    if !resume && state.completion.is_none(){return Err("Pipeline is incomplete; use --resume to replay its prefix and finish missing work".into());}
+    let bars:Vec<sqx_core::Bar>=serde_json::from_value(root.dataset["bars"].clone()).map_err(|e|e.to_string())?;
+    let instrument:sqx_core::Instrument=serde_json::from_value(root.dataset["instrument"].clone()).map_err(|e|e.to_string())?;
+    let config:sqx_backtest::BacktestConfig=serde_json::from_value(root.run.request["config"].clone()).map_err(|e|e.to_string())?;
+    let pipeline:sqx_pipeline::Pipeline=serde_json::from_value(root.strategy["pipeline"].clone()).map_err(|e|e.to_string())?;
+    let generator:sqx_optimizer::GeneratorConfig=serde_json::from_value(root.strategy["generator"].clone()).map_err(|e|e.to_string())?;
+    let seed=root.run.request["seed"].as_u64().ok_or("Missing pipeline seed")?;
+    let pyp=root.run.request["periods_per_year"].as_f64().filter(|n|n.is_finite() && *n>0.0).ok_or("Invalid periods per year")?;
+    let mut ids=Vec::new();let mut appended=0;
+    let report=sqx_pipeline::run_observed(&pipeline,&bars,&instrument,&config,pyp,&generator,seed,&mut |event|{
+        let value=serde_json::to_value(event).map_err(|e|e.to_string())?;
+        let index=ids.len();
+        let event_id=if let Some((event_id,recorded))=state.events.get(index){
+            if *recorded!=value{return Err(format!("Pipeline replay differs at event {index}; no further work accepted"));}
+            event_id.clone()
+        }else{
+            if !resume || state.completion.is_some(){return Err("Replay produced events beyond the saved completion".into());}
+            let event_id=archive.save(root.run.engine_id.clone(),root.dataset.clone(),root.strategy.clone(),event_request(root,index,ids.last()),value)?;
+            appended+=1;event_id
+        };
+        ids.push(event_id);Ok(())
+    })?;
+    if ids.len()<state.events.len(){return Err("Replay ended before the saved prefix".into());}
+    let result=json!({"report":report,"event_ids":ids,"scope":SCOPE});
+    let completion_id=if let Some(done)=state.completion{
+        // Scope prose may evolve; calculations and event references must match.
+        if done.run.result["report"]!=result["report"] || done.run.result["event_ids"]!=result["event_ids"]{
+            return Err("Pipeline final report differs on replay".into());
+        }
+        done.run_id
+    }else{archive.save(root.run.engine_id.clone(),root.dataset.clone(),root.strategy.clone(),completion_request(root),result)?};
+    Ok(Recovery{report,completion_id,replayed:state.events.len(),appended})
+}

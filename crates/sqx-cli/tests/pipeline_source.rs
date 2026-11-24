@@ -72,12 +72,12 @@ fn interrupted_pipeline_retains_frozen_family_and_completed_candidate() {
     let csv=root.join("bars.csv");
     let mut data="timestamp,open,high,low,close,volume\n".to_string();
     for i in 0..500 { data.push_str(&format!("{},1.1,1.101,1.099,1.1,1\n",1700000000+i*60)); }
-    fs::write(&csv,data).unwrap();
+    fs::write(&csv,&data).unwrap();
     struct Child(std::process::Child);
     impl Drop for Child {fn drop(&mut self){let _=self.0.kill();let _=self.0.wait();}}
     let mut child=Child(Command::new(env!("CARGO_BIN_EXE_sqx-cli"))
         .args(["pipeline","--data"]).arg(&csv)
-        .args(["--symbol","EURUSD","--timeframe","M1","--count","2000","--keep","1","--archive-dir"])
+        .args(["--symbol","EURUSD","--timeframe","M1","--count","64","--keep","1","--archive-dir"])
         .arg(root.join("archive")).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
     let archive=sqx_project::archive::Archive::new(root.join("archive"));
     let deadline=std::time::Instant::now()+std::time::Duration::from_secs(60);
@@ -93,7 +93,7 @@ fn interrupted_pipeline_retains_frozen_family_and_completed_candidate() {
     let records:Vec<_>=archive.list().unwrap().iter().map(|id|archive.load(id).unwrap()).collect();
     assert!(records.iter().any(|r|r.run.request["research_kind"]=="cli_pipeline_started"));
     assert!(!records.iter().any(|r|r.run.request["research_kind"]=="cli_pipeline"),"interrupted run must not claim completion");
-    assert!(records.iter().any(|r|r.run.result["kind"]=="build_family" && r.run.result["candidates"].as_array().unwrap().len()==2000));
+    assert!(records.iter().any(|r|r.run.result["kind"]=="build_family" && r.run.result["candidates"].as_array().unwrap().len()==64));
     let outcomes:Vec<_>=records.iter().filter(|r|r.run.result["kind"]=="build_outcome").collect();
     assert!(!outcomes.is_empty());
     assert_eq!(outcomes[0].dataset["bars"].as_array().unwrap().len(),500);
@@ -101,5 +101,60 @@ fn interrupted_pipeline_retains_frozen_family_and_completed_candidate() {
     for record in &records {restored.restore(record).unwrap();}
     fs::remove_dir_all(root.join("archive")).unwrap();
     for record in &records {assert_eq!(restored.load(&record.run_id).unwrap().run.result,record.run.result);}
+    let started=records.iter().find(|r|r.run.request["research_kind"]=="cli_pipeline_started").unwrap();
+    let command=|subcommand:&str,resume:bool|{
+        let mut c=Command::new(env!("CARGO_BIN_EXE_sqx-cli"));
+        c.args([subcommand,"--archive-dir"]).arg(root.join("restored")).args(["--run-id",&started.run_id]);
+        if resume{c.arg("--resume");}c.output().unwrap()
+    };
+    let inspection=command("pipeline-history",false);assert!(inspection.status.success());
+    assert_eq!(serde_json::from_slice::<Value>(&inspection.stdout).unwrap()["status"],"incomplete");
+    assert!(!command("replay-pipeline",false).status.success());
+    let lock_path=root.join("restored/pipeline-locks").join(&started.run_id);
+    let lock=fs::OpenOptions::new().read(true).write(true).open(&lock_path).unwrap();lock.try_lock().unwrap();
+    let busy=command("replay-pipeline",true);assert!(!busy.status.success());
+    assert!(String::from_utf8_lossy(&busy.stderr).contains("process lock"));drop(lock);
+    let resumed=command("replay-pipeline",true);assert!(resumed.status.success(),"{}",String::from_utf8_lossy(&resumed.stderr));
+    let summary:Value=serde_json::from_slice(&resumed.stdout).unwrap();
+    assert!(summary["replayed_events"].as_u64().unwrap()>0);assert!(summary["appended_events"].as_u64().unwrap()>0);
+    let completed=restored.load(summary["completion_id"].as_str().unwrap()).unwrap();
+    let count=restored.list().unwrap().len();
+    let replay=command("replay-pipeline",false);assert!(replay.status.success(),"{}",String::from_utf8_lossy(&replay.stderr));
+    assert_eq!(serde_json::from_slice::<Value>(&replay.stdout).unwrap()["appended_events"],0);
+    assert_eq!(restored.list().unwrap().len(),count);
+    fs::write(&csv,&data).unwrap();
+    let reference=Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["pipeline","--data"]).arg(&csv)
+        .args(["--symbol","EURUSD","--timeframe","M1","--count","64","--keep","1","--archive-dir"])
+        .arg(root.join("reference")).output().unwrap();
+    let receipt:Value=serde_json::from_str(String::from_utf8_lossy(&reference.stdout).lines().find_map(|l|l.strip_prefix("Pipeline archive: ")).unwrap()).unwrap();
+    let expected=sqx_project::archive::Archive::new(root.join("reference")).load(receipt["run_id"].as_str().unwrap()).unwrap();
+    assert_eq!(completed.run.result["report"],expected.run.result["report"]);
+    assert_ne!(completed.run.request["started_run_id"],expected.run.request["started_run_id"],"fresh attempts need distinct identities");
+    let altered=sqx_project::archive::Archive::new(root.join("altered"));
+    altered.restore(started).unwrap();
+    let mut prefix:Vec<_>=records.iter().filter(|r|r.run.request["research_kind"]=="cli_pipeline_event").collect();
+    prefix.sort_by_key(|r|r.run.request["sequence"].as_u64().unwrap());
+    for event in prefix {
+        if event.run.result["kind"]=="build_outcome" {
+            let mut changed=event.run.result.clone();changed["candidate_index"]=json!(999);
+            altered.save(event.run.engine_id.clone(),event.dataset.clone(),event.strategy.clone(),event.run.request.clone(),changed).unwrap();break;
+        }
+        altered.restore(event).unwrap();
+    }
+    let before=altered.list().unwrap().len();
+    let mismatch=Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["replay-pipeline","--archive-dir"]).arg(root.join("altered"))
+        .args(["--run-id",&started.run_id,"--resume"]).output().unwrap();
+    assert!(!mismatch.status.success());assert!(String::from_utf8_lossy(&mismatch.stderr).contains("replay differs"));
+    assert_eq!(altered.list().unwrap().len(),before,"mismatched prefix must not append work");
+    let wrong=altered.save("different engine".into(),started.dataset.clone(),started.strategy.clone(),started.run.request.clone(),started.run.result.clone()).unwrap();
+    let mismatch=Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["replay-pipeline","--archive-dir"]).arg(root.join("altered"))
+        .args(["--run-id",&wrong,"--resume"]).output().unwrap();
+    assert!(!mismatch.status.success());assert!(String::from_utf8_lossy(&mismatch.stderr).contains("engine executable differs"));
+    let event=records.iter().find(|r|r.run.result["kind"]=="build_outcome").unwrap();
+    let mut corrupt=event.run.result.clone();corrupt["candidate_index"]=json!(999);
+    restored.save(event.run.engine_id.clone(),event.dataset.clone(),event.strategy.clone(),event.run.request.clone(),corrupt).unwrap();
+    let conflict=command("pipeline-history",false);assert!(!conflict.status.success());
+    assert!(String::from_utf8_lossy(&conflict.stderr).contains("Conflicting pipeline events"));
+    assert!(!command("replay-pipeline",true).status.success());
     fs::remove_dir_all(root).unwrap();
 }
