@@ -60,6 +60,53 @@ fn retest_warms_on_prefix_and_matches_hand_calculated_entry_timing(){
 fn trade(pnl:f64)->sqx_backtest::Trade {
  sqx_backtest::Trade{id:0,direction:sqx_core::Direction::Long,open_time:0,close_time:60000,open_price:1.0,close_price:1.0,size:0.1,pnl,pnl_points:0.0,commission:0.0,financing:0.0,bars:1,mae_points:0.0,mfe_points:0.0,exit_reason:sqx_backtest::ExitReason::EndOfData}
 }
+
+#[test]
+fn manipulation_checkpoints_preserve_legacy_random_paths_and_stop_on_failure(){
+ use rand::{Rng,SeedableRng,seq::SliceRandom};
+ use sqx_robustness::{monte_carlo_trade_manipulation_observed,RobustnessEvent};
+ let trades=[trade(10.0),trade(-20.0),trade(5.0)]; // IDs deliberately identical.
+ let mut rng=rand::rngs::StdRng::seed_from_u64(123);
+ let mut legacy_paths=Vec::new();
+ for _ in 0..20 {
+  let mut path:Vec<f64>=trades.iter().filter(|_|rng.gen_bool(0.7)).map(|t|t.pnl).collect();
+  path.shuffle(&mut rng);legacy_paths.push(path);
+ }
+ for fail_at in 0..=40 {
+  let mut events=0;let mut captured=Vec::new();
+  let report=monte_carlo_trade_manipulation_observed(&trades,20,0.3,123,&mut |event|{
+   let position=events;events+=1;
+   match event {
+    RobustnessEvent::TradeManipulationStarted{index,trade_indices}=>{
+     assert_eq!(position,2*index);
+     let path:Vec<_>=trade_indices.iter().map(|&i|trades[i].pnl).collect();
+     assert_eq!(path,legacy_paths[index]);
+     let mut unique=trade_indices.to_vec();unique.sort_unstable();unique.dedup();assert_eq!(unique.len(),trade_indices.len());
+    },
+    RobustnessEvent::TradeManipulationOutcome{index,sample,errors}=>{
+     assert_eq!(position,2*index+1);assert!(errors.is_empty());
+     let sample=sample.unwrap();assert_eq!(sample.net_profit,legacy_paths[index].iter().sum::<f64>());
+     assert_eq!(sample.included_trades,legacy_paths[index].len());captured.push(sample.clone());
+    },
+    _=>panic!("wrong event"),
+   }
+   if position==fail_at{Err("write failed".into())}else{Ok(())}
+  });
+  assert_eq!(events,(fail_at+1).min(40));
+  if fail_at<40 {assert_eq!(report.unwrap_err(),"write failed");}
+  else {assert_eq!(report.unwrap().samples,captured);}
+ }
+ let mut events=0;
+ let invalid=monte_carlo_trade_manipulation_observed(&[],10,0.3,123,&mut |_|{events+=1;Ok(())}).unwrap();
+ assert_eq!(events,0);assert!(!invalid.errors.is_empty());
+ let mut events=0;
+ let overflow=monte_carlo_trade_manipulation_observed(&[trade(f64::MAX),trade(f64::MAX)],10,0.0,123,&mut |event|{
+  events+=1;
+  if let RobustnessEvent::TradeManipulationOutcome{sample,errors,..}=event{assert!(sample.is_none());assert!(!errors.is_empty());}
+  Ok(())
+ }).unwrap();
+ assert_eq!(events,2);assert!(!overflow.errors.is_empty());
+}
 #[test]
 fn zero_profit_and_skipped_all_paths_never_count_as_profitable(){
  for (trades,skip) in [(vec![trade(0.0)],0.0),(vec![trade(100.0)],1.0)] {
