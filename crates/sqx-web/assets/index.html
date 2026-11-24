@@ -316,7 +316,7 @@
           <input type="number" id="opt-oos" value="0.3" min="0.05" max="0.5" step="0.05">
           <label for="opt-min-is">Minimum training trades</label><input id="opt-min-is" type="number" min="1" value="10">
           <label for="opt-min-oos">Minimum test trades per window</label><input id="opt-min-oos" type="number" min="1" value="10">
-          <button id="opt-run">Run optimizer</button>
+          <button id="opt-run">Run optimizer</button><button id="opt-new-request" class="secondary" hidden>Use current settings for a new study</button>
         </div>
         <div id="opt-results" class="muted">Pick a type and run. Walk-forward evaluates out-of-sample windows; the matrix sweeps windows × OOS.</div>
       </div>
@@ -1263,11 +1263,24 @@ document.getElementById("proj-run").onclick = async function() {
   box.textContent = researchNotice(d.research_context)+"\nDatabank: " + (d.databank || 0) + " strategies\n\n" + (d.log || []).join("\n")+archiveNote;
 };
 
-document.getElementById("opt-run").onclick = async function() {
+let optimizationRequestPending=false;
+const optimizationPendingKey='sqx.pendingOptimization.v1';
+document.getElementById('opt-new-request').onclick=function(){
+  if(optimizationRequestPending)return;
+  localStorage.removeItem(optimizationPendingKey);this.hidden=true;
+  document.getElementById('opt-results').textContent='The next run will use current settings. This does not cancel an earlier study; inspect Builder → Saved research for its status.';
+};
+async function runOptimization() {
   const box = document.getElementById("opt-results");
-  box.textContent = "Running...";
+  const button=document.getElementById('opt-run'),fresh=document.getElementById('opt-new-request');
+  if(optimizationRequestPending)return;
+  optimizationRequestPending=true;button.disabled=true;
+  try{
+  let body;const pending=localStorage.getItem(optimizationPendingKey);
+  if(pending){body=JSON.parse(pending);if(!body||typeof body.request_key!=='string')throw Error('Stored request is invalid. Inspect Saved research before choosing a new study.');}
+  else{
   const inputs=generatorInputs(box);if(!inputs)return;
-  const body = Object.assign({
+  body = Object.assign({
     kind: document.getElementById("opt-kind").value,
     count: Number(document.getElementById("opt-count").value),
     windows: Number(document.getElementById("opt-windows").value),
@@ -1276,15 +1289,24 @@ document.getElementById("opt-run").onclick = async function() {
     oos: Number(document.getElementById("opt-oos").value),
     symbol: selectedSymbol()
   }, inputs);
-  const d = await postJSON("/api/optimize", JSON.stringify(body));
-  if (d.error) { box.innerHTML = "<span class=\"neg\">" + escapeHtml(d.error) + "</span>"; return; }
+  if(!body.symbol)throw Error('Load and select market data before optimization.');
+  body.request_key=crypto.randomUUID();localStorage.setItem(optimizationPendingKey,JSON.stringify(body));
+  }
+  fresh.hidden=false;box.textContent=pending?'Retrying the saved optimization settings…':'Running and saving optimization research…';
+  let d;try{d=await postJSON('/api/optimize',JSON.stringify(body));}
+  catch(error){box.textContent='The response could not be received. The study may still be running. Retry to locate the same request, or inspect Builder → Saved research before starting a new study.';return;}
+  const id=d.archive&&d.archive.started_run_id;
+  const saved=id?'<p class="muted">Saved optimization study: '+escapeHtml(id)+'. Open Builder → Saved research to inspect, back up or resume. Replay checks repeatability, not independent correctness.</p>':'';
+  if(id){localStorage.removeItem(optimizationPendingKey);fresh.hidden=true;refreshResearchRuns();}
+  if(d.recovery_required){box.innerHTML=saved+'<p>'+escapeHtml(d.message||'This study already exists; inspect its saved status.')+'</p>';return;}
+  if(d.error){box.innerHTML=saved+'<p class="neg">'+escapeHtml(d.error)+'</p>';return;}
   if (d.kind === "simple") {
     let html = "<table><tr><th>Name</th><th>PF</th><th>Net</th><th>Trades</th><th>DD %</th></tr>";
     (d.results || []).forEach(function(r) {
       html += "<tr><td>" + escapeHtml(r.name) + "</td><td>" + fmt(r.profit_factor, 2) + "</td><td>" + fmt(r.net_profit, 2) + "</td><td>" + fmt(r.trades, 0) + "</td><td>" + fmt(r.dd_pct, 2) + "</td></tr>";
     });
     html += "</table>";
-    box.innerHTML = html;
+    box.innerHTML = saved+html;
     refreshDatabank();
   } else if (d.kind === "walk-forward") {
     let html = "<table><tr><th>Windows</th><th>OOS trades</th><th>OOS net</th><th>OOS PF</th><th>OOS win %</th><th>OOS DD %</th></tr>";
@@ -1292,7 +1314,7 @@ document.getElementById("opt-run").onclick = async function() {
     html += '<p><b>'+ (d.evidence_sufficient ? 'Trade-count criteria met' : 'Insufficient or incomplete evidence') + '</b> · '+d.candidates_attempted+' candidates attempted. This is not a robustness certificate or an untouched final holdout.</p>';
     if(d.errors && d.errors.length)html+='<p class="neg">'+d.errors.map(escapeHtml).join('; ')+'</p>';
     html+='<div class="table-scroll"><table><tr><th>Window</th><th>Test start</th><th>Test end</th><th>Starting equity</th><th>Final equity</th><th>Trades</th><th>Evidence</th></tr>'+(d.window_results||[]).map(w=>'<tr><td>'+(w.index+1)+'</td><td>'+day(w.test_start)+'</td><td>'+day(w.test_end)+'</td><td>'+fmt(w.starting_equity,2)+'</td><td>'+fmt(w.final_equity,2)+'</td><td>'+w.oos_trades+'</td><td>'+escapeHtml(w.reason)+'</td></tr>').join('')+'</table></div>';
-    box.innerHTML = html;
+    box.innerHTML = saved+html;
   } else {
     let html = "<table><tr><th>Windows</th><th>OOS</th><th>Net</th><th>PF</th><th>Trades</th><th>DD %</th><th>Evidence</th></tr>";
     (d.rows || []).forEach(function(r) {
@@ -1301,10 +1323,13 @@ document.getElementById("opt-run").onclick = async function() {
       html += "<tr style=\"background:" + bg + "\"><td>" + r.windows + "</td><td>" + fmt(r.oos, 2) + "</td><td>" + fmt(r.net, 2) + "</td><td>" + fmt(r.pf, 2) + "</td><td>" + r.trades + "</td><td>" + fmt(r.dd_pct, 2) + "</td><td>" + (r.evidence_sufficient ? "Trade-count criteria met" : "Insufficient evidence") + "</td></tr>";
     });
     html += "</table><p>Matrix cells are additional research trials; selecting the best cell does not create an untouched holdout.</p>";
-    box.innerHTML = html;
+    box.innerHTML = saved+html;
   }
   const notice=document.createElement("p");notice.textContent=researchNotice(d.research_context);box.prepend(notice);
-};
+  }catch(error){box.textContent=error.message||String(error);fresh.hidden=false;}
+  finally{optimizationRequestPending=false;button.disabled=false;}
+}
+document.getElementById('opt-run').onclick=runOptimization;
 
 function parseGeneratorRanges(text) {
   const ranges=[],seen=new Set();

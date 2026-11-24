@@ -909,6 +909,47 @@ mod tests {
     }
 
     #[test]
+    fn invalid_matrix_keeps_all_cells_and_replays_as_invalid(){
+        let state=research_state();
+        let request=json!({"symbol":"EURUSD","kind":"wf-matrix","count":1,"seed":123,"allow_data_gaps":true});
+        let response:serde_json::Value=serde_json::from_str(&optimize_json(&request.to_string(),&state)).unwrap();
+        assert!(response["error"].is_string(),"{response}");
+        let id=response["archive"]["started_run_id"].as_str().unwrap();
+        let completion=response["archive"]["run_id"].as_str().unwrap();
+        let done=state.archive.load(completion).unwrap();
+        assert_eq!(done.run.result["report"]["walk_forward_studies"].as_array().unwrap().len(),12);
+        let backup=sqx_project::pipeline_archive::export(&state.archive,id).unwrap();
+        let restored=research_state();restored.store.write().unwrap().series.clear();sqx_project::pipeline_archive::import(&restored.archive,backup).unwrap();std::fs::remove_dir_all(state.archive.root()).unwrap();
+        let replay=sqx_project::pipeline_archive::recover(&restored.archive,id,true).unwrap();
+        assert!(!replay.report.errors.is_empty());assert_eq!(replay.completion_id,completion);assert_eq!(json!(replay.report),done.run.result["report"]);
+        std::fs::remove_dir_all(restored.archive.root()).unwrap();
+    }
+
+    #[test]
+    fn optimization_retains_all_modes_and_restores_without_live_inputs(){
+        for kind in ["simple","walk-forward","wf-matrix"] {
+            let state=research_state();state.store.write().unwrap().series[0].bars=(0..1500).map(|i|{let p=1.1+(i as f64*0.3).sin()*0.01;Bar::new(i*60000,p,p+0.003,p-0.003,p+0.0002,10.0)}).collect();
+            let request=json!({"symbol":"EURUSD","kind":kind,"count":2,"seed":123,"windows":2,"oos":0.3,"min_is_trades":999,"min_oos_trades":777,"allow_data_gaps":true,"request_key":format!("optimization-{kind}")});
+            let response:serde_json::Value=serde_json::from_str(&optimize_json(&request.to_string(),&state)).unwrap();
+            assert!(response.get("error").is_none(),"{response}");
+            let id=response["archive"]["started_run_id"].as_str().unwrap();let completion=response["archive"]["run_id"].as_str().unwrap();
+            let done=state.archive.load(completion).unwrap();
+            assert_eq!(state.archive.load(id).unwrap().run.request["origin"],"web_optimization");
+            if kind=="simple"{assert_eq!(done.run.result["report"]["builds"].as_array().unwrap().len(),2);}else{
+                let cells=done.run.result["report"]["walk_forward_studies"].as_array().unwrap();assert_eq!(cells.len(),if kind=="wf-matrix"{12}else{1});
+                for cell in cells {assert_eq!(cell["specification"]["criteria"]["min_is_trades"],999);assert_eq!(cell["specification"]["criteria"]["min_oos_trades_per_window"],777);assert_eq!(cell["report"]["evidence_sufficient"],false);}
+            }
+            let backup=sqx_project::pipeline_archive::export(&state.archive,id).unwrap();
+            let restored=research_state();restored.store.write().unwrap().series.clear();sqx_project::pipeline_archive::import(&restored.archive,backup).unwrap();std::fs::remove_dir_all(state.archive.root()).unwrap();
+            let repeated:serde_json::Value=serde_json::from_str(&optimize_json(&request.to_string(),&restored)).unwrap();assert_eq!(repeated["recovery_required"],true);assert_eq!(repeated["archive"]["started_run_id"],id);
+            let replay=sqx_project::pipeline_archive::recover(&restored.archive,id,true).unwrap();assert_eq!(replay.completion_id,completion);assert_eq!(json!(replay.report),done.run.result["report"]);assert_eq!(replay.appended,0);
+            let mut changed=request.clone();changed["seed"]=json!(124);assert!(reserve_web_research_request("web_optimization",&changed,&restored).unwrap_err().contains("different inputs"));
+            assert!(reserve_web_research_request("web_portfolio",&request,&restored).unwrap_err().contains("different inputs"));
+            std::fs::remove_dir_all(restored.archive.root()).unwrap();
+        }
+    }
+
+    #[test]
     fn generated_portfolio_freezes_all_trials_and_request_identity_through_restore(){
         let state=research_state();state.store.write().unwrap().series[0].bars=(0..1500).map(|i|{let p=1.1+(i as f64*0.07).sin()*0.01;Bar::new((1700000000+i*60)*1000,p,p+0.001,p-0.001,p,1.0)}).collect();
         let mut request=json!({"symbol":"EURUSD","count":40,"seed":123,"top":4,"min_k":2,"max_k":3,"allow_data_gaps":true,"request_key":"portfolio-request-1"});
@@ -1644,6 +1685,8 @@ fn optimize_json(body: &str, state: &State) -> String {
     };
     let input=match OptimizationInputs::parse(&val){Ok(input)=>input,Err(error)=>return json!({"error":error}).to_string()};
     let kind=&input.kind;
+    let (creation_guard,existing)=match reserve_web_research_request("web_optimization",&val,state){Ok(result)=>result,Err(error)=>return json!({"error":error}).to_string()};
+    if let Some(id)=existing{return json!({"recovery_required":true,"message":"This request already has a saved optimization study. Inspect Saved research before retrying.","archive":{"started_run_id":id}}).to_string();}
     let symbol = val.get("symbol").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let series = match find_series(state, &symbol) {
         Some(s) => s,
@@ -1663,45 +1706,42 @@ fn optimize_json(body: &str, state: &State) -> String {
         min_is_trades:input.min_is_trades,
         min_oos_trades_per_window:input.min_oos_trades,
     };
+    let task=if kind=="simple" {
+        sqx_pipeline::TaskKind::Generate{count,min_trades:5}
+    }else{
+        let cells=if kind=="wf-matrix"{[3usize,4,5,6].into_iter().flat_map(|w|[0.2,0.3,0.4].into_iter().map(move |oos|(w,oos))).collect::<Vec<_>>()}else{vec![(input.windows,input.oos)]};
+        sqx_pipeline::TaskKind::WalkForwardStudy{studies:cells.into_iter().map(|(windows,oos_fraction)|sqx_pipeline::WalkForwardSpec{windows,candidates:count,oos_fraction,criteria:criteria.clone()}).collect()}
+    };
+    let pipeline=sqx_pipeline::Pipeline{name:"Dashboard optimization study".into(),tasks:vec![sqx_pipeline::Task{kind:task}]};
+    let request=json!({"research_kind":"cli_pipeline_started","origin":"web_optimization","attempt_id":format!("{:032x}",rand::random::<u128>()),"web_request":val,"config":cfg,"seed":seed,"periods_per_year":pyp});
+    let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,"normalization":series.normalization,"bars":series.bars,"source_context":research_context});
+    let started=match retained_engine_identity(state).and_then(|engine|state.archive.save(engine,dataset,json!({"pipeline":pipeline,"generator":gen}),request,json!({"status":"execution_not_recorded"}))){
+        Ok(id)=>id,Err(error)=>return json!({"error":format!("Optimization could not be archived: {error}")}).to_string()
+    };
+    drop(creation_guard);
+    let recovered=match sqx_project::pipeline_archive::recover(&state.archive,&started,true){Ok(result)=>result,Err(error)=>return json!({"error":format!("Optimization stopped: {error}. Inspect Saved research before retrying."),"archive":{"started_run_id":started}}).to_string()};
+    let receipt=json!({"started_run_id":started,"run_id":recovered.completion_id});
+    let report=recovered.report;
+    if !report.errors.is_empty(){return json!({"error":report.errors.join("; "),"research_context":research_context,"archive":receipt}).to_string();}
     match kind.as_str() {
-        "walk-forward" => {
-            let windows=input.windows;
-            let oos=input.oos;
-            let r = sqx_optimizer::walk_forward_with_criteria(&series.bars, &inst, &cfg, pyp, &gen, windows, oos, count, seed, &criteria);
-            let mut response=json!(r);response["kind"]=json!("walk-forward");response["research_context"]=research_context;response.to_string()
-        }
-        "wf-matrix" => {
-            let mut rows = Vec::new();
-            for w in [3usize, 4, 5, 6] {
-                for oos in [0.2f64, 0.3, 0.4] {
-                    let r = sqx_optimizer::walk_forward_with_criteria(&series.bars, &inst, &cfg, pyp, &gen, w, oos, count, seed, &criteria);
-                    rows.push(json!({
-                        "windows": w, "oos": oos,
-                        "net": r.oos_net_profit, "pf": r.oos_profit_factor,
-                        "trades": r.oos_trades, "dd_pct": r.oos_max_dd_pct, "evidence_sufficient":r.evidence_sufficient, "candidates_attempted":r.candidates_attempted, "errors":r.errors
-                    }));
-                }
-            }
-            json!({"research_context":research_context, "kind": "wf-matrix", "seed":seed,"candidates_per_window":count,"rows": rows }).to_string()
-        }
-        _ => {
-            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-            let strategies: Vec<Strategy> = (0..count)
-                .map(|i| random_strategy(&mut rng, &format!("s{i:04}"), &gen))
-                .collect();
-            let scored = backtest_batch(&strategies, &series.bars, &inst, &cfg, pyp);
-            let ranked = rank(scored, Fitness::ProfitFactor, 5);
-            let rows: Vec<_> = ranked
-                .iter()
-                .take(20)
-                .map(|(s, m)| json!({
-                    "name": s.name,"research_context":research_context, "profit_factor": m.profit_factor,
-                    "net_profit": m.net_profit, "trades": m.number_of_trades,
-                    "dd_pct": m.max_drawdown_pct, "strategy": s
-                }))
-                .collect();
-            databank_push(state, &rows);
-            json!({"research_context":research_context, "kind": "simple", "results": rows }).to_string()
+        "walk-forward"=>{
+            let mut response=json!(report.walk_forward_studies[0].report);
+            response["kind"]=json!(kind);response["research_context"]=research_context;response["archive"]=receipt;response.to_string()
+        },
+        "wf-matrix"=>{
+            let rows:Vec<_>=report.walk_forward_studies.iter().map(|cell|{let r=&cell.report;json!({
+                "windows":cell.specification.windows,"oos":cell.specification.oos_fraction,
+                "net":r.oos_net_profit,"pf":r.oos_profit_factor,"trades":r.oos_trades,"dd_pct":r.oos_max_dd_pct,
+                "evidence_sufficient":r.evidence_sufficient,"candidates_attempted":r.candidates_attempted,"errors":r.errors
+            })}).collect();
+            json!({"research_context":research_context,"kind":kind,"seed":seed,"candidates_per_window":count,"rows":rows,"archive":receipt}).to_string()
+        },
+        _=>{
+            let rows:Vec<_>=report.databank.iter().take(20).filter_map(|strategy|report.builds.iter().find(|row|row.evaluation.strategy==*strategy).map(|row|{
+                let m=&row.evaluation.metrics;json!({"name":strategy.name,"research_context":research_context,"profit_factor":m.profit_factor,"net_profit":m.net_profit,"trades":m.number_of_trades,"dd_pct":m.max_drawdown_pct,"strategy":strategy})
+            })).collect();
+            databank_push(state,&rows);
+            json!({"research_context":research_context,"kind":kind,"results":rows,"archive":receipt}).to_string()
         }
     }
 }
@@ -1880,7 +1920,7 @@ fn research_data_quality(series:&SymbolSeries, request:&serde_json::Value, as_of
 fn research_restore_json(body:&str,state:&State)->String {
     let result=(||->Result<String,String>{
         let bundle:sqx_project::archive::ResearchBundle=serde_json::from_str(body).map_err(|e|e.to_string())?;
-        let _request_guard=if bundle.run.request["research_kind"]=="cli_pipeline_started" && matches!(bundle.run.request["origin"].as_str(),Some("web_robustness"|"web_portfolio"|"web_portfolio_combination")) {
+        let _request_guard=if bundle.run.request["research_kind"]=="cli_pipeline_started" && matches!(bundle.run.request["origin"].as_str(),Some("web_robustness"|"web_portfolio"|"web_portfolio_combination"|"web_optimization")) {
             let (guard,existing)=reserve_web_research_request(bundle.run.request["origin"].as_str().unwrap(),&bundle.run.request["web_request"],state)?;
             if existing.is_some_and(|id|id!=bundle.run_id){return Err("Restored stress-test request key conflicts with an existing study".into());}
             guard
@@ -1902,7 +1942,7 @@ fn reserve_web_research_request(origin:&str,value:&serde_json::Value,state:&Stat
     let mut existing=None;
     for id in state.archive.list()? {
         let record=state.archive.load(&id)?;
-        if record.run.request["research_kind"]=="cli_pipeline_started" && matches!(record.run.request["origin"].as_str(),Some("web_robustness"|"web_portfolio"|"web_portfolio_combination")) && record.run.request["web_request"]["request_key"]==key {
+        if record.run.request["research_kind"]=="cli_pipeline_started" && matches!(record.run.request["origin"].as_str(),Some("web_robustness"|"web_portfolio"|"web_portfolio_combination"|"web_optimization")) && record.run.request["web_request"]["request_key"]==key {
             if record.run.request["origin"]!=origin || record.run.request["web_request"]!=*value{return Err("Research request key already belongs to different inputs or workflow".into());}
             if existing.replace(id).is_some(){return Err("Conflicting studies share this stress-test request key".into());}
         }
@@ -2323,7 +2363,7 @@ fn research_list_json(state:&State)->String{
                     Some(task) if task.get("Portfolio").is_some() || task.get("PortfolioCombination").is_some()=>"portfolio",
                     Some(task) if task.get("Backtest").is_some()=>"backtest",
                     Some(task) if task.get("Generate").is_some()=>"generation",
-                    Some(task) if task.get("DiscoverWalkForward").is_some()=>"walk_forward",
+                    Some(task) if task.get("DiscoverWalkForward").is_some() || task.get("WalkForwardStudy").is_some()=>"walk_forward",
                     Some(task) if task.get("Sensitivity").is_some_and(|s|s["scenarios"].as_array().is_some_and(|rows|rows.is_empty()))=>"monte_carlo",
                     Some(task) if task.get("Robustness").is_some() || task.get("Sensitivity").is_some()=>"robustness",
                     _=>"pipeline",

@@ -4358,3 +4358,29 @@ Compact backup SHA-256:
 `e89405f596dd3ae0128af74e751613bdb66ccb56a0854cec7629c35bf3f6e397`.
 Exporter executable SHA-256:
 `feb8f356e23d8a69b908787827b93c6661299a96ba89aa227a881bbe77f4ca20`.
+
+### Dashboard optimization journal (unmerged follow-up, 2026-11-24)
+
+The optimization endpoint now freezes a shared-pipeline start record before
+execution. Simple discovery retains every candidate; walk-forward and matrix
+modes retain explicit cell specifications, minimum IS/OOS trade thresholds,
+per-candidate execution events and full cell reports. The matrix does not select
+a best OOS cell or populate a deployable-strategy databank. Invalid cells remain
+in the archived report and prevent the response from claiming a successful study.
+Existing default pipeline/CLI discovery serialization remains unchanged.
+
+The browser retains request settings and identity after a lost response, blocks
+double starts and offers an explicit new-study action. Recovery lookup precedes
+live-data lookup, and imported identities share the existing cross-workflow
+conflict checks. Saved-study receipts point to the existing inspection, portable
+backup and recovery UI. Original files and terminal access are not needed for
+replay of frozen inputs.
+
+Two pipeline tests pass: full reports match direct configured computation and
+every observer failure boundary aborts with the exact prior event prefix. The
+frontend request test and inline syntax checks pass. An invalid twelve-cell
+matrix survives deletion/import/replay without becoming valid. Successful
+three-mode portable recovery verification is still running; full workspace,
+platform checks, rendered optimization UI and actual HTTP process-kill coverage
+remain pending for this increment. This is reproducibility evidence, not an
+independent review of walk-forward arithmetic or untouched holdout provenance.
