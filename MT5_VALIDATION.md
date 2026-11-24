@@ -680,3 +680,14 @@ quotes were missing. The tool correctly returned a discrepancy/nonzero result;
 the limit was not relaxed. This does not establish a faulty broker quote: it
 establishes that these events do not satisfy the declared freshness contract.
 All 41 Python tests passed, including no-future-quote and exact-age-boundary cases.
+
+Running the existing independent eight-case checker against that five-window
+snapshot, with the dated Tickmill normalization policy and unchanged 10-second
+conversion contract, failed at the first backtest with `missing or stale USD->EUR
+margin conversion at 1795520153332` (normalized UTC milliseconds). This is the
+first reported EURUSD age failure after removing the declared two-hour broker
+offset. It precedes the first planned entry: the engine's whole-input conversion
+preflight rejects the dataset, rather than proving a conversion failure during
+an actual open position. No successful comparison was published; comparison.json
+remained `verification_not_completed`. This observed rejection is useful negative
+evidence and must not be reported as successful strategy or broker parity.
