@@ -58,3 +58,14 @@ not an untrusted author's fabricated results. Exported JSON can contain private
 market data and strategy definitions; store it accordingly. Interrupted exports
 must be repeated; partial JSON is not a backup. Large-archive performance and
 power-loss recovery remain outside the tested coverage.
+
+## Walk-forward interruption evidence
+
+A separate-process fixture generates 100 candidates, selects one family, and
+runs 16 variants in each of three walk-forward windows. The test kills the CLI
+after a full training outcome is durably visible, exports the incomplete archive,
+deletes the original archive, imports twice to check idempotence, and resumes.
+All 48 training outcomes and the complete ordered event IDs match a separate
+uninterrupted execution; the final completion ID matches as well. This checks
+full archived executions rather than only aggregate profits. It does not cover
+power loss, disk-full interruption, large-search memory limits or broker parity.

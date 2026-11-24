@@ -71,7 +71,9 @@ remaining execution assumptions and unsupported cases are visible.
   Whole-search JSON export/import now validates checksums, event links and the
   merged destination graph before publication; repeat imports deduplicate.
   Tests reject corruption, missing completion dependencies and conflicting
-  destination events. Engine/runtime transport, process-kill validation during walk-forward execution, bounded-scale
+  destination events. A separate process-kill test inside walk-forward restores through the public
+  backup commands and matches all 48 candidate outcomes and full event identities
+  against an uninterrupted run. Engine/runtime transport, bounded-scale
   validation, UI recovery and power-loss validation remain open.
 - [x] Preserve MCP generation execution failures in responses, exclude failed candidates from ranking and mark partial searches as errors. Durable generation accounting is implemented below; other MCP routes remain open.
 - [x] Stop MCP portfolio selection on failed or missing candidate evaluations and preserve error/selection context.

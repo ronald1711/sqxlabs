@@ -178,3 +178,68 @@ fn portable_restore(root:&std::path::Path, start_id:&str) {
     let repeated=import();assert!(repeated.status.success());
     assert_eq!(serde_json::from_slice::<Value>(&repeated.stdout).unwrap()["published_records"],0);
 }
+
+#[test]
+fn killed_walkforward_restores_full_trial_evidence_and_matches_uninterrupted_run() {
+    use sqx_project::archive::{Archive,content_id};
+    let root=std::env::temp_dir().join(format!("sqx-wf-kill-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    struct Cleanup(std::path::PathBuf);
+    impl Drop for Cleanup{fn drop(&mut self){let _=fs::remove_dir_all(&self.0);}}
+    let _cleanup=Cleanup(root.clone());
+    let archive=Archive::new(root.join("archive"));
+    let bars:Vec<_>=(0..1500).map(|i|{let p=1.1+(i as f64*0.3).sin()*0.01;sqx_core::Bar::new(i*60000,p,p+0.003,p-0.003,p+0.0002,10.0)}).collect();
+    let pipeline=sqx_pipeline::Pipeline{name:"walk-forward recovery".into(),tasks:vec![
+        sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::Build{count:100,keep:1}},
+        sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::Optimize{windows:3,candidates:16}}]};
+    let executable=env!("CARGO_BIN_EXE_sqx-cli");
+    let engine=content_id(&fs::read(executable).unwrap());
+    let id=archive.save(engine,json!({"bars":bars,"instrument":sqx_core::Instrument::fx("EURUSD"),"timeframe":"M1"}),
+        json!({"pipeline":pipeline,"generator":sqx_optimizer::GeneratorConfig::default()}),
+        json!({"research_kind":"cli_pipeline_started","attempt_id":"killed-walkforward-fixture","config":sqx_backtest::BacktestConfig::default(),"seed":42,"periods_per_year":525600.0}),
+        json!({"status":"execution_not_recorded"})).unwrap();
+    let start=archive.load(&id).unwrap();
+    let command=|folder:&str|{let mut command=Command::new(executable);command.args(["replay-pipeline","--archive-dir"]).arg(root.join(folder)).args(["--run-id",&id,"--resume"]);command};
+    struct Child(std::process::Child);
+    impl Drop for Child{fn drop(&mut self){let _=self.0.kill();let _=self.0.wait();}}
+    let mut child=Child(command("archive").stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap());
+    let deadline=std::time::Instant::now()+std::time::Duration::from_secs(120);
+    let mut seen=std::collections::BTreeSet::new();
+    let retained=loop {
+        let mut found=None;
+        for entry in fs::read_dir(archive.root().join("runs")).unwrap(){
+            let path=entry.unwrap().path();if path.extension().and_then(|v|v.to_str())!=Some("json"){continue;}
+            let key=path.file_stem().unwrap().to_str().unwrap().to_string();
+            if !seen.insert(key.clone()){continue;}
+            let record=archive.load(&key).unwrap();
+            if record.run.result["kind"]=="walk_forward" && record.run.result["event"]["kind"]=="candidate_outcome" {found=Some(record);break;}
+        }
+        if let Some(record)=found{break record;}
+        assert!(child.0.try_wait().unwrap().is_none(),"pipeline ended before a walk-forward outcome was persisted");
+        assert!(std::time::Instant::now()<deadline,"walk-forward checkpoint deadline exceeded");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    child.0.kill().unwrap();child.0.wait().unwrap();
+    assert!(!retained.run.result["event"]["execution"]["trades"].as_array().unwrap().is_empty());
+    assert!(!archive.list().unwrap().iter().any(|key|archive.load(key).unwrap().run.request["research_kind"]=="cli_pipeline"));
+    portable_restore(&root,&id);
+    let restored=Archive::new(root.join("restored"));
+    assert_eq!(restored.load(&retained.run_id).unwrap().run.result,retained.run.result);
+    let resumed=command("restored").output().unwrap();
+    assert!(resumed.status.success(),"{}",String::from_utf8_lossy(&resumed.stderr));
+    let receipt:Value=serde_json::from_slice(&resumed.stdout).unwrap();
+    assert!(receipt["replayed_events"].as_u64().unwrap()>0);assert!(receipt["appended_events"].as_u64().unwrap()>0);
+    let completion=restored.load(receipt["completion_id"].as_str().unwrap()).unwrap();
+    let uninterrupted=Archive::new(root.join("uninterrupted"));uninterrupted.restore(&start).unwrap();
+    let fresh=command("uninterrupted").output().unwrap();assert!(fresh.status.success(),"{}",String::from_utf8_lossy(&fresh.stderr));
+    let fresh_receipt:Value=serde_json::from_slice(&fresh.stdout).unwrap();
+    let expected=uninterrupted.load(fresh_receipt["completion_id"].as_str().unwrap()).unwrap();
+    // Exact event IDs compare all archived full executions, not only summary metrics.
+    assert_eq!(completion.run.result,expected.run.result);
+    assert_eq!(completion.run_id,expected.run_id);
+    assert_eq!(completion.run.result["report"]["optimizations"].as_array().unwrap().len(),1);
+    let outcomes=completion.run.result["event_ids"].as_array().unwrap().iter().filter(|key|{
+        let event=restored.load(key.as_str().unwrap()).unwrap();
+        event.run.result["kind"]=="walk_forward" && event.run.result["event"]["kind"]=="candidate_outcome"
+    }).count();
+    assert_eq!(outcomes,48);
+}
