@@ -15,6 +15,15 @@ pub struct ExperimentData {
     pub instrument: Instrument,
     pub provenance: Value,
 }
+impl ExperimentData {
+    fn verify_normalization(&self,config:&BacktestConfig)->Result<(),String>{
+        if let Some(value)=self.provenance.get("normalization").filter(|v|!v.is_null()) {
+            let bundle:sqx_data::normalization::Bundle=serde_json::from_value(value.clone()).map_err(|e|e.to_string())?;
+            bundle.verify_bars(&self.bars,config.bar_duration_ms)?;
+        }
+        Ok(())
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExperimentPlan {
@@ -83,6 +92,7 @@ impl Experiments {
         file.lock().map_err(err)?;Ok(file)
     }
     pub fn create(&self, data: &ExperimentData, mut plan: ExperimentPlan) -> Result<String,String> {
+        data.verify_normalization(&plan.config)?;
         sqx_backtest::validate_backtest_inputs(&data.bars,&data.instrument,&plan.config)?;
         crate::observation::range(&data.bars,plan.config.bar_duration_ms,&data.provenance["timeframe"])?;
         if plan.schema != 1 || plan.engine_id.is_empty() || plan.holdout_start < 2 || plan.holdout_start >= data.bars.len()
@@ -371,6 +381,7 @@ impl Experiments {
             || content_id(&bytes(&backup.data)?)!=backup.plan.dataset_id {
             return Err("experiment backup identity/integrity failure".into());
         }
+        backup.data.verify_normalization(&backup.plan.config)?;
         sqx_backtest::validate_backtest_inputs(&backup.data.bars,&backup.data.instrument,&backup.plan.config)?;
         crate::observation::range(&backup.data.bars,backup.plan.config.bar_duration_ms,&backup.data.provenance["timeframe"])?;
         if backup.plan.schema!=1 || backup.plan.holdout_start<2 || backup.plan.holdout_start>=backup.data.bars.len()

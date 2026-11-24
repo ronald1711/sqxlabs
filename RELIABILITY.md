@@ -3658,3 +3658,23 @@ independent reference cases with archive replay and future-price mutation. The
 initial assistant fixture failure reflected the intentional earlier storage
 failure; its replacement now asserts zero provider connections in that case.
 Remote verification is required separately for the published commit.
+
+### Normalization evidence retained by frozen experiments
+
+New dashboard experiments now preserve the complete optional clock-normalization
+bundle in their frozen dataset provenance. Experiment creation and backup restore
+reverify the bundle against the exact candles and declared duration. A backup
+with altered candles is rejected even if its outer dataset, plan and backup
+identities have been recomputed. Missing legacy bundles remain missing evidence;
+this change does not manufacture provenance for them.
+
+A synthetic two-hour-offset fixture verifies source retention, source-free restore,
+rehashed candle-edit rejection, invalid policy rejection and duration mismatch.
+The dashboard experiment/search/backup/restore test now includes a complete bundle
+and checks that its exact strings survive. This verifies transformation integrity,
+not the truth of the clock policy, broker identity or tick completeness. Evolution
+and other research routes still need equivalent source-bundle propagation.
+
+Both full local debug and release gates passed for the experiment normalization
+increment: workspace tests/builds, frontend checks, 37 Python tests and independent
+reference/replay/future-mutation checks. Publication and remote checks are separate.

@@ -9,6 +9,7 @@ description = "Project and databank persistence (JSON, clean-room design)."
 sqx-optimizer = { path = "../sqx-optimizer" }
 sqx-backtest = { path = "../sqx-backtest" }
 sqx-core = { path = "../sqx-core" }
+sqx-data = { path = "../sqx-data" }
 sqx-strategy = { path = "../sqx-strategy" }
 sqx-metrics = { path = "../sqx-metrics" }
 serde.workspace = true

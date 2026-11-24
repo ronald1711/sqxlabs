@@ -430,3 +430,34 @@ fn contradictory_timeframe_metadata_is_rejected_before_creating_experiment(){
     assert!(store.create(&fixture,config).unwrap_err().contains("conflicts with timeframe"));
     assert!(store.list().unwrap().is_empty());
 }
+
+#[test]
+fn normalization_sources_survive_restore_and_rehashed_candle_edits_are_rejected(){
+    use sqx_project::archive::content_id;
+    let mut utc=String::from("timestamp,open,high,low,close,volume\n");
+    let mut raw=String::from("timestamp_broker,open,high,low,close,volume\n");
+    for i in 0..100 {
+        utc.push_str(&format!("{},1,1.02,0.98,1.001,1\n",1700000040+i*60));
+        raw.push_str(&format!("{},1,1.02,0.98,1.001,1\n",1700007240+i*60));
+    }
+    let policy=json!({"schema":1,"server":"synthetic","intervals":[{"raw_start_ms":1700007240000i64,"raw_end_ms":1700013240000i64,"offset_seconds":7200,"source":"explicit synthetic offset"}]}).to_string();
+    let manifest=json!({"schema":1,"server":"synthetic","raw_sha256":content_id(raw.as_bytes()),"policy_sha256":content_id(policy.as_bytes()),"normalized_sha256":content_id(utc.as_bytes()),"rows":100,"bar_duration_ms":60000,"clock":"broker to UTC","scope":"synthetic transformation only"}).to_string();
+    let bundle=sqx_data::normalization::Bundle{manifest_json:manifest,policy_json:policy,raw_csv:raw,utc_csv:utc.clone()};
+    let original=ExperimentData{bars:sqx_data::read_csv_bars_str(&utc).unwrap(),instrument:Instrument::fx("EURUSD"),provenance:json!({"timeframe":"M1","normalization":bundle})};
+    let mut planned=plan();planned.config.bar_duration_ms=Some(60000);
+    let source=Temp::new();let archive=Experiments::new(&source.0);
+    let id=archive.create(&original,planned.clone()).unwrap();let backup=archive.backup(&id).unwrap();
+    let destination=Temp::new();let restored=Experiments::new(&destination.0);
+    restored.restore(&backup).unwrap();
+    assert_eq!(restored.backup(&id).unwrap().data.provenance,original.provenance);
+    let mut forged=backup.clone();forged.data.bars[0].close=1.002;
+    forged.plan.dataset_id=content_id(&serde_json::to_vec(&forged.data).unwrap());
+    forged.experiment_id=content_id(&serde_json::to_vec(&forged.plan).unwrap());
+    forged.checksum=forged.integrity_id().unwrap();
+    assert!(restored.restore(&forged).unwrap_err().contains("supplied candles"));
+    assert_eq!(restored.list().unwrap().len(),1);
+    let mut corrupt=original.clone();corrupt.provenance["normalization"]["policy_json"]=json!("{}");
+    assert!(archive.create(&corrupt,planned.clone()).is_err());
+    planned.config.bar_duration_ms=Some(120000);
+    assert!(archive.create(&original,planned).unwrap_err().contains("timeframe"));
+}

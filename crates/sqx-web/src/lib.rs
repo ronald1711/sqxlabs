@@ -272,6 +272,17 @@ mod tests {
     #[test]
     fn frozen_experiment_uses_saved_data_costs_and_records_all_search_trials() {
         let state=research_state();
+        let bundle={
+            let mut store=state.store.write().unwrap();let series=&mut store.series[0];
+            let mut utc=String::from("timestamp,open,high,low,close,volume\n");
+            for b in &series.bars {utc.push_str(&format!("{},{},{},{},{},{}\n",b.time/1000,b.open,b.high,b.low,b.close,b.volume));}
+            let raw=utc.replacen("timestamp,","timestamp_broker,",1);
+            let policy=json!({"schema":1,"server":"synthetic","intervals":[{"raw_start_ms":series.bars[0].time,"raw_end_ms":series.bars.last().unwrap().time+60000,"offset_seconds":0,"source":"synthetic UTC fixture"}]}).to_string();
+            let hash=|s:&str|sqx_project::archive::content_id(s.as_bytes());
+            let manifest=json!({"schema":1,"server":"synthetic","raw_sha256":hash(&raw),"policy_sha256":hash(&policy),"normalized_sha256":hash(&utc),"rows":series.bars.len(),"bar_duration_ms":60000,"clock":"explicit UTC fixture","scope":"synthetic transformation"}).to_string();
+            let bundle=sqx_data::normalization::Bundle{manifest_json:manifest,policy_json:policy,raw_csv:raw,utc_csv:utc};
+            series.normalization=Some(bundle.clone());bundle
+        };
         let split=state.store.read().unwrap().series[0].bars[140].time;
         let request=json!({"symbol":"EURUSD","holdout_start_time":split,"min_development_trades":1,"min_holdout_trades":1,"prior_exposure_disclosed":true,"deposit":4321.0});
         let created:serde_json::Value=serde_json::from_str(&experiment_json("create",&request.to_string(),&state)).unwrap();
@@ -291,6 +302,8 @@ mod tests {
         assert_eq!(again["status"]["trials_attempted"],6,"repeated searches count as additional attempts");
         assert_eq!(again["trials"][0]["report"],result["trials"][0]["report"]);
         let backup=experiment_json("backup",&json!({"experiment_id":id}).to_string(),&state);
+        let saved:serde_json::Value=serde_json::from_str(&backup).unwrap();
+        assert_eq!(saved["data"]["provenance"]["normalization"],json!(bundle));
         let restored=research_state();
         let response:serde_json::Value=serde_json::from_str(&experiment_json("restore",&backup,&restored)).unwrap();
         assert_eq!(response["trials_attempted"],6);
@@ -2407,7 +2420,7 @@ fn experiment_json(action:&str,body:&str,state:&State)->String {
                 min_development_trades:minimum("min_development_trades")?,min_holdout_trades:minimum("min_holdout_trades")?,
                 periods_per_year:pyp_for(&series.bars[..split]),prior_exposure_disclosed:disclosure};
             let data=ExperimentData{instrument:instrument_for(&series.symbol),bars:series.bars,
-                provenance:json!({"symbol":series.symbol,"timeframe":series.timeframe,"calendar":series.calendar,"quality":quality})};
+                provenance:json!({"symbol":series.symbol,"timeframe":series.timeframe,"calendar":series.calendar,"quality":quality,"normalization":series.normalization})};
             let id=store.create(&data,plan)?;
             return store.status(&id);
         }
