@@ -400,6 +400,9 @@ enum Cmd {
     },
     /// Run walk-forward optimization.
     Optimize {
+        /// Immutable inputs, per-trial checkpoints and replayable completion.
+        #[arg(long, default_value = "data/research")]
+        archive_dir: PathBuf,
         #[command(flatten)]
         research:ResearchOptions,
         #[arg(long)]
@@ -923,12 +926,23 @@ fn main() -> Result<()> {
             if !report.errors.is_empty(){anyhow::bail!(report.errors.join("; "));}
             Ok(())
         }
-        Cmd::Optimize { data, research, windows, oos, candidates, seed } => {
+        Cmd::Optimize { archive_dir, data, research, windows, oos, candidates, seed } => {
             let bars = load_bars(&data)?;
             let (inst,config,mut context)=research.prepare(&bars)?;
             let pyp = resolve_periods_per_year(bars.len(), 0.0, &bars);
             let gen = GeneratorConfig::default();
-            let report = walk_forward(&bars, &inst, &config, pyp, &gen, windows, oos, candidates, seed);
+            let pipeline=sqx_pipeline::Pipeline{name:"Standalone walk-forward discovery".into(),tasks:vec![sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::DiscoverWalkForward{windows,candidates,oos_fraction:oos}}]};
+            let archive=sqx_project::archive::Archive::new(&archive_dir);
+            let engine=archive.retain_current_engine().map_err(anyhow::Error::msg)?;
+            let dataset=serde_json::json!({"bars":bars,"instrument":inst,"timeframe":context["timeframe"],"source_context":context});
+            let specification=serde_json::json!({"pipeline":pipeline,"generator":gen});
+            let request=serde_json::json!({"research_kind":"cli_pipeline_started","attempt_id":format!("{:032x}",rand::random::<u128>()),"config":config,"seed":seed,"periods_per_year":pyp});
+            let started=archive.save(engine,dataset,specification,request,serde_json::json!({"status":"execution_not_recorded"})).map_err(anyhow::Error::msg)?;
+            println!("Optimization checkpoint: {}",serde_json::json!({"run_id":started,"root":archive_dir}));
+            std::io::Write::flush(&mut std::io::stdout())?;
+            let recovered=pipeline_archive::recover(&archive,&started,true).map_err(|e|anyhow!("Optimization stopped; use pipeline-history or replay-pipeline --resume with its checkpoint: {e}"))?;
+            println!("Optimization archive: {}",serde_json::json!({"run_id":recovered.completion_id,"started_run_id":started,"root":archive_dir,"replay_available":true}));
+            let report=recovered.report.discovery.ok_or_else(||anyhow!("Standalone walk-forward did not execute: {}",recovered.report.errors.join("; ")))?;
             println!("Walk-forward optimization ({} windows)", report.windows);
             println!("  Candidates tried  : {}", report.candidates_attempted);
             println!("  Trade evidence    : {} (not a robustness certificate)", report.evidence_sufficient);

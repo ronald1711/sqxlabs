@@ -8,7 +8,7 @@ fn generator_and_walk_forward_bind_instrument_costs_and_quality(){
     fs::write(&config,json!({"initial_deposit":25000,"spread_points":7,"commission_per_lot":5,"account":{"currency":"JPY"}}).to_string()).unwrap();
     let run=|name:&str,args:&[&str]|{
         let mut cmd=Command::new(env!("CARGO_BIN_EXE_sqx-cli"));cmd.arg(name).arg("--data").arg(&data);
-        if name=="generate"{cmd.args(["--count","2"]);}else{cmd.args(["--windows","2","--candidates","1"]);}
+        if name=="generate"{cmd.args(["--count","2"]);}else{cmd.args(["--windows","2","--candidates","1","--archive-dir"]).arg(root.join("archive"));}
         cmd.args(args).output().unwrap()
     };
     for name in ["generate","optimize"] {
@@ -36,7 +36,7 @@ fn invalid_walk_forward_returns_failure_with_preserved_context(){
     fs::write(&data,csv).unwrap();
     let output=Command::new(env!("CARGO_BIN_EXE_sqx-cli"))
         .args(["optimize","--symbol","EURUSD","--timeframe","M1","--windows","0"])
-        .arg("--data").arg(&data).output().unwrap();
+        .arg("--data").arg(&data).arg("--archive-dir").arg(root.join("archive")).output().unwrap();
     fs::remove_dir_all(root).unwrap();
     let stdout=String::from_utf8(output.stdout).unwrap();
     let context:Value=serde_json::from_str(stdout.lines().find_map(|line|line.strip_prefix("Research context: ")).expect("invalid report must retain research context")).unwrap();

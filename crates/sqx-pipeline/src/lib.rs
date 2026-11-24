@@ -18,6 +18,8 @@ pub enum TaskKind {
     Build { count: usize, keep: usize },
     Retest { mc_runs: usize, min_positive_pct: f64 },
     Optimize { windows: usize, candidates: usize },
+    /// Standalone generated search: a fresh seeded family in each training window.
+    DiscoverWalkForward { windows: usize, candidates: usize, oos_fraction: f64 },
     GoToTask { index: usize },
 }
 
@@ -37,6 +39,8 @@ pub struct Pipeline {
 /// The outcome of running a pipeline.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PipelineReport {
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub discovery: Option<sqx_optimizer::WalkForwardReport>,
     pub retests: Vec<RetestEvaluation>,
     pub builds: Vec<BuildEvaluation>,
     pub optimizations: Vec<CandidateOptimization>,
@@ -112,6 +116,9 @@ pub fn run_observed(
     observer:&mut impl FnMut(PipelineEvent<'_>)->Result<(),String>,
 )->Result<PipelineReport,String> {
     let failure=|error:String| Ok(PipelineReport{errors:vec![error],..Default::default()});
+    if pipeline.tasks.iter().any(|t|matches!(t.kind,TaskKind::DiscoverWalkForward{..})) && pipeline.tasks.len()!=1 {
+        return failure("Generated walk-forward must be a standalone task; it does not select a single deployable strategy".into());
+    }
     if let Err(error)=gen.validate(){return failure(error);}
     if let Err(error)=sqx_backtest::validate_backtest_inputs(bars,instrument,config){return failure(error);}
     for task in &pipeline.tasks {
@@ -123,7 +130,7 @@ pub fn run_observed(
             _=>{}
         }
     }
-    let mut retests=Vec::new();let mut builds=Vec::new();let mut optimizations=Vec::new();let mut errors=Vec::new();
+    let mut retests=Vec::new();let mut builds=Vec::new();let mut optimizations=Vec::new();let mut errors=Vec::new();let mut discovery=None;
     let mut rng = StdRng::seed_from_u64(seed);
     let mut databank: Vec<Strategy> = Vec::new();
     let mut log = Vec::new();
@@ -133,6 +140,13 @@ pub fn run_observed(
         steps += 1;
         observer(PipelineEvent::StepStarted{step:steps,task_index:pc,task:&pipeline.tasks[pc],inputs:&databank})?;
         match &pipeline.tasks[pc].kind {
+            TaskKind::DiscoverWalkForward{windows,candidates,oos_fraction}=>{
+                let report=sqx_optimizer::walk_forward_generated_observed(bars,instrument,config,periods_per_year,gen,*windows,*oos_fraction,*candidates,seed,&sqx_optimizer::WalkForwardCriteria::default(),&mut |event|observer(PipelineEvent::WalkForward{step:steps,candidate_index:0,event}))?;
+                errors.extend(report.errors.iter().cloned());
+                log.push(format!("Generated walk-forward: {} candidates across {} windows",report.candidates_attempted,report.windows));
+                discovery=Some(report);
+                pc+=1;
+            },
             TaskKind::Build { count, keep } => {
                 let cands: Vec<Strategy> = (0..*count)
                     .map(|i| random_strategy(&mut rng, &format!("b{steps}-{i}"), gen))
@@ -208,7 +222,7 @@ pub fn run_observed(
     }
     log.push(format!("Pipeline {} after {} steps; {} strategies in databank",if pc<pipeline.tasks.len(){"stopped at its limit"}else{"finished"}, steps, databank.len()));
     if pc<pipeline.tasks.len(){errors.push("Pipeline step limit reached before completion".into());}
-    Ok(PipelineReport {errors,retests,builds,optimizations,databank, log })
+    Ok(PipelineReport {errors,retests,builds,optimizations,discovery,databank, log })
 }
 
 /// A default demo pipeline: Build -> Retest -> Optimize.
