@@ -58,11 +58,13 @@ fn killed_generation_retains_trials_and_can_be_inspected_without_source_files(){
         serde_json::from_slice::<Value>(&output.stdout).unwrap()["result"].clone()
     };
     let response=call(&store,"generation_resume",json!({"search_id":search_id}));
+    assert_ne!(response["isError"],true,"generation resume failed: {response}");
     let recovered:Value=serde_json::from_str(response["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(recovered["evaluations_recorded"],64);assert_eq!(recovered["previous_results_replayed"].as_u64().unwrap() as usize,results.len());
     assert_eq!(recovered["new_results_recorded"].as_u64().unwrap() as usize,64-results.len());
     let before=archive.list().unwrap();
     let response=call(&store,"generation_resume",json!({"search_id":search_id}));
+    assert_ne!(response["isError"],true,"repeated generation resume failed: {response}");
     let repeated:Value=serde_json::from_str(response["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(repeated["completion_id"],recovered["completion_id"]);assert_eq!(repeated["new_results_recorded"],0);assert_eq!(archive.list().unwrap(),before);
     // Independently started process, same seeded family: recovery must reproduce
