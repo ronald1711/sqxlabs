@@ -743,6 +743,7 @@ dependencies = [
  "sqx-core",
  "sqx-metrics",
  "sqx-optimizer",
+ "sqx-portfolio",
  "sqx-robustness",
  "sqx-strategy",
 ]
@@ -751,6 +752,8 @@ dependencies = [
 name = "sqx-portfolio"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "sqx-backtest",
  "sqx-core",
  "sqx-metrics",

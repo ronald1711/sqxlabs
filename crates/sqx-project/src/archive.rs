@@ -31,7 +31,36 @@ pub struct ResearchBundle {
 
 #[derive(Debug, Clone)]
 pub struct Archive { root: PathBuf }
+// An operation-local validation set for immutable shared inputs. Never retained
+// across requests; each run payload is read and hash-checked on every access.
+pub(crate) struct RecordSession<'a>{archive:&'a Archive,validated:std::collections::BTreeSet<(&'static str,String)>}
+impl RecordSession<'_>{
+    pub(crate) fn load_run(&mut self,id:&str)->Result<RunRecord,String>{
+        let run=self.archive.read_run(id)?;self.validate_inputs(&run)?;Ok(run)
+    }
+    fn validate_inputs(&mut self,run:&RunRecord)->Result<(),String>{
+        for (kind,input_id) in [("datasets",&run.dataset_id),("strategies",&run.strategy_id)]{
+            let key=(kind,input_id.clone());
+            if !self.validated.contains(&key){
+                let _:Value=serde_json::from_slice(&self.archive.read_blob(kind,input_id)?).map_err(|e|e.to_string())?;
+                self.validated.insert(key);
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn save_run(&mut self,run:&RunRecord)->Result<String,String>{
+        if run.schema!=1{return Err("unsupported research archive schema".into());}
+        self.validate_inputs(run)?;self.archive.write_blob("runs",&encode(run)?)
+    }
+    /// Publish a checked record whose immutable inputs already exist here.
+    pub(crate) fn restore_run(&mut self,id:&str,run:&RunRecord)->Result<String,String>{
+        let bytes=encode(run)?;
+        if run.schema!=1 || content_id(&bytes)!=id{return Err("research backup failed integrity validation".into());}
+        self.validate_inputs(run)?;self.archive.write_blob("runs",&bytes)
+    }
+}
 impl Archive {
+    pub(crate) fn record_session(&self)->RecordSession<'_>{RecordSession{archive:self,validated:Default::default()}}
     pub fn new(root: impl Into<PathBuf>) -> Self { Self {root:root.into()} }
     fn path(&self, kind: &str, id: &str) -> Result<PathBuf,String> {
         if !valid_id(id) { return Err("invalid archive identifier".into()); }
@@ -82,19 +111,12 @@ impl Archive {
     pub fn list(&self)->Result<Vec<String>,String>{
         let dir=self.root.join("runs");if !dir.exists(){return Ok(Vec::new());}
         let mut ids=Vec::new();
-        // Immutable inputs are shared by many trial records. Revalidate each
-        // referenced object once per listing, never cache across calls or kinds.
-        let mut validated=std::collections::BTreeSet::new();
+        let mut reader=self.record_session();
         for entry in fs::read_dir(dir).map_err(|e|e.to_string())? {
             let path=entry.map_err(|e|e.to_string())?.path();
             if path.extension().and_then(|v|v.to_str())!=Some("json"){continue;}
             if let Some(id)=path.file_stem().and_then(|v|v.to_str()).filter(|id|valid_id(id)) {
-                let run=self.read_run(id)?;
-                for (kind,input_id) in [("datasets",run.dataset_id),("strategies",run.strategy_id)]{
-                    if validated.insert((kind,input_id.clone())){
-                        let _:Value=serde_json::from_slice(&self.read_blob(kind,&input_id)?).map_err(|e|e.to_string())?;
-                    }
-                }
+                reader.load_run(id)?;
                 ids.push(id.into());
             }
         }
@@ -153,4 +175,44 @@ impl Archive {
         let id=content_id(&bytes);
         self.retain_engine(&bytes,&id)
     }
+}
+
+#[cfg(test)]
+mod record_session_tests{
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn scoped_reads_validate_inputs_once_but_never_cache_runs_or_failed_validation(){
+        let dir=std::env::temp_dir().join(format!("sqx-reader-{:032x}",rand::random::<u128>()));
+        struct Cleanup(PathBuf);impl Drop for Cleanup{fn drop(&mut self){let _=fs::remove_dir_all(&self.0);}}let _cleanup=Cleanup(dir.clone());
+        let archive=Archive::new(dir);let id=archive.save("engine".into(),json!([1,2,3]),json!({"rules":[]}),json!({}),json!({})).unwrap();
+        let bundle=archive.load(&id).unwrap();let input=archive.path("datasets",&bundle.run.dataset_id).unwrap();let original=fs::read(&input).unwrap();
+        fs::write(&input,b"corrupted").unwrap();let mut reader=archive.record_session();
+        assert!(reader.load_run(&id).is_err());assert!(reader.validated.is_empty());
+        assert!(reader.load_run(&id).is_err(),"a failed input check must not be cached");
+        fs::write(&input,&original).unwrap();reader.load_run(&id).unwrap();assert_eq!(reader.validated.len(),2);
+        reader.load_run(&id).unwrap();assert_eq!(reader.validated.len(),2);
+        let path=archive.path("runs",&id).unwrap();let run=fs::read(&path).unwrap();fs::write(&path,b"corrupted").unwrap();
+        assert!(reader.load_run(&id).is_err(),"run payloads must always be checked");fs::write(&path,run).unwrap();
+        fs::remove_file(&input).unwrap();assert!(archive.record_session().load_run(&id).is_err(),"a new request must validate shared inputs again");
+    }
+    #[test]
+    fn record_publication_requires_valid_identity_and_existing_inputs(){
+        let dir=std::env::temp_dir().join(format!("sqx-record-import-{:032x}",rand::random::<u128>()));
+        struct Cleanup(PathBuf);impl Drop for Cleanup{fn drop(&mut self){let _=fs::remove_dir_all(&self.0);}}let _cleanup=Cleanup(dir.clone());
+        let source=Archive::new(dir.join("source"));let id=source.save("engine".into(),json!([1]),json!({}),json!({}),json!({})).unwrap();let bundle=source.load(&id).unwrap();
+        let target=Archive::new(dir.join("target"));
+        assert!(target.record_session().restore_run(&id,&bundle.run).is_err());assert!(target.list().unwrap().is_empty());
+        target.restore(&bundle).unwrap();let mut next=bundle.run.clone();next.request=json!({"sequence":1});let next_id=content_id(&encode(&next).unwrap());
+        let mut session=target.record_session();assert!(session.restore_run(&id,&next).is_err());assert_eq!(target.list().unwrap(),vec![id]);
+        assert_eq!(session.restore_run(&next_id,&next).unwrap(),next_id);assert_eq!(session.restore_run(&next_id,&next).unwrap(),next_id);
+        assert_eq!(target.list().unwrap().len(),2);
+        let mut generated=next.clone();generated.request=json!({"sequence":2});
+        let traditional=target.save(generated.engine_id.clone(),bundle.dataset.clone(),bundle.strategy.clone(),generated.request.clone(),generated.result.clone()).unwrap();
+        assert_eq!(session.save_run(&generated).unwrap(),traditional,"sharing inputs must preserve the exact record identity");
+        let mut wrong_schema=next.clone();wrong_schema.schema=2;let bad_id=content_id(&encode(&wrong_schema).unwrap());assert!(session.restore_run(&bad_id,&wrong_schema).is_err());assert_eq!(target.list().unwrap().len(),3);
+        fs::write(target.path("strategies",&next.strategy_id).unwrap(),b"bad").unwrap();
+        assert!(target.record_session().restore_run(&next_id,&next).is_err(),"new imports must detect corrupted shared inputs");
+    }
+
 }

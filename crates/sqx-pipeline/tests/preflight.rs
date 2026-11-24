@@ -141,3 +141,62 @@ fn retest_journal_records_each_trial_and_stops_before_selection_on_write_failure
   assert_eq!(result.unwrap_err(),"simulated trial journal failure");assert_eq!(seen,fail_at+1);
  }
 }
+
+#[test]
+fn standalone_backtest_retains_full_execution_and_stops_at_every_failed_checkpoint(){
+ let bars:Vec<_>=(0..20).map(|i|Bar::new(i*60000,1.1,1.101,1.099,1.1,1.0)).collect();
+ let instrument=Instrument::fx("EURUSD");let config=BacktestConfig::default();let generator=GeneratorConfig::default();
+ for invalid in [false,true]{
+  let mut strategy=sqx_strategy::Strategy::new("single control");strategy.long=true;strategy.short=false;
+  for kind in [sqx_strategy::SignalKind::LongEntry,sqx_strategy::SignalKind::LongExit]{strategy.signals.push(sqx_strategy::Signal::new(kind,vec![sqx_strategy::Condition::new(sqx_strategy::Operand::Const(1.0),sqx_strategy::Comparator::Gt,sqx_strategy::Operand::Const(0.0))],sqx_strategy::Join::And));}
+  if invalid{strategy.stop_loss=Some(sqx_strategy::StopLoss::Points(-1.0));}
+  let pipeline=Pipeline{name:"single".into(),tasks:vec![Task{kind:TaskKind::Backtest{strategy:strategy.clone()}}]};
+  let expected=sqx_backtest::backtest(&strategy,&bars,&instrument,&config);
+  if !invalid{assert!(!expected.trades.is_empty());}
+  let mut events=Vec::new();
+  let result=sqx_pipeline::run_observed(&pipeline,&bars,&instrument,&config,525600.0,&generator,42,&mut |event|{events.push(serde_json::to_value(event).unwrap());Ok(())}).unwrap();
+  assert_eq!(serde_json::to_value(result.backtest.as_ref().unwrap()).unwrap(),serde_json::to_value(&expected).unwrap());
+  assert_eq!(result.errors,expected.errors);assert!(result.databank.is_empty());assert!(result.builds.is_empty());assert!(result.robustness.is_none());
+  assert_eq!(events[1]["kind"],"backtest_started");assert_eq!(events[2]["kind"],"backtest_outcome");
+  assert_eq!(events[2]["result"],serde_json::to_value(expected).unwrap());
+  for failure in 0..events.len(){
+   let mut seen=0;
+   let interrupted=sqx_pipeline::run_observed(&pipeline,&bars,&instrument,&config,525600.0,&generator,42,&mut |event|{
+    assert_eq!(serde_json::to_value(event).unwrap(),events[seen]);let index=seen;seen+=1;if index==failure{Err("checkpoint failure".into())}else{Ok(())}
+   });
+   assert_eq!(interrupted.unwrap_err(),"checkpoint failure");assert_eq!(seen,failure+1);
+  }
+  let mixed=Pipeline{name:"invalid chain".into(),tasks:vec![pipeline.tasks[0].clone(),Task{kind:TaskKind::Build{count:1,keep:1}}]};
+  let report=run(&mixed,&bars,&instrument,&config,525600.0,&generator,42);assert!(!report.errors.is_empty());assert!(report.backtest.is_none());
+ }
+}
+
+#[test]
+fn portfolio_rejections_remain_evidence_and_mixed_tasks_never_start(){
+ let bars:Vec<_>=(0..20).map(|i|Bar::new(i*60000,1.1,1.101,1.099,1.1,1.0)).collect();
+ let instrument=Instrument::fx("EURUSD");let config=BacktestConfig::default();let generator=GeneratorConfig::default();
+ let task=Task{kind:TaskKind::Portfolio{strategies:vec![sqx_strategy::Strategy::new("no signals")],selection:Default::default()}};
+ let pipeline=Pipeline{name:"insufficient portfolio".into(),tasks:vec![task.clone()]};let mut events=Vec::new();
+ let report=sqx_pipeline::run_observed(&pipeline,&bars,&instrument,&config,252.0,&generator,42,&mut |event|{events.push(serde_json::to_value(event).unwrap());Ok(())}).unwrap();
+ assert!(!report.errors.is_empty());assert!(report.databank.is_empty());
+ let study=report.portfolio.unwrap();assert_eq!(study.candidates.len(),1);assert!(study.selected.is_empty());assert!(study.combined.is_none());
+ assert_eq!(events[1]["event"]["kind"],"candidate_started");assert_eq!(events[2]["event"]["kind"],"candidate_outcome");assert_eq!(events[3]["event"]["kind"],"shortlist");
+ for failure in 0..events.len(){let mut seen=0;let result=sqx_pipeline::run_observed(&pipeline,&bars,&instrument,&config,252.0,&generator,42,&mut |_|{seen+=1;if seen==failure+1{Err("disk failure".into())}else{Ok(())}});assert_eq!(result.unwrap_err(),"disk failure");assert_eq!(seen,failure+1);}
+ let mixed=Pipeline{name:"mixed".into(),tasks:vec![task,Task{kind:TaskKind::Build{count:1,keep:1}}]};
+ let result=sqx_pipeline::run_observed(&mixed,&bars,&instrument,&config,252.0,&generator,42,&mut |_|panic!("invalid workflow must not start")).unwrap();assert!(!result.errors.is_empty());assert!(result.portfolio.is_none());
+}
+
+#[test]
+fn mixed_defined_and_undefined_portfolio_scores_have_a_valid_ranking_order(){
+ use rand::SeedableRng;
+ let bars:Vec<_>=(0..1500).map(|i|{let p=1.1+(i as f64*0.07).sin()*0.01;Bar::new((1700000000+i*60)*1000,p,p+0.001,p-0.001,p,1.0)}).collect();
+ let generator=GeneratorConfig::default();let mut rng=rand::rngs::StdRng::seed_from_u64(123);
+ let strategies=(0..40).map(|i|sqx_optimizer::random_strategy(&mut rng,&format!("p{i:04}"),&generator)).collect();
+ let pipeline=Pipeline{name:"mixed ranking scores".into(),tasks:vec![Task{kind:TaskKind::Portfolio{strategies,selection:sqx_portfolio::SearchConfig{min_trades:5,shortlist_limit:4,min_subset:2,max_subset:3}}}]};
+ let report=run(&pipeline,&bars,&Instrument::fx("EURUSD"),&BacktestConfig::default(),525600.0,&generator,123);
+ assert!(report.errors.is_empty(),"{:?}",report.errors);let study=report.portfolio.unwrap();assert_eq!(study.candidates.len(),40);
+ assert!(study.candidates.iter().any(|row|!row.metrics.profit_factor.is_finite()),"fixture must exercise undefined scores");
+ assert_eq!(study.shortlist.len(),4);assert_eq!(study.subset.unwrap().attempted,10);
+ for &i in &study.shortlist{assert!(study.candidates[i].metrics.profit_factor.is_finite());assert!(study.candidates[i].metrics.number_of_trades>=5.0);}
+ for pair in study.shortlist.windows(2){assert!(study.candidates[pair[0]].metrics.profit_factor>=study.candidates[pair[1]].metrics.profit_factor);}
+}

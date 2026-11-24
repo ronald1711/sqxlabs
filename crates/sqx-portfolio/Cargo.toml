@@ -6,7 +6,11 @@ license.workspace = true
 description = "Portfolio construction: combine strategies, weights, correlation, best subset."
 
 [dependencies]
+serde.workspace = true
 sqx-core = { path = "../sqx-core" }
 sqx-strategy = { path = "../sqx-strategy" }
 sqx-backtest = { path = "../sqx-backtest" }
 sqx-metrics = { path = "../sqx-metrics" }
+
+[dev-dependencies]
+serde_json.workspace = true

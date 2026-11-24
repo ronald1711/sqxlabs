@@ -6,6 +6,7 @@ license.workspace = true
 description = "Custom projects: an ordered task pipeline (Build/Retest/Optimize/GoToTask)."
 
 [dependencies]
+sqx-portfolio = { path = "../sqx-portfolio" }
 sqx-core = { path = "../sqx-core" }
 sqx-strategy = { path = "../sqx-strategy" }
 sqx-backtest = { path = "../sqx-backtest" }

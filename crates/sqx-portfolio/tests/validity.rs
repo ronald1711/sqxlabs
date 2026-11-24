@@ -90,3 +90,49 @@ fn nonpositive_equity_does_not_fabricate_zero_returns(){
  let result=combine(&["A".into(),"B".into()],&[a,run()],&[0.5,0.5],10000.0,4,252.0);
  assert!(result.errors.is_empty());assert!(result.correlation[0][0].is_nan());assert!(result.correlation[0][1].is_nan());
 }
+
+#[test]
+fn overflowing_subset_arithmetic_cannot_select_a_portfolio(){
+ let mut component=run();component.initial_deposit=1e308;component.final_equity=-1e308;
+ for sample in &mut component.equity{sample.1=-1e308;}
+ let combined=combine(&["A".into(),"B".into()],&[component.clone(),component.clone()],&[0.5,0.5],1e308,4,252.0);
+ assert!(!combined.errors.is_empty());assert!(combined.equity.is_empty());
+ assert!(best_subset(&[component.clone(),component],2,2,1e308).is_empty(),"nonfinite combined arithmetic must not select the first subset");
+}
+
+#[test]
+fn subset_checkpoints_match_hand_calculations_and_stop_on_write_failure(){
+ let mut a=run();let mut b=run();let c=run();
+ for (sample,value) in a.equity.iter_mut().zip([10000.0,10100.0,10050.0,10200.0]){sample.1=value;}a.final_equity=10200.0;
+ for (sample,value) in b.equity.iter_mut().zip([10000.0,9900.0,10100.0,10100.0]){sample.1=value;}b.final_equity=10100.0;
+ let inputs=[a,b,c];let mut events=Vec::new();
+ let result=sqx_portfolio::best_subset_observed(&inputs,2,2,10000.0,&mut |event|{events.push(serde_json::to_value(event).unwrap());Ok(())}).unwrap();
+ assert_eq!(result.selected,vec![0,1]);assert_eq!(result.attempted,3);assert_eq!(result.invalid,0);assert!(result.errors.is_empty());assert_eq!(events.len(),6);
+ for (index,(components,np,dd,score)) in [
+  (vec![0,1],150.0,0.0,serde_json::json!("PositiveNoDrawdown")),
+  (vec![0,2],100.0,25.0,serde_json::json!({"Ratio":4.0})),
+  (vec![1,2],50.0,50.0,serde_json::json!({"Ratio":1.0})),
+ ].into_iter().enumerate(){
+  assert_eq!(events[2*index]["kind"],"started");assert_eq!(events[2*index]["components"],serde_json::json!(components));
+  let outcome=&events[2*index+1];assert_eq!(outcome["kind"],"outcome");assert_eq!(outcome["components"],serde_json::json!(components));
+  assert_eq!(outcome["net_profit"],np);assert_eq!(outcome["max_drawdown"],dd);assert_eq!(outcome["score"],score);assert_eq!(outcome["errors"],serde_json::json!([]));
+ }
+ for failure in 0..events.len(){
+  let mut seen=0;let interrupted=sqx_portfolio::best_subset_observed(&inputs,2,2,10000.0,&mut |event|{
+   assert_eq!(serde_json::to_value(event).unwrap(),events[seen]);let index=seen;seen+=1;if index==failure{Err("journal failed".into())}else{Ok(())}
+  });assert_eq!(interrupted.unwrap_err(),"journal failed");assert_eq!(seen,failure+1);
+ }
+}
+
+#[test]
+fn subset_errors_are_explicit_and_invalid_inputs_never_start_trials(){
+ let mut invalid=run();invalid.execution.account_currency=None;
+ let report=sqx_portfolio::best_subset_observed(&[invalid],1,1,10000.0,&mut |_|panic!("invalid input must not execute a trial")).unwrap();
+ assert_eq!(report.attempted,0);assert!(report.selected.is_empty());assert!(!report.errors.is_empty());
+ let mut large=run();large.initial_deposit=1e308;large.final_equity=-1e308;for sample in &mut large.equity{sample.1=-1e308;}
+ let mut outcomes=Vec::new();let report=sqx_portfolio::best_subset_observed(&[large.clone(),large],1,2,1e308,&mut |event|{outcomes.push(serde_json::to_value(event).unwrap());Ok(())}).unwrap();
+ assert_eq!(report.attempted,3);assert_eq!(report.invalid,3);assert!(report.selected.is_empty());assert_eq!(report.errors.len(),3);
+ for row in outcomes.iter().filter(|row|row["kind"]=="outcome"){
+  assert_eq!(row["score"],"Unavailable");assert!(!row["errors"].as_array().unwrap().is_empty());assert!(row["net_profit"].is_null());
+ }
+}

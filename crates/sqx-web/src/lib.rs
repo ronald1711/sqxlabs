@@ -2260,6 +2260,8 @@ fn research_list_json(state:&State)->String{
             let tasks=bundle.strategy["pipeline"]["tasks"].as_array();
             let workflow_kind=if pipeline {
                 match tasks.filter(|tasks|tasks.len()==1).and_then(|tasks|tasks.first()).map(|task|&task["kind"]) {
+                    Some(task) if task.get("Portfolio").is_some()=>"portfolio",
+                    Some(task) if task.get("Backtest").is_some()=>"backtest",
                     Some(task) if task.get("Generate").is_some()=>"generation",
                     Some(task) if task.get("DiscoverWalkForward").is_some()=>"walk_forward",
                     Some(task) if task.get("Sensitivity").is_some_and(|s|s["scenarios"].as_array().is_some_and(|rows|rows.is_empty()))=>"monte_carlo",

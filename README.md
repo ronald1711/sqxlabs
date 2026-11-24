@@ -377,6 +377,25 @@ Successful research responses include `research_context` with the quality report
 full supplied calendar, cutoff time, symbol, timeframe and simulation settings.
 These checks do not establish broker execution parity or an untouched holdout.
 
+MCP `backtest` now records a frozen standalone study before running, including
+full execution results and errors rather than only the returned metrics summary.
+Its receipt identifies the start and completion records. The shared
+`research_history`, `research_resume`, `research_export` and `research_import`
+tools inspect, replay and restore it without the original CSV. Resuming an input
+checkpoint reruns the backtest from its beginning; this is not an intra-trade
+resume. Failed calculations remain invalid after recovery. Fresh calls create
+distinct attempts, so inspect history after an uncertain response. This adds
+provenance and repeatability, not independent execution validation.
+
+MCP `portfolio` freezes its generated candidates and seed before evaluation.
+Its research archive retains every candidate execution, including candidates
+below the five-trade threshold, the profit-factor shortlist, every tested subset
+and the final equal-weight combination. Failed calculations remain explicit and
+prevent selection. The same research history, backup and replay tools apply;
+replay verifies the recorded prefix rather than resuming inside a calculation.
+This remains exploratory selection on the supplied data, not independent
+validation. CLI/web portfolio entry points do not yet share this full journal.
+
 MCP `robustness` uses the supplied strategy as its walk-forward control and
 varies only exit distances within the same rule family. It no longer substitutes
 unrelated generated strategies. Before calculation it now freezes the inputs,
