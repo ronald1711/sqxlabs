@@ -77,9 +77,13 @@ remaining execution assumptions and unsupported cases are visible.
   CSV, restores through the web API into an empty server, and resumes all 2,016
   events while preserving the saved prefix. Responsive progress/cancellation,
   power loss and large-study limits still need verification.
-  The browser now rejects additional stress-test starts while one request in
-  that page is awaiting a response. Duplicate requests across tabs or after an
-  uncertain response still need a durable request-identity protocol.
+  The browser rejects additional starts while one request is pending and retains
+  a per-input request ID in tab session storage after an uncertain response.
+  Reusing that ID finds the original immutable study even after source deletion
+  and backup restore; conflicting input reuse is rejected. Request creation is
+  protected by a process lock. Distinct IDs still represent distinct research
+  attempts; closing/clearing the browser session requires finding the study in
+  Saved research rather than relying on the browser's retry identity.
   CLI pipelines retain exact engine bytes, frozen inputs/configuration/seed,
   a pre-execution start record, ordered stage/family events, per-build/retest
   starts and outcomes, and the full returned report before reporting errors.

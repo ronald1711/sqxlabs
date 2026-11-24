@@ -40,7 +40,7 @@ fn killed_web_stress_test_restores_partial_backup_and_resumes_without_sources(){
     for i in 0..120{csv.push_str(&format!("{},1.1,1.101,1.099,1.1,1\n",1700000000+i*60));}fs::write(&data,csv).unwrap();
     let mut strategy=json!(sqx_strategy::Strategy::new("interrupted web research"));
     strategy["signals"]=json!(["LongEntry","LongExit"].map(|kind|json!({"kind":kind,"conditions":[{"left":{"Const":1.0},"cmp":"Gt","right":{"Const":0.0}}],"join":"And","fuzzy":null})));
-    strategy["symbol"]=json!("EURUSD");strategy["allow_data_gaps"]=json!(true);
+    strategy["symbol"]=json!("EURUSD");strategy["allow_data_gaps"]=json!(true);strategy["request_key"]=json!("crash-test-request");
     let (mut server,addr)=start(&root,Some(&data));let pending=send(&addr,"/api/robustness",&strategy);
     let archive=Archive::new(root.join("data/research"));let deadline=Instant::now()+Duration::from_secs(90);
     let mut seen=std::collections::BTreeSet::new();
@@ -62,6 +62,10 @@ fn killed_web_stress_test_restores_partial_backup_and_resumes_without_sources(){
     fs::remove_file(&data).unwrap();fs::remove_dir_all(archive.root()).unwrap();
     let (_restored,addr)=start(&root,None);
     let imported=response(send(&addr,"/api/pipeline/restore",&backup));assert_eq!(imported["status"],"incomplete","{imported}");
+    let before_retry=archive.list().unwrap();
+    let repeated=response(send(&addr,"/api/robustness",&strategy));
+    assert_eq!(repeated["recovery_required"],true,"{repeated}");assert_eq!(repeated["archive"]["started_run_id"],started);
+    assert_eq!(archive.list().unwrap(),before_retry,"lost-response retry must not create or execute another study");
     let completed=response(send(&addr,"/api/pipeline/replay",&json!({"run_id":started,"resume":true})));
     assert_eq!(completed["matches"],true,"{completed}");assert_eq!(completed["replayed_events"],retained);assert!(completed["appended_events"].as_u64().unwrap()>0);
     let done=archive.load(completed["completion_id"].as_str().unwrap()).unwrap();

@@ -290,6 +290,15 @@ archive. To open an empty recovery workspace, use `serve --data-dir <empty-direc
 --data-timeframe M1`; an empty directory now permits dashboard startup for import
 and recovery. Missing or malformed source files still fail their source checks.
 
+The browser preserves a stress-test request ID in tab session storage until it
+receives a saved-study identity. Retrying the same inputs after a lost response
+or page reload reuses that ID. The server returns the existing study instead of
+starting another, including after backup restoration; changed inputs with the
+same ID are rejected. This lookup does not resume execution automatically: inspect
+the saved study and explicitly resume if needed. Closing or clearing the browser
+session loses this retry identity, so use Saved research to locate earlier work.
+Different request IDs remain separate research attempts.
+
 CLI `crosscheck` uses `--manifest` instead of inferring instruments from a folder.
 The schema-1 manifest contains a `markets` array with explicit `symbol`, `data`
 and `timeframe` per entry; optional `calendar`, `config` paths and
