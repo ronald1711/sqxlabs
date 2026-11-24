@@ -6,14 +6,13 @@ use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
 use rand::SeedableRng;
 
-use sqx_backtest::{backtest, backtest_ticks, BacktestConfig, BacktestResult};
+use sqx_backtest::{backtest, backtest_ticks, BacktestConfig};
 use sqx_core::{Bar, Instrument, Timeframe};
 use sqx_data::{DataStore, QuestdbClient, QuestdbConfig};
 use sqx_metrics::{compute as compute_metrics, render as render_metrics};
 use sqx_optimizer::{genetic_evolve_observed, rank, random_strategy, Fitness, GeneticConfig, GeneratorConfig};
 use sqx_project::{Databank, MetricSummary, Project, StrategyRecord};
 use sqx_export::{export_report as export_strategy, Engine};
-use sqx_portfolio::{backtest_all, best_subset, combine, equal_weights};
 use sqx_strategy::{render as render_pseudocode, Strategy};
 
 #[derive(Parser)]
@@ -464,6 +463,8 @@ enum Cmd {
     Doctor,
     /// Build a portfolio from generated strategies (equal weights, best subset).
     Portfolio {
+        #[arg(long, default_value="data/research")]
+        archive_dir: PathBuf,
         #[command(flatten)]
         research:ResearchOptions,
         #[arg(long)]
@@ -1132,41 +1133,36 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
-        Cmd::Portfolio { research, data, count, seed, top, min_k, max_k } => {
+        Cmd::Portfolio { archive_dir, research, data, count, seed, top, min_k, max_k } => {
+            if !(1..=2000).contains(&count) || !(2..=12).contains(&top) || min_k<2 || min_k>max_k || max_k>top {anyhow::bail!("Portfolio requires 1..2000 candidates, a shortlist of 2..12, and 2 <= min-k <= max-k <= top");}
             let bars = load_bars(&data)?;
             let (inst,cfg,mut context)=research.prepare(&bars)?;
             let pyp = resolve_periods_per_year(bars.len(), 0.0, &bars);
             let gen = GeneratorConfig::default();
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
             let strategies: Vec<Strategy> = (0..count).map(|i| random_strategy(&mut rng, &format!("p{i:04}"), &gen)).collect();
-            let names: Vec<String> = strategies.iter().map(|s| s.name.clone()).collect();
-            let results: Vec<BacktestResult> = backtest_all(&strategies, &bars, &inst, &cfg);
-            context["seed"]=serde_json::json!(seed);context["candidates_attempted"]=serde_json::json!(count);
-            context["invalid_candidates"]=serde_json::json!(results.iter().enumerate().filter(|(_,r)|!r.errors.is_empty()).map(|(i,r)|serde_json::json!({"candidate_index":i,"errors":r.errors})).collect::<Vec<_>>());
-            context["portfolio_scope"]=serde_json::json!("Weighted independent account simulations; not shared margin or joint account execution.");
+            let pipeline=sqx_pipeline::Pipeline{name:"Standalone portfolio study".into(),tasks:vec![sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::Portfolio{
+                strategies,selection:sqx_portfolio::SearchConfig{min_trades:5,shortlist_limit:top,min_subset:min_k,max_subset:max_k},
+            }}]};
+            let archive=sqx_project::archive::Archive::new(&archive_dir);
+            let engine=archive.retain_current_engine().map_err(anyhow::Error::msg)?;
+            let dataset=serde_json::json!({"bars":bars,"instrument":inst,"timeframe":context["timeframe"],"source_context":context});
+            let specification=serde_json::json!({"pipeline":pipeline,"generator":gen});
+            let request=serde_json::json!({"research_kind":"cli_pipeline_started","origin":"cli_portfolio","attempt_id":format!("{:032x}",rand::random::<u128>()),"config":cfg,"seed":seed,"periods_per_year":pyp});
+            let started=archive.save(engine,dataset,specification,request,serde_json::json!({"status":"execution_not_recorded"})).map_err(anyhow::Error::msg)?;
+            println!("Portfolio checkpoint: {}",serde_json::json!({"run_id":started,"root":archive_dir}));
+            std::io::Write::flush(&mut std::io::stdout())?;
+            let recovered=pipeline_archive::recover(&archive,&started,true).map_err(|error|anyhow!("Portfolio stopped; use pipeline-history or replay-pipeline --resume with its checkpoint: {error}"))?;
+            println!("Portfolio archive: {}",serde_json::json!({"run_id":recovered.completion_id,"started_run_id":started,"root":archive_dir,"replay_available":true}));
+            let study=recovered.report.portfolio.ok_or_else(||anyhow!("Portfolio did not execute: {}",recovered.report.errors.join("; ")))?;
+            context["seed"]=serde_json::json!(seed);context["candidates_attempted"]=serde_json::json!(study.candidates.len());
+            context["invalid_candidates"]=serde_json::json!(study.candidates.iter().enumerate().filter(|(_,row)|!row.errors.is_empty()).map(|(i,row)|serde_json::json!({"candidate_index":i,"errors":row.errors})).collect::<Vec<_>>());
+            context["portfolio_selection"]=serde_json::json!({"min_trades":5,"shortlist_limit":top,"min_subset":min_k,"max_subset":max_k,"shortlist":study.shortlist,"selected":study.selected,"subset_trials":study.subset,"errors":study.errors});
+            context["portfolio_scope"]=serde_json::json!("Weighted independent account simulations; not shared margin or joint account execution. Exploratory selection on the supplied data; not independent validation.");
             println!("Research context: {context}");
-            let mets: Vec<sqx_metrics::Metrics> = results.iter().map(|r| compute_metrics(r, bars.len(), pyp)).collect();
-            let mut order: Vec<usize> = (0..results.len()).collect();
-            order.sort_by(|&a, &b| mets[b].profit_factor.partial_cmp(&mets[a].profit_factor).unwrap_or(std::cmp::Ordering::Equal));
-            order.retain(|&i| results[i].errors.is_empty() && mets[i].number_of_trades >= 5.0 && mets[i].profit_factor.is_finite());
-            order.truncate(top);
-            if order.len() < 2 {
-                println!("Not enough qualifying strategies to build a portfolio");
-                return Ok(());
-            }
-            let sel: Vec<BacktestResult> = order.iter().map(|&i| results[i].clone()).collect();
-            let sel_names: Vec<String> = order.iter().map(|&i| names[i].clone()).collect();
-            let subset = best_subset(&sel, min_k, max_k, cfg.initial_deposit);
-            if subset.len() < 2 {
-                println!("No subset found");
-                return Ok(());
-            }
-            let comp: Vec<BacktestResult> = subset.iter().map(|&i| sel[i].clone()).collect();
-            let comp_names: Vec<String> = subset.iter().map(|&i| sel_names[i].clone()).collect();
-            let weights = equal_weights(comp.len());
-            let pf = combine(&comp_names, &comp, &weights, cfg.initial_deposit, bars.len(), pyp);
-            if !pf.errors.is_empty(){return Err(anyhow!(pf.errors.join("; ")));}
-            println!("Portfolio of {} strategies (equal weights)", comp.len());
+            if !study.errors.is_empty(){return Err(anyhow!(study.errors.join("; ")));}
+            let pf=study.combined.ok_or_else(||anyhow!("Portfolio has no combined result"))?;
+            println!("Portfolio of {} strategies (equal weights)", pf.components.len());
             println!("  Net profit {:.2} | PF {:.2} | Max DD {:.2}% | Return/DD {:.2} | Sharpe {:.2}", pf.metrics.net_profit, pf.metrics.profit_factor, pf.metrics.max_drawdown_pct, pf.metrics.return_dd_ratio, pf.metrics.sharpe_ratio);
             println!("  Components:");
             for c in &pf.components {

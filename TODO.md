@@ -274,8 +274,8 @@ See [README.md](README.md) for operation and [ci/README.md](ci/README.md) for ch
   Observer failure boundaries and rejected-candidate retention are tested.
   A 100-candidate/781-subset fixture survives original source/archive deletion,
   portable restore and checkpoint-only replay with identical full reports and
-  completion IDs. A rejected search stays invalid after restore. CLI/web portfolio
-  routes, process-kill coverage for this route, power-loss durability and
+  completion IDs. A rejected search stays invalid after restore. Web portfolio
+  routes, MCP-specific process-kill coverage, power-loss durability and
   large-study performance remain open.
 
 - [x] Reuse validated shared inputs within one pipeline archive operation when
@@ -284,3 +284,11 @@ See [README.md](README.md) for operation and [ci/README.md](ci/README.md) for ch
   and missing inputs, failed checks, invalid record identities and unchanged IDs
   compared with the original save path. Large backup transport and power-loss
   durability remain open; no cross-request validation cache is used.
+
+- [x] Journal CLI portfolio candidates, selection settings and subset outcomes
+  before returning a selection. Insufficient evidence returns a failed study;
+  invalid request bounds fail before creating an archive. An actual process-kill
+  fixture retains an incomplete prefix, deletes the CSV/original archive, imports
+  its backup and completes all 40 candidates/10 subsets with the exact completion
+  identity of an uninterrupted run. Repeated replay adds no records. This covers
+  the CLI process boundary, not power loss or independent execution correctness.
