@@ -104,6 +104,18 @@ now been addressed in the report (see the later verification entry). Remaining
 priorities include durable per-execution checkpoints and complete account/order
 records. Actual broker correspondence remains unproven without independent fixtures.
 
+## MACD reference scope (2026-11-24)
+
+The former MACD check in `talib_crosscheck.rs` compared local MACD components
+with local EMA outputs. It is now named as an internal-consistency check rather
+than independent reference evidence. `reference.rs` additionally fixes rational
+expected values for SMA-seeded MACD(2,3), signal EMA(2) and histogram on seven
+nonlinear prices. It checks every truncated history, the first defined line and
+signal values, both histogram signs, and invariance after appending extreme
+future prices. All 13 arithmetic-reference tests pass locally in debug and
+release. The fixture supports that declared convention only: it does not prove
+TA-Lib/MT5 seed parity, all periods, missing-value behavior, or all indicators.
+
 ## Execution contract migration
 
 The legacy `intrabar_up_first` flag describes an assumed OHLC path, not a

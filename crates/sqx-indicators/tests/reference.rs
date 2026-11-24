@@ -27,6 +27,38 @@ fn ema_reference() {
 }
 
 #[test]
+fn macd_sma_seeded_reference_includes_first_signal_and_histogram() {
+    // Exact rational arithmetic for the declared SMA-seeded convention, not
+    // values produced by this crate's EMA (nor TA-Lib's late-seeded MACD).
+    // Fast EMA2 starts at 3; slow EMA3 starts at 14/3. Thereafter:
+    // fast = (2*close + previous_fast)/3; slow = (close + previous_slow)/2.
+    // Fast tail: 19/3,55/9,235/27,451/81,2395/243.
+    // Slow tail: 14/3,16/3,23/3,35/6,107/12.
+    // Signal EMA2 starts at mean(5/3,7/9)=11/9, then uses weight 2/3.
+    let close = [2.0, 4.0, 8.0, 6.0, 10.0, 4.0, 12.0];
+    let line = [f64::NAN, f64::NAN, 5.0/3.0, 7.0/9.0, 28.0/27.0, -43.0/162.0, 913.0/972.0];
+    let signal = [f64::NAN, f64::NAN, f64::NAN, 11.0/9.0, 89.0/81.0, 46.0/243.0, 335.0/486.0];
+    let histogram = [f64::NAN, f64::NAN, f64::NAN, -4.0/9.0, -5.0/81.0, -221.0/486.0, 0.25];
+    // Every truncated history must produce the same defined prefix, including
+    // empty/insufficient histories and the very first signal/histogram sample.
+    for end in 0..=close.len() {
+        let got_line = ind::macd(&close[..end], 2, 3);
+        let got_signal = ind::macd_signal(&got_line, 2);
+        assert_series(&got_line, &line[..end]);
+        assert_series(&got_signal, &signal[..end]);
+        assert_series(&ind::macd_hist(&got_line, &got_signal), &histogram[..end]);
+    }
+    // A large subsequent reversal cannot alter earlier signals.
+    let mut extended = close.to_vec();
+    extended.extend([10000.0, 0.01, 5000.0]);
+    let got_line = ind::macd(&extended, 2, 3);
+    let got_signal = ind::macd_signal(&got_line, 2);
+    assert_series(&got_line[..close.len()], &line);
+    assert_series(&got_signal[..close.len()], &signal);
+    assert_series(&ind::macd_hist(&got_line, &got_signal)[..close.len()], &histogram);
+}
+
+#[test]
 fn rsi_all_gains_is_100() {
     let r = ind::rsi(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2);
     assert!(r[..2].iter().all(|v| v.is_nan()));
