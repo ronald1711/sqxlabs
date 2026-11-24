@@ -788,3 +788,29 @@ These are independent calculations under the declared simulation contract, not
 MT5 Strategy Tester trades, actual broker fills or certified broker fees. Raw
 captures, fingerprints, plans and comparison reports remain private under work/.
 No orders or shared-terminal setting changes were performed.
+
+## Isolated MT5 tester bootstrap limitation (2026-11-24)
+
+A separate portable MT5 build 6328 installation, with its own Wine prefix and no
+copied broker credentials, ran a minimal mathematical-mode EA. Its `OnInit`
+called `CustomSymbolCreate("SQX_PROBE_ONLY", "SqxReference", "")` and captured
+`GetLastError()` immediately. The observed result was
+`SQX_CUSTOM_PROBE created=0 error=4014`. The tester reached `OnTester` (43) and
+the terminal exited with code 0. Compilation reported zero errors and warnings.
+
+This rules out creating the fixture market from this mathematical tester
+bootstrap. It does not demonstrate a market-mode backtest, any fills, or account
+parity, and does not prove that broker login is required for every alternative
+terminal bootstrap. The custom market still needs preparation in the isolated
+terminal before the reference strategy can be exercised. The shared broker
+terminal was not modified and this probe contains no order calls.
+
+Local evidence is retained under
+`work/mt5-validation/isolated-tester/custom-probe-evidence.json`; source SHA-256
+`a2250dd44528cc1583e3415b846a95f6c9b9c52ef6fd715a6e2b7a2932594039`,
+compiled EA SHA-256
+`6f3c4d99ac3f55713479f063fab76c74f323cafbc4235513b86a47dfe9b4258c`,
+and tester log snapshot SHA-256
+`14f0018824d85039cd667846b286ca087da529ef83b612b0ed00a7dd54a5981b`.
+The log is append-only during subsequent runs; its recorded hash identifies this
+observation, not a guarantee that the live log remains unchanged.
