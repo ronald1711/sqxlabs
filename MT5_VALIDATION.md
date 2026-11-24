@@ -814,3 +814,27 @@ and tester log snapshot SHA-256
 `14f0018824d85039cd667846b286ca087da529ef83b612b0ed00a7dd54a5981b`.
 The log is append-only during subsequent runs; its recorded hash identifies this
 observation, not a guarantee that the live log remains unchanged.
+
+## Read-only USDJPY volume calculation coverage (2026-11-24)
+
+The existing SiliconMetaTrader5 bridge remained connected to an EUR demo account
+with leverage 1:30. No separate terminal was started for this check. Read-only
+`order_calc_profit` and `order_calc_margin` calls supplied 16 new reference cases:
+0.01, 0.1, 1 and 2 lots, buy/sell, opening price 150 and closing price 149 or 151.
+The declared USDJPY specification was Forex calculation, JPY profit currency and
+USD margin currency. Account identity/settings were checked before and after
+the capture without retaining the login in the published fixture. EURUSD/EURJPY
+quote snapshots were unchanged before/after every case; this brackets the calls
+but does not prove atomic capture of MT5's internal conversion quote.
+
+The SqxLabs reference tests compare trade P&L, final account equity, entry margin
+and all in-position margin observations against these MT5 calculations, using
+explicit EUR-account directional profit conversion and Forex base-currency
+margin conversion. All 16 cases passed with an absolute EUR 0.005000001 tolerance
+for MT5's cent-rounded outputs. The existing eight calculation cases still pass.
+Synthetic three-candle engine inputs reproduce the requested open/close prices;
+this is calculation agreement, not actual MT5 signal/fill/timing, fee, financing,
+margin-rejection or stop-out evidence. Broker timestamps remain unnormalized in
+this fixture. No orders, account changes or Market Watch changes were made.
+
+Fixture SHA-256: `f8af22e295163fe72f9e29ffdc9991dc70aa477d6e7afc1ed52f612c22145de1`.

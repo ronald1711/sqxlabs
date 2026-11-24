@@ -1,0 +1,634 @@
+{
+  "schema": 1,
+  "source": "MT5 read-only order_calc_profit/order_calc_margin",
+  "account": {
+    "currency": "EUR",
+    "leverage": 30,
+    "trade_mode": 0
+  },
+  "instrument": {
+    "trade_contract_size": 100000.0,
+    "point": 0.001,
+    "digits": 3,
+    "volume_min": 0.01,
+    "volume_max": 100.0,
+    "volume_step": 0.01,
+    "trade_calc_mode": 0
+  },
+  "cases": [
+    {
+      "symbol": "USDJPY",
+      "direction": "buy",
+      "lots": 0.01,
+      "open": 150.0,
+      "close": 149.0,
+      "profit_account": -5.73,
+      "margin_account": 30.41,
+      "quotes_before": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_after": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_unchanged": true,
+      "host_utc_seconds": [
+        1795526642.6929631,
+        1795526642.693881
+      ]
+    },
+    {
+      "symbol": "USDJPY",
+      "direction": "buy",
+      "lots": 0.01,
+      "open": 150.0,
+      "close": 151.0,
+      "profit_account": 5.73,
+      "margin_account": 30.41,
+      "quotes_before": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_after": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_unchanged": true,
+      "host_utc_seconds": [
+        1795526642.699122,
+        1795526642.699937
+      ]
+    },
+    {
+      "symbol": "USDJPY",
+      "direction": "sell",
+      "lots": 0.01,
+      "open": 150.0,
+      "close": 149.0,
+      "profit_account": 5.73,
+      "margin_account": 30.41,
+      "quotes_before": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_after": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_unchanged": true,
+      "host_utc_seconds": [
+        1795526642.704884,
+        1795526642.7056608
+      ]
+    },
+    {
+      "symbol": "USDJPY",
+      "direction": "sell",
+      "lots": 0.01,
+      "open": 150.0,
+      "close": 151.0,
+      "profit_account": -5.73,
+      "margin_account": 30.41,
+      "quotes_before": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_after": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_unchanged": true,
+      "host_utc_seconds": [
+        1795526642.7107751,
+        1795526642.711574
+      ]
+    },
+    {
+      "symbol": "USDJPY",
+      "direction": "buy",
+      "lots": 0.1,
+      "open": 150.0,
+      "close": 149.0,
+      "profit_account": -57.34,
+      "margin_account": 304.09,
+      "quotes_before": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_after": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_unchanged": true,
+      "host_utc_seconds": [
+        1795526642.716824,
+        1795526642.7175858
+      ]
+    },
+    {
+      "symbol": "USDJPY",
+      "direction": "buy",
+      "lots": 0.1,
+      "open": 150.0,
+      "close": 151.0,
+      "profit_account": 57.34,
+      "margin_account": 304.09,
+      "quotes_before": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_after": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_unchanged": true,
+      "host_utc_seconds": [
+        1795526642.722742,
+        1795526642.723551
+      ]
+    },
+    {
+      "symbol": "USDJPY",
+      "direction": "sell",
+      "lots": 0.1,
+      "open": 150.0,
+      "close": 149.0,
+      "profit_account": 57.33,
+      "margin_account": 304.05,
+      "quotes_before": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_after": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_unchanged": true,
+      "host_utc_seconds": [
+        1795526642.728569,
+        1795526642.729422
+      ]
+    },
+    {
+      "symbol": "USDJPY",
+      "direction": "sell",
+      "lots": 0.1,
+      "open": 150.0,
+      "close": 151.0,
+      "profit_account": -57.33,
+      "margin_account": 304.05,
+      "quotes_before": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_after": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_unchanged": true,
+      "host_utc_seconds": [
+        1795526642.735662,
+        1795526642.736494
+      ]
+    },
+    {
+      "symbol": "USDJPY",
+      "direction": "buy",
+      "lots": 1.0,
+      "open": 150.0,
+      "close": 149.0,
+      "profit_account": -573.36,
+      "margin_account": 3040.95,
+      "quotes_before": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_after": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_unchanged": true,
+      "host_utc_seconds": [
+        1795526642.741795,
+        1795526642.742581
+      ]
+    },
+    {
+      "symbol": "USDJPY",
+      "direction": "buy",
+      "lots": 1.0,
+      "open": 150.0,
+      "close": 151.0,
+      "profit_account": 573.36,
+      "margin_account": 3040.95,
+      "quotes_before": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_after": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_unchanged": true,
+      "host_utc_seconds": [
+        1795526642.747731,
+        1795526642.748561
+      ]
+    },
+    {
+      "symbol": "USDJPY",
+      "direction": "sell",
+      "lots": 1.0,
+      "open": 150.0,
+      "close": 149.0,
+      "profit_account": 573.29,
+      "margin_account": 3040.5,
+      "quotes_before": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_after": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_unchanged": true,
+      "host_utc_seconds": [
+        1795526642.7534,
+        1795526642.754227
+      ]
+    },
+    {
+      "symbol": "USDJPY",
+      "direction": "sell",
+      "lots": 1.0,
+      "open": 150.0,
+      "close": 151.0,
+      "profit_account": -573.29,
+      "margin_account": 3040.5,
+      "quotes_before": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_after": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_unchanged": true,
+      "host_utc_seconds": [
+        1795526642.759315,
+        1795526642.760095
+      ]
+    },
+    {
+      "symbol": "USDJPY",
+      "direction": "buy",
+      "lots": 2.0,
+      "open": 150.0,
+      "close": 149.0,
+      "profit_account": -1146.72,
+      "margin_account": 6081.89,
+      "quotes_before": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_after": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_unchanged": true,
+      "host_utc_seconds": [
+        1795526642.7648928,
+        1795526642.765663
+      ]
+    },
+    {
+      "symbol": "USDJPY",
+      "direction": "buy",
+      "lots": 2.0,
+      "open": 150.0,
+      "close": 151.0,
+      "profit_account": 1146.72,
+      "margin_account": 6081.89,
+      "quotes_before": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_after": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_unchanged": true,
+      "host_utc_seconds": [
+        1795526642.770751,
+        1795526642.7714791
+      ]
+    },
+    {
+      "symbol": "USDJPY",
+      "direction": "sell",
+      "lots": 2.0,
+      "open": 150.0,
+      "close": 149.0,
+      "profit_account": 1146.58,
+      "margin_account": 6081.01,
+      "quotes_before": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_after": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_unchanged": true,
+      "host_utc_seconds": [
+        1795526642.777015,
+        1795526642.7778199
+      ]
+    },
+    {
+      "symbol": "USDJPY",
+      "direction": "sell",
+      "lots": 2.0,
+      "open": 150.0,
+      "close": 151.0,
+      "profit_account": -1146.58,
+      "margin_account": 6081.01,
+      "quotes_before": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_after": {
+        "EURUSD": {
+          "time_msc": 1795533842371,
+          "bid": 1.09615,
+          "ask": 1.09631
+        },
+        "EURJPY": {
+          "time_msc": 1795533842517,
+          "bid": 174.41,
+          "ask": 174.432
+        }
+      },
+      "quotes_unchanged": true,
+      "host_utc_seconds": [
+        1795526642.782463,
+        1795526642.7831738
+      ]
+    }
+  ],
+  "limitations": [
+    "Calculation API only, no actual orders or fills",
+    "Before/after quotes do not prove atomic conversion capture",
+    "No fees or financing validation",
+    "Broker timestamps not normalized"
+  ]
+}
