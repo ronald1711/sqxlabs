@@ -84,3 +84,40 @@ fn impossible_window_count_is_rejected_before_generation_or_iteration(){
     assert_eq!(report.errors.len(),1);assert_eq!(report.candidates_attempted,0);
     assert!(report.window_results.is_empty());assert!(!report.evidence_sufficient);
 }
+
+#[test]
+fn observed_walk_forward_records_every_execution_and_stops_on_storage_failure(){
+    use sqx_optimizer::{walk_forward_candidates_observed,WalkForwardEvent};
+    let cycle=[10000,10020,10040,10010,9990,10030,9980,10060,10000,10010,10050];
+    let bars:Vec<_>=(0..180).map(|i|{let p=cycle[i%cycle.len()] as f64/10000.0;Bar::new(i as i64*60000,p,p,p,p,1.0)}).collect();
+    let candidates=family();let config=BacktestConfig::default();let instrument=Instrument::fx("EURUSD");
+    let criteria=WalkForwardCriteria{min_is_trades:1,min_oos_trades_per_window:1};
+    let mut events=Vec::new();
+    let report=walk_forward_candidates_observed(&bars,&instrument,&config,525600.0,&candidates,2,0.3,42,&criteria,&mut |event|{
+        events.push(serde_json::to_value(event).unwrap());Ok(())
+    }).unwrap();
+    let plain=walk_forward_candidates(&bars,&instrument,&config,525600.0,&candidates,2,0.3,42,&criteria);
+    assert_eq!(serde_json::to_value(report).unwrap(),serde_json::to_value(plain).unwrap());
+    assert_eq!(events.len(),14);
+    for window in 0..2 {
+        let rows=&events[window*7..window*7+7];
+        assert_eq!(rows.iter().map(|r|r["kind"].as_str().unwrap()).collect::<Vec<_>>(),
+            ["family","candidate_started","candidate_outcome","candidate_started","candidate_outcome","out_of_sample_started","out_of_sample_outcome"]);
+        for index in [2,4,6] {
+            assert!(!rows[index]["execution"]["trades"].as_array().unwrap().is_empty());
+            assert!(rows[index]["execution"]["final_equity"].is_number());
+            assert_eq!(rows[index]["window"],window);
+        }
+        assert_eq!(rows[1]["candidate_index"],0);assert_eq!(rows[3]["candidate_index"],1);
+    }
+    // Failure at each registration/result boundary must propagate immediately,
+    // without accepting any later event or returning an apparently complete report.
+    for stop in 0..events.len() {
+        let mut seen=0;
+        let result=walk_forward_candidates_observed(&bars,&instrument,&config,525600.0,&candidates,2,0.3,42,&criteria,&mut |event:WalkForwardEvent<'_>|{
+            assert_eq!(serde_json::to_value(event).unwrap(),events[seen]);seen+=1;
+            if seen==stop+1{Err("storage unavailable".into())}else{Ok(())}
+        });
+        assert_eq!(result.unwrap_err(),"storage unavailable");assert_eq!(seen,stop+1);
+    }
+}

@@ -29,8 +29,11 @@ existence alone does not mean that a process is alive.
 The completion record references all event IDs. A backup must preserve the start,
 all events and completion (when present); exporting only one record is not a
 whole-search backup. Restore/replay tests cover source deletion and process kill,
-not arbitrary disk corruption or power loss. Optimization is checkpointed per
-family; individual walk-forward trials and MC samples are not resumable units.
+not arbitrary disk corruption or power loss. Optimization records each walk-forward family, candidate start/full execution
+outcome, and out-of-sample start/full execution outcome before proceeding. Resume
+still recomputes and verifies the prefix; it does not restore simulator memory.
+Individual Monte Carlo samples are not resumable units. Older engines retain
+their original family-level checkpoint coverage.
 
 Current tests compare a killed/restored/resumed search with a separate
 uninterrupted search, reject a changed event and wrong engine, verify lock

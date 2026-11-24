@@ -3,7 +3,7 @@ use serde_json::{json,Value};
 use sqx_project::archive::{Archive,ResearchBundle};
 use std::collections::BTreeMap;
 
-const SCOPE:&str="Ordered build/retest checkpoints and outcomes; optimization is recorded per family, not per walk-forward trial. Recovery replays the saved prefix before appending missing events. Full-data discovery is exploratory, not an untouched holdout.";
+const SCOPE:&str="Ordered build/retest and walk-forward trial checkpoints, with full walk-forward execution outcomes. Recovery replays the saved prefix before appending missing events. Full-data discovery is exploratory, not an untouched holdout.";
 
 fn lock(archive:&Archive,id:&str)->Result<std::fs::File,String>{
     archive.load(id)?;

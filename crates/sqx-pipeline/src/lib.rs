@@ -88,7 +88,7 @@ pub fn run(
 }
 
 /// Events precede execution/selection. Observer errors stop work immediately.
-/// Optimize outcomes are currently emitted per family, not per walk-forward trial.
+/// Optimize events include each walk-forward trial and its full execution result.
 #[derive(Debug,serde::Serialize)]
 #[serde(tag="kind",rename_all="snake_case")]
 pub enum PipelineEvent<'a> {
@@ -100,6 +100,7 @@ pub enum PipelineEvent<'a> {
     RetestOutcome { step:usize, candidate_index:usize, evaluation:&'a RetestEvaluation },
     OptimizeFamily { step:usize, candidate_index:usize, original:&'a Strategy, family:&'a [Strategy] },
     OptimizeFailure { step:usize, candidate_index:usize, original:&'a Strategy, error:&'a str },
+    WalkForward { step:usize, candidate_index:usize, event:sqx_optimizer::WalkForwardEvent<'a> },
     OptimizeOutcome { step:usize, candidate_index:usize, evaluation:&'a CandidateOptimization },
     StepSelected { step:usize, strategies:&'a [Strategy] },
 }
@@ -185,7 +186,7 @@ pub fn run_observed(
                 for (candidate_index,original) in databank.drain(..).enumerate() {
                     let family=match sqx_optimizer::parameter_family(&original,*candidates,seed,&gen.param_ranges){Ok(family)=>family,Err(error)=>{observer(PipelineEvent::OptimizeFailure{step:steps,candidate_index,original:&original,error:&error})?;errors.push(format!("{}: {error}",original.name));continue;}};
                     observer(PipelineEvent::OptimizeFamily{step:steps,candidate_index,original:&original,family:&family})?;
-                    let report=sqx_optimizer::walk_forward_candidates(bars,instrument,config,periods_per_year,&family,*windows,0.25,seed,&sqx_optimizer::WalkForwardCriteria::default());
+                    let report=sqx_optimizer::walk_forward_candidates_observed(bars,instrument,config,periods_per_year,&family,*windows,0.25,seed,&sqx_optimizer::WalkForwardCriteria::default(),&mut |event|observer(PipelineEvent::WalkForward{step:steps,candidate_index,event}))?;
                     errors.extend(report.errors.iter().map(|error|format!("{}: {error}",original.name)));
                     if report.evidence_sufficient && report.oos_net_profit>0.0 {
                         // Keep the last training-selected variant, never retrospectively
