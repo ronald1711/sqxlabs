@@ -59,7 +59,9 @@ Enable quote/trade sessions covering the fixture. Set commission and financing
 to zero explicitly; the generated INI does not configure all symbol/tester fees.
 Place the `.set` files in that isolated terminal's `MQL5/Profiles/Tester` folder
 and the compiled reference in `MQL5/Experts`. Import and verify both bars and ticks
-before any market-mode run. Do not install this workflow into the shared terminal.
+before any market-mode run. Prefer an isolated test terminal. For the explicitly
+user-started workflow inside the existing SiliconMetaTrader5 terminal, follow
+`START_HIER_NL.md`; the agent does not install or start it automatically.
 
 The generated two-sided fixture was run locally through SqxLabs and its archived
 trade prices, timestamps, exit reasons and balances matched the hand calculation.
@@ -85,3 +87,19 @@ all symbol settings or the source/binary that produced them. Retain the original
 full log, report, exact input/configuration/source/binary hashes and independent
 SqxLabs results before assessing parity. The checker prints the input log hash.
 Its unit tests use synthetic journals and do not count as an executed MT5 test.
+
+## User-started setup inside SiliconMetaTrader5
+
+`prepare_custom_symbol.mq5` is a terminal script requiring explicit
+`CreateSyntheticTestMarket=true`. It refuses tester execution and existing symbol
+names, contains no order calls, and creates/selects only `SQX_EURUSD`. It imports
+240 M1 bars / 960 ticks, including 120 warmup bars before the January 5 baseline,
+and checks both tick and candle readback before printing `SQX_FIXTURE_READY`.
+A setup error leaves the new partial symbol for inspection; no automatic deletion
+or overwrite occurs. The new setup source has not yet been compiled/executed in
+the user's terminal. Compilation and readback are required gates in the guide.
+
+The extra prehistory avoids the documented tester requirement for at least 100
+preceding bars moving the requested start date. The original 120 test candles
+and hand-calculated long/short expectations are unchanged. Setup is not execution
+parity evidence; inspect the actual tester start, ticks, settings and full logs.
