@@ -4380,7 +4380,11 @@ Two pipeline tests pass: full reports match direct configured computation and
 every observer failure boundary aborts with the exact prior event prefix. The
 frontend request test and inline syntax checks pass. An invalid twelve-cell
 matrix survives deletion/import/replay without becoming valid. Successful
-three-mode portable recovery verification is still running; full workspace,
-platform checks, rendered optimization UI and actual HTTP process-kill coverage
-remain pending for this increment. This is reproducibility evidence, not an
+three-mode portable recovery passed (67.19 seconds). A real HTTP process-kill
+test stops after a persisted walk-forward candidate outcome, deletes the source
+CSV and original archive, imports the partial backup into an empty server and
+resumes all 96 candidate outcomes. The saved prefix is unchanged; the final
+completion identity matches an uninterrupted frozen-input replay, and a second
+recovery appends nothing. Full workspace, platform checks and rendered
+optimization UI verification remain pending for this increment. This is reproducibility evidence, not an
 independent review of walk-forward arithmetic or untouched holdout provenance.
