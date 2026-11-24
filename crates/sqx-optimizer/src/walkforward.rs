@@ -91,7 +91,7 @@ fn walk_forward_impl(bars:&[Bar],instrument:&Instrument,config:&BacktestConfig,p
     let mut report=WalkForwardReport{windows:0,oos_trades:0,oos_net_profit:0.0,oos_profit_factor:f64::NAN,
         oos_winning_pct:f64::NAN,oos_max_dd_pct:f64::NAN,criteria:criteria.clone(),window_results:Vec::new(),
         candidates_attempted:0,evidence_sufficient:false,errors:Vec::new(),seed};
-    if windows==0 || bars.len()<100 || candidates_per_window==0 || !oos_fraction.is_finite() || !(0.05..=0.5).contains(&oos_fraction)
+    if windows==0 || bars.len()<100 || windows>bars.len()/60 || candidates_per_window==0 || !oos_fraction.is_finite() || !(0.05..=0.5).contains(&oos_fraction)
         || criteria.min_is_trades==0 || criteria.min_oos_trades_per_window==0 {
         report.errors.push("invalid walk-forward sizes, OOS fraction or evidence thresholds".into());return report;
     }

@@ -3523,3 +3523,36 @@ projects, research archives, raw captures and work files were excluded from the
 commit. All explicit programme requirements remain subject to their separate
 evidence gates; remote CI success does not prove broker fill parity or live
 recording/papertrading readiness. Required branch checks are not yet configured.
+
+### Independent segmented walk-forward arithmetic fixture
+
+`crates/sqx-optimizer/tests/walkforward_reference.rs` independently computes a
+small declared contract without calling engine, indicator, metrics or ranking
+helpers for its expected values: 180 synthetic EURUSD M1 candles, USD account,
+two disjoint 90-bar segments (63 training / 27 test), SMA3 long/short candidates,
+one-candle holding period with next-open exits, end-boundary liquidation, 2%
+current-cash sizing against a 100-pip sizing distance, downward 0.01-lot steps,
+$3.50/lot round-trip commission, and no spread/slippage/financing.
+
+Integer-pip prices provide a separate SMA/entry calculation. The fixture compares
+both candidates' training trade counts, net results, gross gains/losses and profit
+factors, the chosen candidate, OOS trade counts, each carried account balance and
+aggregate OOS results. Altering the first OOS segment leaves its training evidence
+and selection unchanged while changing its test outcome. The fixture requires
+wins, losses and changed carried capital, and checks first-OOS-bar eligibility
+using historical warmup. This is segmented research with positions closed at
+segment boundaries, not uninterrupted portfolio execution or MT5 fill parity.
+Other indicators, multi-timeframe warmup and untouched-holdout routes remain open.
+
+Impossible window counts are now rejected before entering the per-window loop;
+previously an enormous count could iterate and accumulate errors unnecessarily.
+
+### macOS provider-fixture correction
+
+GitHub run 45364814462 exposed a WouldBlock error in the assistant archive test's
+mock provider after accepting a connection from a nonblocking listener. The
+fixture now explicitly selects blocking accepted sockets with bounded read/write
+timeouts. A delayed-fragment test exercises this condition on every platform.
+This fixes the test transport rather than relaxing archive or engine assertions.
+The affected run is failed evidence, not a successful release gate; a later exact
+commit needs a fresh full matrix result.

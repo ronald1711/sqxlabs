@@ -55,6 +55,8 @@ remaining execution assumptions and unsupported cases are visible.
   distinguish archive record counts from independent trial counts.
 - [ ] Independently review walk-forward boundaries, warmup, capital continuity,
   minimum evidence thresholds and untouched-holdout handling across all routes.
+  A separate integer-price SMA3 fixture now checks segmented selection, warmup,
+  costs and carried capital; broader configurations and holdout remain open.
 - [ ] Make a selected strategy traceable to its full search/selection history.
 
 ## P1 — Establish remote release gates
