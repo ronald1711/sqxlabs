@@ -15,3 +15,9 @@ console.log('Evolution report passed: invalid results, undefined ratios, counts,
 result.metadata={instrument:{name:'<EURUSD>'},observation_range:[0,60000],context:{seed:42,timeframe:'M1',allow_data_gaps:true,data_quality:{bars:2,incomplete_bars:0,missing_open_intervals:0,unclassified_intervals:1,irregular_steps:0,calendar:null}},backtest_config:{initial_deposit:4321,account:{currency:'USD',max_leverage:30},spread_points:5,slippage_points:2,commission_per_lot:7,intrabar_policy:'AdverseFirst'},fitness:'ProfitFactor',genetic_config:{min_trades:10}};
 const frozen=ctx.evolutionReportHtml(result);assert.match(frozen,/saved settings, not the current controls/);assert.match(frozen,/&lt;EURUSD&gt;/);assert.match(frozen,/Initial balance 4321/);assert.match(frozen,/Spread 5 FX pips/);assert.match(frozen,/Slippage 2 FX pips/);assert.match(frozen,/1970-01-01T00:00:00.000Z/);assert.match(frozen,/1 unclassified intervals/);assert.match(frozen,/Gap allowance: explicitly enabled/);
 result.metadata.context=null;assert.match(ctx.evolutionReportHtml(result),/not a clean-data result/);
+
+for(const [status,expected] of [['verified',/file integrity was verified/],['missing',/copy is missing/],['unverified',/could not be verified/],['future_status',/has not been checked/]]) {
+ const rendered=ctx.evolutionReportHtml({...result,engine_retention:{status}});
+ assert.match(rendered,expected);assert.match(rendered,/JSON backups do not include the engine/);
+ assert.match(rendered,/does not guarantee compatibility/);
+}

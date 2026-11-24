@@ -2113,7 +2113,7 @@ fn evolution_json(action:&str,body:&str,state:&State)->String {
             "status"=>{
                 let id=value["job_id"].as_str().ok_or("job_id required")?;
                 let (status,latest)=jobs.snapshot(id)?;
-                Ok(json!({"status":status,"metadata":jobs.metadata(id)?,"latest":latest.map(|record|json!({"generation":record.generation,"evaluations":record.evaluations,"ranked":record.ranked}))}))
+                Ok(json!({"status":status,"metadata":jobs.metadata(id)?,"engine_retention":jobs.engine_retention(id)?,"latest":latest.map(|record|json!({"generation":record.generation,"evaluations":record.evaluations,"ranked":record.ranked}))}))
             },
             "list"=>{
                 let engine=engine_identity()?;let mut rows=Vec::new();for id in jobs.list()?{let metadata=jobs.metadata(&id)?;let compatible=metadata["engine_id"].as_str()==Some(engine.as_str());rows.push(json!({"status":jobs.status(&id)?,"metadata":metadata,"compatible_engine":compatible}));}Ok(json!({"jobs":rows}))

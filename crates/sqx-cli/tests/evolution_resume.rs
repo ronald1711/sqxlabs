@@ -22,6 +22,7 @@ fn separate_cli_processes_start_resume_and_reject_stale_retries(){
  let one=resume("0");assert!(one.status.success(),"{}",String::from_utf8_lossy(&one.stderr));let status:serde_json::Value=serde_json::from_slice(&one.stdout).unwrap();assert_eq!(status["committed_generations"],1);assert_eq!(status["complete"],false);
  assert!(!resume("0").status.success());let two=resume("1");assert!(two.status.success(),"{}",String::from_utf8_lossy(&two.stderr));let status:serde_json::Value=serde_json::from_slice(&two.stdout).unwrap();assert_eq!(status["complete"],true);assert_eq!(status["committed_generations"],2);
  let final_status=Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["evolution-status","--store"]).arg(&store).args(["--job-id",id]).output().unwrap();assert!(final_status.status.success());let report:serde_json::Value=serde_json::from_slice(&final_status.stdout).unwrap();assert!(!report["latest_ranked"].as_array().unwrap().is_empty());
+ assert_eq!(report["engine_retention"]["status"],"verified");
  assert_eq!(report["metadata"]["engine_id"],engine);
  assert_eq!(report["metadata"]["context"]["timeframe"],"M1");assert_eq!(report["metadata"]["backtest_config"]["spread_points"].as_f64(),Some(7.0));assert_eq!(report["metadata"]["backtest_config"]["bar_duration_ms"],60000);
  fs::remove_dir_all(root).unwrap();

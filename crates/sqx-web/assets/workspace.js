@@ -718,6 +718,9 @@ $('paper-restore').onchange=async function(){
 function evolutionReportHtml(result) {
   const status=result.status||{},latest=Object.prototype.hasOwnProperty.call(result,'latest')?result.latest:result;
   let header='<h4>Saved search results</h4><p>'+escapeHtml(status.committed_generations??0)+' generations saved · '+(status.complete?'Search complete':'Search not complete')+'</p><p class="muted">Exploratory results on the supplied data. Repeated candidates are not independent evidence; these results do not establish out-of-sample performance.</p>';
+  const retention=result.engine_retention?.status;
+  const retentionText=retention==='verified'?'The original engine copy is saved and its file integrity was verified.':retention==='missing'?'The original engine copy is missing from this archive. Keep the matching installed version before updating.':retention==='unverified'?'The saved engine copy could not be verified. Inspect the archive before relying on recovery.':'Engine-copy availability has not been checked in this response. Inspect the saved search to check it.';
+  header+='<p>'+retentionText+' Search JSON backups do not include the engine. A saved copy does not guarantee compatibility with a different computer or validate trading results.</p>';
   const metadata=result.metadata,context=metadata?.context,config=metadata?.backtest_config,quality=context?.data_quality;
   const show=value=>value===null||value===undefined?'Not recorded':escapeHtml(value);
   const date=value=>Number.isSafeInteger(value)&&Number.isFinite(new Date(value).getTime())?new Date(value).toISOString():'Not recorded';

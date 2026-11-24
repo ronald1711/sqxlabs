@@ -3879,3 +3879,25 @@ a binary neither packages its runtime dependencies nor certifies strategy result
 Validation: the CLI evolution integration test passed in debug and release;
 `cargo build --workspace` passed. This increment does not claim a new full
 workspace test run or a completed remote CI run.
+
+### Inspect recovery-engine availability separately from compatibility
+
+Explicit CLI evolution status and the dashboard's saved-search inspection now
+check the retained engine copy: `verified` means the stored regular file hashes
+to the job's engine identity, `missing` means no copy is present, and `unverified`
+means it could not be validated (including corrupt bytes, symlinks and legacy
+non-hash identifiers). Inspection never executes or replaces stored bytes. Large
+executables are hashed as a stream. This check runs on explicit inspection, not
+once per job when listing searches, and does not change compatibility gates for
+the currently running engine.
+
+The report explains that JSON backups omit engine copies and a verified copy is
+not proof of operating-system/runtime compatibility or trading correctness.
+Archive regressions cover missing, retained, corrupted, symlink and restored
+backup cases; CLI status checks the verified result and report tests cover all
+statuses, including an unknown-status fallback.
+
+Validation for engine inspection: `cargo test --workspace` and
+`cargo build --workspace` passed locally. Evolution report, recovery and restore
+JavaScript checks passed. This is automated rendering coverage; no new browser
+interaction or cross-platform CI pass is claimed for this increment yet.

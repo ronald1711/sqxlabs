@@ -264,6 +264,10 @@ impl EvolutionJobs {
   let job=self.job(id)?;let range=job.initial.observation_range();
   Ok(json!({"job_id":id,"engine_id":job.engine_id,"request_key":job.request_key,"instrument":job.initial.instrument(),"observation_range":range,"population_size":job.initial.population_size(),"context":job.context,"backtest_config":job.initial.backtest_config(),"genetic_config":job.initial.genetic_config(),"fitness":job.initial.fitness()}))
  }
+ /// Explicit inspection only: do not rehash a shared executable for every list row.
+ pub fn engine_retention(&self,id:&str)->Result<Value,String>{
+  Ok(self.archive.engine_retention(&self.job(id)?.engine_id))
+ }
  pub fn latest_record(&self,id:&str)->Result<Option<GenerationRecord>,String>{
   let (_lock,dir)=self.lock(id)?;Ok(self.latest(id,&dir)?.1.map(|row|row.1))
  }

@@ -107,6 +107,30 @@ impl Archive {
         self.write_blob("engines",bytes)
     }
 
+    /// Inspect retained bytes without executing them. A matching hash is not proof
+    /// of runtime compatibility, source provenance or independent correctness.
+    pub fn engine_retention(&self, id:&str)->Value {
+        let check=||->Result<&'static str,String>{
+            let path=self.path("engines",id)?;
+            let metadata=match fs::symlink_metadata(&path) {
+                Ok(metadata)=>metadata,
+                Err(e) if e.kind()==std::io::ErrorKind::NotFound=>return Ok("missing"),
+                Err(e)=>return Err(e.to_string()),
+            };
+            if !metadata.is_file(){return Err("retained engine is not a regular file".into());}
+            let mut file=fs::File::open(path).map_err(|e|e.to_string())?;
+            let mut hash=Sha256::new();
+            // Stream large debug executables rather than retaining another full copy.
+            std::io::copy(&mut file,&mut hash).map_err(|e|e.to_string())?;
+            if format!("{:x}",hash.finalize())!=id{return Err("retained engine integrity failure".into());}
+            Ok("verified")
+        };
+        match check() {
+            Ok(status)=>serde_json::json!({"status":status}),
+            Err(error)=>serde_json::json!({"status":"unverified","error":error}),
+        }
+    }
+
     /// This captures the executable available at call time. Call before research;
     /// do not replace a running process's executable in place.
     pub fn retain_current_engine(&self)->Result<String,String>{

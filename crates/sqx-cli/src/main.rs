@@ -857,7 +857,7 @@ fn main() -> Result<()> {
         Cmd::EvolutionStatus {store,job_id}=>{
             let jobs=sqx_project::evolution::EvolutionJobs::new(store);
             let (status,latest)=jobs.snapshot(&job_id).map_err(anyhow::Error::msg)?;
-            println!("{}",serde_json::json!({"status":status,"metadata":jobs.metadata(&job_id).map_err(anyhow::Error::msg)?,"latest_ranked":latest.map(|record|record.ranked),"interpretation":"Exploratory search; repeated generations are not independent validation."}));Ok(())
+            println!("{}",serde_json::json!({"status":status,"metadata":jobs.metadata(&job_id).map_err(anyhow::Error::msg)?,"engine_retention":jobs.engine_retention(&job_id).map_err(anyhow::Error::msg)?,"latest_ranked":latest.map(|record|record.ranked),"interpretation":"Exploratory search; repeated generations are not independent validation."}));Ok(())
         }
         Cmd::Indicators => {
             for spec in sqx_strategy::indicator_catalog() {
