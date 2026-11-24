@@ -4117,3 +4117,23 @@ Local log SHA-256 values (raw logs remain outside Git):
 This verifies narrow backup/recovery fixtures, not representative-scale transport,
 power-loss durability, UI recovery, independent MT5 execution or trading validity.
 GitHub run 45399712550 for `9a1656f` was still running when this evidence was recorded.
+
+## MCP backup scale probe (2026-11-24)
+
+A frozen local debug executable (SHA-256
+`2fb77f5cf641490b626dff72b7769fd8dbd539b0863d1145fcf13d082202707b`)
+generated 64 candidates over 2,000 synthetic candles. Export retained all 130
+records; after deleting that disposable source archive and CSV, import into a
+new store, equal re-export, and replay of all 64 outcomes passed with no invalid
+candidates or newly computed missing results.
+
+The JSON backup was 74,611,326 bytes; the MCP response was 82,450,000 bytes.
+Observed export/import/replay times were 16.545s / 58.498s / 22.805s. This reveals
+a material transport scaling limitation: shared datasets are repeated per record.
+It is a single local measurement, not a performance guarantee or peak-memory test.
+Deduplicated transport remains required before large-search usability is claimed.
+The full local report is `work/mt5-validation/backup-scale-64x2000/report.json`;
+backup SHA-256 is
+`681b87e25b7f308576ffe97c60195df8dd4d531ecdc8bb74a0bf9f6c569e4f15`.
+This synthetic test does not establish MT5 parity, power-loss safety or untouched
+holdout evidence.

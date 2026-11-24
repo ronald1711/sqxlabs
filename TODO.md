@@ -123,6 +123,10 @@ remaining execution assumptions and unsupported cases are visible.
 - [ ] Complete the evidence viewer and test rendered recovery flows, keyboard
   navigation and narrow-screen layouts.
 - [ ] Validate long-running research and backup/restore at representative scale.
+  A 64-candidate/2,000-candle synthetic MCP export/import/replay passed, but
+  produced 74,611,326 backup bytes (82,450,000 protocol bytes) and took 58.498s
+  to import on the local Mac. Deduplicate shared datasets/strategies in transport
+  before claiming large-search usability; retain all outcomes and exact hashes.
 - [ ] If remote hosting is introduced, implement and test authentication and access
   control first. The supported server currently restricts access to loopback.
 
