@@ -4087,3 +4087,33 @@ Validation for reference coverage reporting: all 46 Python tests passed. The
 synthetic eight-case reference fixture still passed with archive replay and
 future-price invariance. The prospective real-data run deliberately returned
 nonzero coverage_incomplete (seven exercised cases, one verified no-signal case).
+
+## MCP backup protocol verification (2026-11-24)
+
+At commit `c82703a`, a stable local `cargo test --workspace` run completed with
+418 passed, zero failed and zero ignored tests across 91 summaries. The subsequent
+`cargo build --workspace` exited successfully (one existing deprecation warning
+in sqx-web). The separate-process backup test passed in debug and release: it
+exports two candidates, deletes source archive/CSV, imports into a fresh archive,
+checks missing retained engine bytes, reimports idempotently and replays both
+results with the original MCP executable.
+
+An earlier workspace attempt failed parsing a generation-resume error response
+while another debug build was performed during execution. The test now reports
+that protocol error explicitly. The same crash/recovery test passed when the
+workspace executable remained unchanged. Concurrent rebuilding is a plausible
+cause, not a proven diagnosis: the original response text was not retained.
+The failed log remains evidence and is not replaced by the passing run.
+
+Local log SHA-256 values (raw logs remain outside Git):
+
+- `mcp-import-workspace-tests.log`: `34c3533585e5d0c13575c992d03539ed4d4215df7a48ac4ecafc79a204808f7d`
+
+- `mcp-import-workspace-tests-stable.log`: `a2afc447cfaf32d18f34ceafb1d60ccd3d72c17fda2845214c70d89618011edb`
+
+- `mcp-import-workspace-build-stable.log`: `cc22d8c41b483fb1dec30612211d4cd759039e0bf1578fbee991c6dcc1f3b607`
+
+
+This verifies narrow backup/recovery fixtures, not representative-scale transport,
+power-loss durability, UI recovery, independent MT5 execution or trading validity.
+GitHub run 45399712550 for `9a1656f` was still running when this evidence was recorded.
