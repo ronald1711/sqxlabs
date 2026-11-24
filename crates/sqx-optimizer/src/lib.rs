@@ -353,6 +353,11 @@ impl EvolutionState {
     pub fn instrument(&self)->&Instrument{&self.instrument}
     pub fn backtest_config(&self)->&BacktestConfig{&self.config}
     pub fn source_bars(&self)->&[Bar]{&self.bars}
+    /// Only population, RNG position and progress may change between checkpoints.
+    pub fn frozen_inputs_match(&self,other:&Self)->Result<bool,String>{
+        let encode=|state:&Self|serde_json::to_vec(&(state.schema,&state.generator,&state.ga,&state.kind,&state.bars,&state.instrument,&state.config,state.periods_per_year)).map_err(|e|e.to_string());
+        Ok(encode(self)?==encode(other)?)
+    }
     pub fn genetic_config(&self)->&GeneticConfig{&self.ga}
     pub fn fitness(&self)->Fitness{self.kind}
     pub fn observation_range(&self)->Option<(i64,i64)>{Some((self.bars.first()?.time,self.bars.last()?.time))}

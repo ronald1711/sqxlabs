@@ -135,3 +135,25 @@ fn replay_checks_results_and_next_state_beyond_content_integrity(){
  assert_eq!(complete.verify_replay("engine").unwrap(),40);
  assert_eq!(serde_json::to_vec(&jobs.backup(&id).unwrap()).unwrap(),before);
 }
+
+#[test]
+fn rehashed_checkpoints_cannot_change_frozen_research_inputs(){
+ let source=Temp::new();let jobs=EvolutionJobs::new(&source.0);
+ let id=jobs.create("engine","frozen-inputs",&initial()).unwrap();jobs.advance(&id,"engine",0).unwrap();
+ let backup=jobs.backup(&id).unwrap();backup.verify().unwrap();
+ for pointer in ["/state/bars/0/close","/state/config/initial_deposit","/state/periods_per_year"] {
+  let mut altered=backup.clone();let mut record:serde_json::Value=serde_json::from_str(&altered.generations[0].1).unwrap();
+  *record.pointer_mut(pointer).unwrap()=serde_json::json!(if pointer.ends_with("close"){1.1003}else{123.0});
+  let raw=record.to_string();altered.generations[0]=(sqx_project::archive::content_id(raw.as_bytes()),raw);
+  assert!(altered.verify().is_err(),"accepted changed frozen input: {pointer}");
+  let target=Temp::new();let restored=EvolutionJobs::new(&target.0);
+  assert!(restored.restore(&altered).is_err());assert!(!target.0.exists());
+  restored.restore(&backup).unwrap();
+  let history=target.0.join("evolution_history").join(&id);
+  let old=history.join(format!("{:020}-{}.json",0,backup.generations[0].0));
+  std::fs::remove_file(old).unwrap();
+  std::fs::write(history.join(format!("{:020}-{}.json",0,altered.generations[0].0)),&altered.generations[0].1).unwrap();
+  assert!(restored.status(&id).unwrap_err().contains("frozen research inputs"));
+  assert!(restored.advance(&id,"engine",1).unwrap_err().contains("frozen research inputs"));
+ }
+}

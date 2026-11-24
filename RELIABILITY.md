@@ -3703,3 +3703,25 @@ including workspace tests/builds, frontend checks, 37 Python tests and independe
 reference/replay/future-mutation checks. Frozen-input consistency across later
 checkpoint states is a separate review item; source validation of the initial
 job must not be represented as proof of every subsequent state transition.
+
+### Frozen inputs across evolution checkpoints
+
+A new regression reproduced acceptance of a generation checkpoint with changed
+source candles after recomputing its outer hash. Backup verification previously
+checked chain structure and coverage without binding every later state's immutable
+research inputs to the initial job. The correction compares schema, generator,
+genetic settings, fitness, candles, instrument, execution/account configuration
+and annualization across checkpoints. Population, RNG position and progress are
+allowed to evolve; this check does not independently prove their transition.
+
+Both backup verification/restore and stored-history reads now reject changed
+frozen inputs. Restore compares against its already-verified incoming job before
+publishing the new job header, preserving header-last publication. All eight
+evolution lifecycle tests pass, including valid restore, concurrent publication,
+replay, and rejection of rehashed candle, initial-deposit and annualization changes
+on restore, status and resume. Full profile gates are checked separately.
+
+The frozen-input correction passed both full local debug and release gates:
+workspace tests/builds, frontend checks, 37 Python tests, and independent reference,
+archive replay and future-price-mutation checks. This extends structural binding
+of checkpoints; it does not replace full transition replay or broker evidence.

@@ -86,6 +86,7 @@ impl EvolutionBackup {
    previous=Some(hash);records.push(record);
   }
   for record in &records {
+   if !job.initial.frozen_inputs_match(&record.state)?{return Err("Evolution checkpoint changed frozen research inputs".into());}
    if state.is_complete() || record.generation!=state.generation() || record.evaluations.len()!=state.population_size(){return Err("Evolution backup generation coverage failure".into());}
    state=&record.state;
   }
@@ -154,6 +155,9 @@ impl EvolutionJobs {
   lock.lock().map_err(err)?;Ok((lock,dir))
  }
  fn latest(&self,id:&str,dir:&std::path::Path)->Result<(usize,Option<(String,GenerationRecord)>),String>{
+  self.latest_for_initial(id,dir,&self.job(id)?.initial)
+ }
+ fn latest_for_initial(&self,id:&str,dir:&std::path::Path,initial:&EvolutionState)->Result<(usize,Option<(String,GenerationRecord)>),String>{
   let mut paths=Vec::new();for item in fs::read_dir(dir).map_err(err)?{let path=item.map_err(err)?.path();if path.extension().is_some_and(|v|v=="json"){paths.push(path);}}
   paths.sort();let mut latest:Option<(String,GenerationRecord)>=None;let count=paths.len();
   for (sequence,path) in paths.into_iter().enumerate(){
@@ -163,6 +167,7 @@ impl EvolutionJobs {
    let bytes=fs::read(&path).map_err(err)?;
    if crate::archive::content_id(&bytes)!=hash{return Err("Evolution checkpoint integrity failure".into());}
    let record:GenerationRecord=serde_json::from_slice(&bytes).map_err(err)?;
+   if !initial.frozen_inputs_match(&record.state)?{return Err("Evolution checkpoint changed frozen research inputs".into());}
    if record.schema!=1 || record.job_id!=id || record.sequence!=sequence || record.previous.as_deref()!=latest.as_ref().map(|v|v.0.as_str()) || latest.as_ref().is_some_and(|v|v.1.state.is_complete()) {return Err("Invalid evolution history chain".into());}
    latest=Some((hash.into(),record));
   }Ok((count,latest))
@@ -220,7 +225,7 @@ impl EvolutionJobs {
   let claims=self.archive.root().join("evolution_claims").join(&backup.job_id);
   fs::create_dir_all(&history).map_err(err)?;fs::create_dir_all(&claims).map_err(err)?;
   let _job=OpenOptions::new().create(true).truncate(false).read(true).write(true).open(history.join("lock")).map_err(err)?;_job.lock().map_err(err)?;
-  self.latest(&backup.job_id,&history)?;
+  self.latest_for_initial(&backup.job_id,&history,&job.initial)?;
   let mut objects:Vec<(&str,&str,&str,PathBuf)>=Vec::new();
   for (sequence,(hash,raw)) in backup.generations.iter().enumerate(){
    let prefix=format!("{sequence:020}-");

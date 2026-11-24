@@ -7,12 +7,10 @@ description = "Random strategy generation and genetic evolution."
 
 [dependencies]
 serde.workspace = true
+serde_json.workspace = true
 sqx-core = { path = "../sqx-core" }
 sqx-strategy = { path = "../sqx-strategy" }
 sqx-backtest = { path = "../sqx-backtest" }
 sqx-metrics = { path = "../sqx-metrics" }
 rand.workspace = true
 rand_chacha = { version = "0.3.1", features = ["serde1"] }
-
-[dev-dependencies]
-serde_json.workspace = true
