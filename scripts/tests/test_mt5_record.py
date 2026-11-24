@@ -29,6 +29,7 @@ class ReconnectTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'account context changed'):
                 recorder.record_windows(journal,lambda:second,lambda *a:self.fail('history read after identity change'),1,emit=lambda _:None)
             self.assertEqual(journal.verify()[0],180)
+            self.assertEqual(journal.status()['account_binding'],'server_login_fingerprint')
         self.assertTrue(second.closed)
 
     def test_legacy_recording_stays_readable_but_cannot_gain_inferred_identity(self):
@@ -36,6 +37,7 @@ class ReconnectTests(unittest.TestCase):
             payload=capture(Client(),['EURUSD'],120,180,60)
             del payload['account']['account_fingerprint'];journal.append(payload)
             self.assertEqual(journal.verify()[0],180)
+            self.assertEqual(journal.status()['account_binding'],'legacy_settings_only')
             with self.assertRaisesRegex(ValueError,'legacy recording lacks account fingerprint'):
                 recorder.record_windows(journal,lambda:self.fail('must reject before connecting'),capture,1,emit=lambda _:None)
             self.assertEqual(journal.verify()[0],180)

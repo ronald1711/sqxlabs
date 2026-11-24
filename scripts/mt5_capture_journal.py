@@ -73,6 +73,9 @@ class Journal:
         if payload.get('tick_warmup_seconds')!=self.config['warmup_seconds'] or [m['symbol'] for m in payload['markets']]!=self.config['symbols']:
             raise ValueError('capture symbols or warmup differ from recording configuration')
         identity=payload['account']
+        fingerprint=identity.get('account_fingerprint')
+        if 'account_fingerprint' in identity and (not isinstance(fingerprint,str) or len(fingerprint)!=64 or any(c not in '0123456789abcdef' for c in fingerprint)):
+            raise ValueError('invalid recording account fingerprint')
         if identity.get('server')!=self.config['server'] or (account is not None and identity!=account):
             raise ValueError('recording account context changed')
         return identity
@@ -134,6 +137,7 @@ class Journal:
             'committed_windows':(cursor-config['broker_start'])//config['window_seconds'],
             'broker_window_seconds':[config['broker_start'],cursor],
             'next_broker_start':cursor,'account_context':account,
+            'account_binding':('not_observed' if account is None else 'server_login_fingerprint' if 'account_fingerprint' in account else 'legacy_settings_only'),
             'instrument_specifications':specs,'writer_status':'not_observed',
             'scope':'Verified committed snapshot only. Broker-clock timestamps are not UTC-normalized. Tick completeness, recorder liveness and historical specification validity are not certified.'}
 

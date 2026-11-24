@@ -712,3 +712,15 @@ All 44 Python tests passed, including same-settings login switches during captur
 and resume, and legacy rejection before connecting. Two read-only observations
 of the installed bridge produced the same new fingerprint; no account switch or
 terminal setting was performed during this real-environment check.
+
+A separate new recording at `work/mt5-validation/live-account-bound-1795527300`
+then captured [1795527300,1795527360) and resumed in another process to capture
+[1795527360,1795527420). Both committed exactly once and the journal verified two
+contiguous windows with the same fingerprint. This is observed process-resume
+evidence on the real read-only connection; it is not a simulated account-switch
+test on the user's terminal. Account-switch rejection is covered by regressions.
+
+Recording status now reports `account_binding` as `not_observed`,
+`legacy_settings_only` or `server_login_fingerprint`; malformed fingerprint fields
+are rejected. Actual status checks distinguished the two-window new journal from
+the concurrently running legacy fifteen-window probe. All 44 Python tests passed.
