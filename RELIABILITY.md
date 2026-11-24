@@ -4442,3 +4442,11 @@ web pipeline tests, all 24 frontend scripts and cross-workflow request-import
 conflict checks also pass. Full workspace and platform integration remain open.
 Retaining full results increases archive and memory requirements; scale limits
 remain an explicit unresolved requirement.
+
+Rendered pipeline review (2026-11-24): an isolated dashboard with forty flat
+EURUSD/M1 bars ran two generated candidates and retained none. The page showed
+two attempts, zero survivors, four completed tasks, no final executions and the
+saved pipeline identity with backup/recovery instructions. Exploratory and
+untouched-holdout limitations remained visible; the run button re-enabled after
+completion. This is no-survivor UI evidence, not broad visual or accessibility
+coverage. The disposable server was stopped; no terminal/broker was contacted.
