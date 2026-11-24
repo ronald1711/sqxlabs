@@ -80,8 +80,9 @@ remaining execution assumptions and unsupported cases are visible.
 - [ ] Establish a versioned release/artifact retention procedure: archive replay
   requires the exact recorded executable, not merely compatible source code.
   `scripts/retain_engine.py` now provides hash-checked local byte retention;
-  automatic retention, runtime/environment packaging and durable release
-  artifacts remain open. See ci/README.md for the manual procedure.
+  new CLI backtest/assistant/crosscheck and dashboard archive/experiment/evolution
+  creation routes now retain engine bytes automatically. Remaining routes, legacy
+  resume, runtime/environment packaging and durable release artifacts remain open. See ci/README.md for the manual procedure.
 
 ## P2 — Validate exports and paper trading
 

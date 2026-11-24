@@ -25,6 +25,8 @@ let context:Value=serde_json::from_str(output.lines().find_map(|line|line.strip_
     let receipt:Value=serde_json::from_str(stdout.lines().find_map(|l|l.strip_prefix("Backtest archive: ")).unwrap()).unwrap();
     let bundle=sqx_project::archive::Archive::new(&archive_root).load(receipt["run_id"].as_str().unwrap()).unwrap();
     assert_eq!(bundle.run.request["research_kind"],"cli_backtest");
+    let retained=archive_root.join("engines").join(format!("{}.bin",bundle.run.engine_id));
+    assert_eq!(fs::read(&retained).unwrap(),fs::read(env!("CARGO_BIN_EXE_sqx-cli")).unwrap());
     assert_eq!(bundle.dataset["ticks"].as_array().unwrap().len(),2);
     assert_eq!(bundle.dataset["ticks"][1]["time"],1700000060456i64);
     assert_eq!(bundle.run.result["trades"][0]["open_time"],1700000060456i64);

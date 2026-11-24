@@ -643,7 +643,7 @@ fn main() -> Result<()> {
             }
             let checkpoint=if let Some(root)=&archive_dir {
                 let archive=sqx_project::archive::Archive::new(root);
-                let engine=sqx_project::archive::content_id(&std::fs::read(std::env::current_exe()?)?);
+                let engine=archive.retain_current_engine().map_err(|e|anyhow!("Research engine could not be archived: {e}"))?;
                 let dataset=serde_json::json!({"symbol":symbol,"timeframe":source.timeframe,"calendar":context["calendar"],"instrument":instrument,"bars":bars,"ticks":tick_data});
                 let strategy=serde_json::to_value(&s)?;
                 let mut request=serde_json::json!({"research_kind":"cli_backtest_started","config":config,"periods_per_year":pyp,"source_context":context});
@@ -741,7 +741,7 @@ fn main() -> Result<()> {
             }
             let cfg = sqx_assistant::LlmConfig { base_url, model, api_key, max_rounds: 6 };
             let archive=sqx_project::archive::Archive::new("data/research");
-            let engine=sqx_project::archive::content_id(&std::fs::read(std::env::current_exe()?)?);
+            let engine=archive.retain_current_engine().map_err(|e|anyhow!("Research engine could not be archived: {e}"))?;
             let mut a = sqx_assistant::Assistant::new(cfg, &research.symbol, bars, instrument, pyp).with_backtest_config(simulation)
                 .with_trial_archive(archive.clone(),engine.clone(),context.clone());
             let answer=a.run(&ask);
@@ -1165,7 +1165,7 @@ fn main() -> Result<()> {
                 prepared.push((bars,instrument,config,context));
             }
             let archive=sqx_project::archive::Archive::new(&archive_dir);
-            let engine=sqx_project::archive::content_id(&std::fs::read(std::env::current_exe()?)?);
+            let engine=archive.retain_current_engine().map_err(|e|anyhow!("Research engine could not be archived: {e}"))?;
             let dataset=serde_json::json!({"markets":prepared.iter().map(|(bars,instrument,config,context)|serde_json::json!({"bars":bars,"instrument":instrument,"config":config,"source_context":context})).collect::<Vec<_>>()});
             let strategy_value=serde_json::to_value(&s)?;
             let mut request=serde_json::json!({"research_kind":"cli_crosscheck_started","minimum_trades":min_trades});

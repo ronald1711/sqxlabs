@@ -25,8 +25,20 @@ downloaded research backups. The normal replay check still rejects a different
 engine identity. The original operating system, architecture and required runtime
 libraries must remain available: retaining bytes does not package those
 dependencies or authenticate the build's source. Record that environment with
-your research. This manual procedure does not yet provide automatic retention
-on every research route or durable GitHub release artifacts.
+your research. New CLI backtests, assistant sessions and crosschecks also retain their engine
+before publishing their first checkpoint, under the selected archive's
+`engines/<engine-id>.bin`. New dashboard backtest, pipeline, robustness and
+assistant archives, experiment creation and evolution creation retain the engine
+there too. An existing damaged engine copy prevents new archive publication.
+The dashboard checks against its startup engine identity; replacing its executable
+while it runs prevents retention instead of silently relabeling results. Stop the
+process before upgrading. CLI executables must likewise not be replaced in place
+while running.
+
+This does not retroactively retain engines for old records. JSON backup/restore
+still carries only research data; copy the engine directory separately. Resuming
+legacy jobs and the remaining CLI/MCP routes do not yet guarantee automatic
+retention. Durable GitHub release artifacts and runtime packaging remain open.
 
 ## Running the gates
 

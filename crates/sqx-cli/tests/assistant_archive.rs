@@ -35,9 +35,10 @@ fn assistant_archives_candidates_after_success_and_provider_failure_and_reports_
         if !storage_ok {fs::write(root.join("data"),"block archive directory creation").unwrap();}
         let listener=TcpListener::bind("127.0.0.1:0").unwrap();listener.set_nonblocking(true).unwrap();
         let endpoint=format!("http://{}/v1",listener.local_addr().unwrap());
+        let probe=listener.try_clone().unwrap();
         let server=std::thread::spawn(move||{
             let mut requests=Vec::new();
-            for round in 0..if storage_ok {3}else{1} {
+            for round in 0..if storage_ok {3}else{0} {
                 let deadline=Instant::now()+Duration::from_secs(15);
                 let stream=loop {match listener.accept(){Ok((s,_))=>break s,Err(e) if e.kind()==std::io::ErrorKind::WouldBlock=>{assert!(Instant::now()<deadline,"provider request missing");std::thread::sleep(Duration::from_millis(10));},Err(e)=>panic!("{e}")}};
                 let mut stream=fixture_stream(stream);
@@ -62,7 +63,8 @@ fn assistant_archives_candidates_after_success_and_provider_failure_and_reports_
         let output=Command::new(env!("CARGO_BIN_EXE_sqx-cli")).current_dir(&root)
             .args(["assistant","--data","bars.csv","--symbol","EURUSD","--timeframe","M1","--base-url",&endpoint,"--api-key","fixture-secret-key","--model","fixture","--ask","private-fixture-question"])
             .output().unwrap();
-        let requests=server.join().unwrap();assert_eq!(requests.len(),if storage_ok {3}else{1});
+        let requests=server.join().unwrap();assert_eq!(requests.len(),if storage_ok {3}else{0});
+        if !storage_ok {assert_eq!(probe.accept().unwrap_err().kind(),std::io::ErrorKind::WouldBlock,"storage failure must precede every provider connection");}
         if storage_ok {assert!(requests[1]["messages"].as_array().unwrap().iter().any(|m|m["role"]=="tool"));}
         for request in &requests {
             assert!(!request.to_string().contains("cash_settlements"),"full execution evidence must stay out of provider requests");

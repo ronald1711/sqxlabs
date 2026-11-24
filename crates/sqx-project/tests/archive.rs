@@ -34,3 +34,32 @@ fn concurrent_writers_publish_one_complete_record(){
     let ids:Vec<_>=threads.into_iter().map(|t|t.join().unwrap()).collect();
     assert!(ids.iter().all(|id|id==&ids[0]));assert_eq!(a.list().unwrap(),vec![ids[0].clone()]);
 }
+
+#[test]
+fn retained_engine_is_immutable_and_not_included_in_json_backup(){
+    let temp=Temp::new();let archive=Archive::new(&temp.0);let bytes=b"synthetic engine bytes";
+    let id=content_id(bytes);
+    assert!(archive.retain_engine(bytes,&"0".repeat(64)).is_err());
+    let workers:Vec<_>=(0..4).map(|_|{let a=archive.clone();let id=id.clone();std::thread::spawn(move||a.retain_engine(bytes,&id))}).collect();
+    for worker in workers {assert_eq!(worker.join().unwrap().unwrap(),id);}
+    let path=temp.0.join("engines").join(format!("{id}.bin"));
+    assert_eq!(std::fs::read(&path).unwrap(),bytes);
+    #[cfg(unix)] {use std::os::unix::fs::PermissionsExt;assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode()&0o111,0);}
+    let run=archive.save(id.clone(),json!({}),json!({}),json!({}),json!({})).unwrap();
+    let destination=Temp::new();let restored=Archive::new(&destination.0);
+    restored.restore(&archive.load(&run).unwrap()).unwrap();
+    assert!(!destination.0.join("engines").exists(),"untrusted research backups must not transport executable bytes implicitly");
+    std::fs::write(&path,b"damaged").unwrap();
+    assert!(archive.retain_engine(bytes,&id).unwrap_err().contains("integrity"));
+    assert_eq!(std::fs::read(&path).unwrap(),b"damaged");
+}
+
+#[cfg(unix)]
+#[test]
+fn retained_engine_rejects_symlink(){
+    let temp=Temp::new();let a=Archive::new(&temp.0);let id=content_id(b"engine");
+    std::fs::create_dir_all(temp.0.join("engines")).unwrap();
+    let source=temp.0.join("source");std::fs::write(&source,b"engine").unwrap();
+    std::os::unix::fs::symlink(&source,temp.0.join("engines").join(format!("{id}.bin"))).unwrap();
+    assert!(a.retain_engine(b"engine",&id).unwrap_err().contains("regular file"));
+}

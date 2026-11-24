@@ -591,6 +591,12 @@ mod tests {
         let response:serde_json::Value=serde_json::from_str(&archived_backtest_json(&request.to_string(),&state)).unwrap();
         let id=response["archive"]["run_id"].as_str().expect("run must be archived");
         let backup=state.archive.load(id).unwrap();
+        let retained=state.archive.root().join("engines").join(format!("{}.bin",backup.run.engine_id));
+        assert_eq!(std::fs::read(&retained).unwrap(),std::fs::read(std::env::current_exe().unwrap()).unwrap());
+        std::fs::write(&retained,b"corrupt engine copy").unwrap();
+        let refused:serde_json::Value=serde_json::from_str(&archived_backtest_json(&request.to_string(),&state)).unwrap();
+        assert!(refused["error"].as_str().unwrap().contains("integrity"));
+        assert!(refused.get("archive").is_none());assert_eq!(state.archive.list().unwrap().len(),1);
         state.store.write().unwrap().series.clear();
         let replay:serde_json::Value=serde_json::from_str(&research_replay_json(&json!({"run_id":id}).to_string(),&state)).unwrap();
         assert_eq!(replay["matches"],true);
@@ -1333,7 +1339,7 @@ fn pipeline_json(body: &str, state: &State) -> String {
     let report=compute_pipeline_report(&series,&inst,&cfg,pyp,&gen,count,keep,input.seed,&research_context);
     let request=json!({"research_kind":"pipeline","config":cfg,"generator":gen,"count":count,"keep":keep,"seed":input.seed,"periods_per_year":pyp,"research_context":research_context});
     let dataset=json!(ArchivedDataset{symbol:series.symbol.clone(),timeframe:series.timeframe,instrument:inst,calendar:series.calendar.clone(),normalization:series.normalization.clone(),bars:series.bars});
-    let id=match engine_identity().and_then(|engine|state.archive.save(engine,dataset,json!({"name":"Build → Retest → Optimize","kind":"pipeline"}),request,report.clone())) {
+    let id=match retained_engine_identity(state).and_then(|engine|state.archive.save(engine,dataset,json!({"name":"Build → Retest → Optimize","kind":"pipeline"}),request,report.clone())) {
         Ok(id)=>id,Err(error)=>return json!({"error":format!("Pipeline report could not be archived: {error}")}).to_string()
     };
     if report.get("error").is_none(){databank_push(state,report["results"].as_array().expect("computed pipeline rows"));}
@@ -1649,7 +1655,7 @@ fn robustness_json(body: &str, state: &State) -> String {
     let report=compute_robustness_report(&s,&series,&inst,&spec);
     let request=json!({"research_kind":"robustness","spec":spec});
     let dataset=json!(ArchivedDataset{symbol:series.symbol.clone(),timeframe:series.timeframe,instrument:inst,calendar:series.calendar.clone(),normalization:series.normalization.clone(),bars:series.bars});
-    let id=match engine_identity().and_then(|engine|state.archive.save(engine,dataset,json!(s),request,report.clone())) {
+    let id=match retained_engine_identity(state).and_then(|engine|state.archive.save(engine,dataset,json!(s),request,report.clone())) {
         Ok(id)=>id,Err(error)=>return json!({"error":format!("Robustness report could not be archived: {error}")}).to_string()
     };
     let mut response=report;response["archive"]=json!({"run_id":id});response.to_string()
@@ -1888,7 +1894,7 @@ fn assistant_json(body: &str, state: &State) -> String {
     let simulation = match config_for_series(&val,&series){Ok(config)=>config,Err(error)=>return json!({"error":error}).to_string()};
     let quality=match research_data_quality(&series,&val,sqx_data::quality::now_ms()) {Ok(quality)=>quality,Err(error)=>return error.to_string()};
     let cfg = llm_config();
-    let engine=match engine_identity() {Ok(engine)=>engine,Err(error)=>return json!({"error":error}).to_string()};
+    let engine=match retained_engine_identity(state) {Ok(engine)=>engine,Err(error)=>return json!({"error":error}).to_string()};
     let mut a = sqx_assistant::Assistant::new(cfg, &series.symbol, series.bars.clone(), inst, pyp).with_backtest_config(simulation)
         .with_trial_archive(state.archive.clone(),engine,json!({"timeframe":series.timeframe,"calendar":series.calendar,"data_quality":quality}));
     let answer=a.run(&question);
@@ -1910,7 +1916,7 @@ fn archive_assistant_candidates(state:&State,series:&SymbolSeries,context:serde_
     let request=json!({"research_kind":"assistant_candidates","research_context":context,"data_quality":quality});
     // Provider prose, prompts and configuration are deliberately not archive inputs.
     let result=json!({"candidate_evaluations":candidates,"detail_evaluations":details,"trial_executions":executions,"session_completed":completed,"scope":"Generation and details summaries with full executed trial results. Per-trial checkpoints preserve inputs/results; provider-conversation resume and independent validation are unavailable."});
-    let engine=engine_identity()?;
+    let engine=retained_engine_identity(state)?;
     let id=state.archive.save(engine.clone(),dataset,json!({"name":"AI candidate research","kind":"assistant_candidates"}),request,result)?;
     let stored=state.archive.load(&id)?;
     Ok(json!({"run_id":id,"dataset_id":stored.run.dataset_id,"engine_id":engine,"replay_available":false}))
@@ -1950,6 +1956,12 @@ fn engine_identity() -> Result<String, String> {
         .map(|bytes|sqx_project::archive::content_id(&bytes))).clone()
 }
 
+fn retained_engine_identity(state:&State)->Result<String,String>{
+    let expected=engine_identity()?;
+    let bytes=std::fs::read(std::env::current_exe().map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+    state.archive.retain_engine(&bytes,&expected)
+}
+
 fn archived_backtest_json(body: &str, state: &State) -> String {
     let execute = || -> Result<serde_json::Value,String> {
         let value: serde_json::Value=serde_json::from_str(body).map_err(|e|e.to_string())?;
@@ -1966,7 +1978,7 @@ fn archived_backtest_json(body: &str, state: &State) -> String {
         let mut report:serde_json::Value=serde_json::from_str(&backtest_series_json(&request.to_string(),&series,&instrument)).map_err(|e|e.to_string())?;
         if report.get("error").is_some(){return Ok(report);}
         let dataset=json!(ArchivedDataset{symbol:series.symbol,timeframe:series.timeframe,instrument,calendar:series.calendar,normalization:series.normalization,bars:series.bars});
-        let engine=engine_identity()?;
+        let engine=retained_engine_identity(state)?;
         let id=state.archive.save(engine.clone(),dataset,json!(strategy),request,report.clone())?;
         let stored=state.archive.load(&id)?;
         report["archive"]=json!({"run_id":id,"dataset_id":stored.run.dataset_id,"strategy_id":stored.run.strategy_id,"engine_id":engine});
@@ -1999,7 +2011,7 @@ fn evolution_json(action:&str,body:&str,state:&State)->String {
                 let config=config_for_series(&value,&series)?;let generator=gen_config_from(&value)?;let instrument=instrument_for(&series.symbol);
                 let initial=sqx_optimizer::EvolutionState::new(input.seed,&generator,&input.ga,sqx_optimizer::Fitness::ProfitFactor,&series.bars,&instrument,&config,pyp_for(&series.bars))?;
                 let context=json!({"source":"web","seed":input.seed,"timeframe":series.timeframe,"calendar":series.calendar,"data_quality":quality,"allow_data_gaps":value.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false)});
-                let id=jobs.create_with_context(&engine_identity()?,&input.request_key,&initial,context)?;
+                let id=jobs.create_with_context(&retained_engine_identity(state)?,&input.request_key,&initial,context)?;
                 Ok(json!({"status":jobs.status(&id)?,"data_quality":quality,"interpretation":"Frozen exploratory search over all supplied data; not an untouched final test."}))
             },
             "advance"=>{
@@ -2391,7 +2403,7 @@ fn experiment_json(action:&str,body:&str,state:&State)->String {
             let minimum=|key:&str|value[key].as_u64().filter(|n|*n>0).map(|n|n as usize).ok_or_else(||format!("{key} must be positive"));
             let disclosure=value["prior_exposure_disclosed"].as_bool().ok_or("Disclose whether these data have already been inspected or tested")?;
             let config=config_for_series(&value,&series)?;
-            let plan=ExperimentPlan{schema:1,engine_id:engine_identity()?,dataset_id:String::new(),holdout_start:split,config,
+            let plan=ExperimentPlan{schema:1,engine_id:retained_engine_identity(state)?,dataset_id:String::new(),holdout_start:split,config,
                 min_development_trades:minimum("min_development_trades")?,min_holdout_trades:minimum("min_holdout_trades")?,
                 periods_per_year:pyp_for(&series.bars[..split]),prior_exposure_disclosed:disclosure};
             let data=ExperimentData{instrument:instrument_for(&series.symbol),bars:series.bars,

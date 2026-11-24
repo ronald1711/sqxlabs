@@ -3631,3 +3631,30 @@ The manual operation and restoration boundaries are documented in ci/README.md.
 Automatic retention at every research entry point, permanent release artifacts,
 OS/runtime dependency retention and representative power-loss validation remain
 open. Research backups alone still do not include the executable.
+
+### Automatic engine retention on new archive routes
+
+New CLI backtest, assistant and crosscheck runs retain the current executable
+before their first checkpoint. New dashboard backtest, pipeline, robustness and
+assistant archives, experiment creation and evolution creation also retain exact
+engine bytes under the archive's `engines/<engine-id>.bin`. The dashboard compares
+these bytes with its startup identity and refuses changed bytes. Stop processes
+before replacing executables; this is not an attestation of the loaded OS image.
+
+Retention uses immutable, synced archive publication. Existing corrupt copies
+prevent new archive publication; the CLI assistant fails before contacting its
+provider when the engine cannot be retained. JSON research backup/restore does
+not embed or execute binaries. Tests cover concurrent publication, corruption,
+symlink rejection, non-executable permissions, CLI byte equality, dashboard
+publication refusal and absence of provider connections on storage failure.
+
+Legacy job resume and other CLI/MCP paths still need integration. This does not
+retain historical engines that are already missing, package runtime dependencies,
+prove source provenance or establish permanent remote release retention.
+
+Validation for this increment: both full local debug and release gates passed,
+including workspace tests/builds, frontend checks, 37 Python tests and the eight
+independent reference cases with archive replay and future-price mutation. The
+initial assistant fixture failure reflected the intentional earlier storage
+failure; its replacement now asserts zero provider connections in that case.
+Remote verification is required separately for the published commit.

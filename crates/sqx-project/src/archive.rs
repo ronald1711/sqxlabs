@@ -35,7 +35,8 @@ impl Archive {
     pub fn new(root: impl Into<PathBuf>) -> Self { Self {root:root.into()} }
     fn path(&self, kind: &str, id: &str) -> Result<PathBuf,String> {
         if !valid_id(id) { return Err("invalid archive identifier".into()); }
-        Ok(self.root.join(kind).join(format!("{id}.json")))
+        let extension=if kind=="engines" {"bin"} else {"json"};
+        Ok(self.root.join(kind).join(format!("{id}.{extension}")))
     }
     pub(crate) fn write_blob(&self, kind: &str, bytes: &[u8]) -> Result<String,String> {
         let id=content_id(bytes);let dest=self.path(kind,&id)?;
@@ -94,4 +95,23 @@ impl Archive {
         self.save(bundle.run.engine_id.clone(),bundle.dataset.clone(),bundle.strategy.clone(),bundle.run.request.clone(),bundle.run.result.clone())
     }
     pub fn root(&self)->&Path{&self.root}
+
+    /// Retain exact engine bytes before publishing research. Never executes them.
+    /// Existing objects are verified and never replaced, even when corrupted.
+    pub fn retain_engine(&self, bytes:&[u8], expected:&str)->Result<String,String>{
+        if content_id(bytes)!=expected {return Err("engine bytes differ from the expected identity".into());}
+        let path=self.path("engines",expected)?;
+        if let Ok(metadata)=fs::symlink_metadata(&path) {
+            if !metadata.is_file(){return Err("retained engine is not a regular file".into());}
+        }
+        self.write_blob("engines",bytes)
+    }
+
+    /// This captures the executable available at call time. Call before research;
+    /// do not replace a running process's executable in place.
+    pub fn retain_current_engine(&self)->Result<String,String>{
+        let bytes=fs::read(std::env::current_exe().map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+        let id=content_id(&bytes);
+        self.retain_engine(&bytes,&id)
+    }
 }
