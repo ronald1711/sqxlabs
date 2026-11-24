@@ -4,6 +4,7 @@ const $ = id => document.getElementById(id);
 const copy = value => JSON.parse(JSON.stringify(value));
 function escapeHtml(value) { return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 let strategyModel = null, undoHistory = [], savedStrategy = '', editorView = 'visual', visualSupported = true;
+let dataContextError = '', dataContextRequest = 0;
 let dataContext = null, runHistory = [], activeProfile = null, lastRun = null;
 function announce(message) { $('workspace-message').textContent = message; $('workspace-message').hidden = !message; }
 function showView(view) {
@@ -88,8 +89,8 @@ function contextKey() { try { return JSON.stringify({strategy:readStrategy(),sym
 function updateContext() {
   let costs; try { costs=settings(); } catch { announce('Correct the conversion-rate JSON before running.'); return; }
   const name=strategyModel ? strategyModel.name : 'Loading strategy';
-  const coverage=dataContext ? `${dataContext.timeframe || ''} · ${dataContext.bars.toLocaleString()} bars · ${day(dataContext.first_time)} → ${day(dataContext.last_time)}` : 'Loading data coverage';
-  $('research-context').innerHTML=`<div><span>Current strategy</span><strong>${escapeHtml(name)}</strong></div><div><span>${escapeHtml(dataContext ? dataContext.symbol : "Selected dataset")} · full loaded dataset</span><strong>${escapeHtml(coverage)}</strong></div><div><span>Simulation costs</span><strong>Spread ${costs.spread} FX pips · Slippage ${costs.slippage} FX pips · Commission ${costs.commission}/lot · ${escapeHtml(costs.account.currency)} · Max leverage ${costs.account.max_leverage}:1</strong></div><button class="secondary" data-go="settings">Edit assumptions</button>`;
+  const coverage=dataContext ? `${dataContext.timeframe || ''} · ${dataContext.bars.toLocaleString()} bars · ${day(dataContext.first_time)} → ${day(dataContext.last_time)}` : !selectedSymbol() ? 'No market data loaded' : dataContextError || 'Loading data coverage';
+  $('research-context').innerHTML=`<div><span>Current strategy</span><strong>${escapeHtml(name)}</strong></div><div><span>${selectedSymbol()?escapeHtml(dataContext ? dataContext.symbol : "Selected dataset")+' · full loaded dataset':'Market data'}</span><strong>${escapeHtml(coverage)}</strong></div><div><span>Simulation costs</span><strong>Spread ${costs.spread} FX pips · Slippage ${costs.slippage} FX pips · Commission ${costs.commission}/lot · ${escapeHtml(costs.account.currency)} · Max leverage ${costs.account.max_leverage}:1</strong></div><button class="secondary" data-go="settings">Edit assumptions</button>${!selectedSymbol()?'<button class="secondary" data-go="data">Import or load market data</button>':''}`;
   if (lastRun) $('run-summary').textContent=(lastRun.key===contextKey() ? 'Latest run matches the current draft and costs. ' : 'Stale result — strategy, symbol or costs have changed. Run again. ')+lastRun.label;
 }
 async function readNormalizationFiles(files) {
@@ -108,10 +109,18 @@ function normalizationSummary(value) {
   return 'Clock evidence: not supplied. UTC timestamps are user-declared.';
 }
 refreshDataInfo = async function() {
-  const symbol=selectedSymbol();
-  const d=await getJSON('/api/data?symbol='+encodeURIComponent(symbol));
-  if (symbol!==selectedSymbol()) return;
-  dataContext=d.error ? null : d;
+  const symbol=selectedSymbol(), request=++dataContextRequest;
+  dataContext=null;dataContextError='';updateContext();
+  if(!symbol){
+    $('data-info').textContent='No market data loaded';
+    $('data-quality-output').textContent='Import a CSV or reload a saved dataset in Data before starting research.';
+    return;
+  }
+  let d;
+  try{d=await getJSON('/api/data?symbol='+encodeURIComponent(symbol));}
+  catch(error){d={error:'Data coverage unavailable: '+error.message};}
+  if(request!==dataContextRequest || symbol!==selectedSymbol()) return;
+  dataContext=d.error ? null : d;dataContextError=d.error || '';
   const quality=d.data_quality;
   $('data-quality-output').textContent=d.error || (quality ? [normalizationSummary(d.normalization), 'Calendar: '+(quality.calendar || 'Not specified'), 'Bars: '+quality.bars, 'Missing open intervals: '+quality.missing_open_intervals, 'Scheduled closed intervals: '+quality.scheduled_closed_intervals, 'Unclassified intervals: '+quality.unclassified_intervals, 'Irregular steps: '+quality.irregular_steps, 'Incomplete candles: '+quality.incomplete_bars, ...quality.errors].join('\n') : 'Quality report unavailable');
   $('data-info').textContent=d.error || `${d.bars.toLocaleString()} bars`;
@@ -484,7 +493,7 @@ async function refreshResearchRuns() {
       const name=document.createElement('strong');name.textContent=run.name+' · '+run.symbol;
       const mcpGeneration=['mcp_generation','mcp_generation_started','mcp_generation_trial','mcp_generation_trial_started'].includes(run.kind);
       const cliPipeline=['cli_pipeline_started','cli_pipeline_event','cli_pipeline'].includes(run.kind);
-      const researchNoun=run.workflow_kind==='generation'?'search':run.workflow_kind==='walk_forward'?'walk-forward study':run.workflow_kind==='robustness'?'robustness study':'pipeline';
+      const researchNoun=run.workflow_kind==='generation'?'search':run.workflow_kind==='walk_forward'?'walk-forward study':run.workflow_kind==='robustness'?'robustness study':run.workflow_kind==='monte_carlo'?'Monte Carlo study':'pipeline';
       const researchTitle=researchNoun[0].toUpperCase()+researchNoun.slice(1);
       const pipelineLabel=researchTitle+(run.kind==='cli_pipeline_started'?' input checkpoint':run.kind==='cli_pipeline_event'?' step record':' completion record');
       const metadata=document.createElement('p');metadata.textContent='Run '+run.run_id.slice(0,12)+' · Dataset '+run.dataset_id.slice(0,12)+' · '+(cliPipeline?pipelineLabel:mcpGeneration?'MCP generation evidence ('+run.kind+')':run.kind==='cli_backtest_started'?'CLI input checkpoint':run.kind==='cli_backtest'?'CLI execution record':run.kind==='assistant_trial_started'?'AI trial input checkpoint':run.kind==='assistant_trial'?'AI trial execution':run.kind==='assistant_candidates'?'AI session evidence':run.kind==='pipeline'?'Pipeline report':run.kind==='robustness'?'Stress-test report':'Net '+fmt(run.metrics?.net_profit,2))+' · Not independently validated';

@@ -7,6 +7,7 @@ const storage={getItem:key=>stored.get(key)||null,setItem:(key,value)=>stored.se
 const context=vm.createContext({sessionStorage:storage,crypto:{randomUUID:()=>`request-${++nextKey}`},escapeHtml:s=>String(s).replaceAll('<','&lt;').replaceAll('>','&gt;'),fmt:n=>String(n),selectedSymbol:()=> 'EURUSD',settings:()=>{if(invalid)throw Error('invalid spread');return {};},postJSON:async(url,body)=>{calls++;sent.push(JSON.parse(body));throw Error('network');}});
 vm.runInContext(source.slice(start,end),context);
 (async()=>{
+ context.selectedSymbol=()=>'';let empty=await context.requestRobustness({name:'fixture'});assert.equal(calls,0);assert.match(empty.error,/load market data in Data/);context.selectedSymbol=()=> 'EURUSD';
  let result=await context.requestRobustness({name:'fixture'});assert.equal(calls,0);assert.match(result.error,/invalid spread/);
  invalid=false;result=await context.requestRobustness({name:'fixture'});assert.equal(calls,1);assert.match(result.error,/may still be running or have saved partial progress/);assert.match(result.error,/before retrying/);
  const lostKey=sent[0].request_key;assert.equal(stored.size,1);

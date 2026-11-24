@@ -114,3 +114,30 @@ fn standalone_generation_preserves_seed_names_ranking_and_every_outcome(){
  for (index,row) in report.builds.iter().enumerate(){assert_eq!(row.evaluation.strategy,family[index]);assert_eq!(row.candidate_index,index);}
  assert_eq!(report.log.len(),2,"the generation task must advance exactly once");
 }
+
+#[test]
+fn retest_journal_records_each_trial_and_stops_before_selection_on_write_failure(){
+ let bars:Vec<_>=(0..1500).map(|i|{let p=1.1+(i as f64*0.3).sin()*0.01;Bar::new(i*60000,p,p+0.003,p-0.003,p+0.0002,10.0)}).collect();
+ let instrument=Instrument::fx("EURUSD");let config=BacktestConfig::default();let generator=GeneratorConfig::default();
+ let pipeline=Pipeline{name:"retest checkpoints".into(),tasks:vec![Task{kind:TaskKind::Build{count:100,keep:2}},Task{kind:TaskKind::Retest{mc_runs:3,min_positive_pct:0.0}}]};
+ let mut events=Vec::new();
+ let report=sqx_pipeline::run_observed(&pipeline,&bars,&instrument,&config,525600.0,&generator,42,&mut |event|{events.push(serde_json::to_value(event).unwrap());Ok(())}).unwrap();
+ assert!(!report.retests.is_empty());
+ let trial_positions:Vec<_>=events.iter().enumerate().filter(|(_,event)|event["kind"]=="retest_trial").map(|(i,_)|i).collect();
+ assert_eq!(trial_positions.len(),report.retests.len()*6,"every sampled path needs a start and outcome");
+ for (candidate,row) in report.retests.iter().enumerate(){
+  let base=events.iter().find(|event|event["kind"]=="retest_base_outcome"&&event["candidate_index"]==candidate).expect("full retest trade input");
+  let expected=sqx_backtest::backtest(&row.strategy,&bars,&instrument,&config);
+  assert_eq!(base["result"],serde_json::to_value(expected).unwrap());
+  assert_eq!(events.iter().filter(|event|event["kind"]=="retest_trial"&&event["candidate_index"]==candidate).count(),6);
+ }
+ let failure_positions:Vec<_>=events.iter().enumerate().filter(|(_,event)|matches!(event["kind"].as_str(),Some("retest_started"|"retest_base_outcome"|"retest_trial"|"retest_outcome"))).map(|(i,_)|i).collect();
+ for fail_at in failure_positions {
+  let mut seen=0;
+  let result=sqx_pipeline::run_observed(&pipeline,&bars,&instrument,&config,525600.0,&generator,42,&mut |event|{
+   assert_eq!(serde_json::to_value(event).unwrap(),events[seen]);let position=seen;seen+=1;
+   if position==fail_at{Err("simulated trial journal failure".into())}else{Ok(())}
+  });
+  assert_eq!(result.unwrap_err(),"simulated trial journal failure");assert_eq!(seen,fail_at+1);
+ }
+}

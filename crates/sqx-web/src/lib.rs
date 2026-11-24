@@ -2262,6 +2262,7 @@ fn research_list_json(state:&State)->String{
                 match tasks.filter(|tasks|tasks.len()==1).and_then(|tasks|tasks.first()).map(|task|&task["kind"]) {
                     Some(task) if task.get("Generate").is_some()=>"generation",
                     Some(task) if task.get("DiscoverWalkForward").is_some()=>"walk_forward",
+                    Some(task) if task.get("Sensitivity").is_some_and(|s|s["scenarios"].as_array().is_some_and(|rows|rows.is_empty()))=>"monte_carlo",
                     Some(task) if task.get("Robustness").is_some() || task.get("Sensitivity").is_some()=>"robustness",
                     _=>"pipeline",
                 }

@@ -9,7 +9,7 @@ fn stress_and_portfolio_commands_bind_sources_and_reject_failed_execution(){
     let csv="timestamp,open,high,low,close,volume\n1700000000,150,151,149,150,1\n1700000060,150,151,149,150,1\n";fs::write(&data,csv).unwrap();
     let run=|name:&str,args:&[&str]|{
         let mut cmd=Command::new(env!("CARGO_BIN_EXE_sqx-cli"));cmd.arg(name).arg("--data").arg(&data);
-        if name=="robustness" {cmd.arg("--archive-dir").arg(root.join("archive"));}
+        if matches!(name,"robustness"|"montecarlo") {cmd.arg("--archive-dir").arg(root.join("archive"));}
         if name=="portfolio"{cmd.args(["--count","2"]);}else{cmd.arg("--strategy").arg(&strategy);if name=="montecarlo"{cmd.args(["--runs","2"]);}else{cmd.args(["--mc-runs","2","--retest-runs","2","--windows","2"]);}}
         cmd.args(args).output().unwrap()
     };
@@ -42,7 +42,12 @@ fn stress_and_portfolio_commands_bind_sources_and_reject_failed_execution(){
         let invalid=run(name,&["--symbol","USDJPY","--timeframe","M5","--allow-data-gaps"]);assert!(!invalid.status.success());assert!(String::from_utf8_lossy(&invalid.stderr).contains("overlapping candle"));
     }
     let mut bad=json!(sqx_strategy::Strategy::new("invalid size"));bad["money_management"]=json!({"FixedSize":{"size":0.0}});fs::write(&strategy,bad.to_string()).unwrap();
-    let failed=run("montecarlo",&["--symbol","USDJPY","--timeframe","M1"]);assert!(!failed.status.success(),"{}",String::from_utf8_lossy(&failed.stdout));assert!(failed.stdout.is_empty(),"failed simulation must not become a Monte Carlo report");
+    let failed=run("montecarlo",&["--symbol","USDJPY","--timeframe","M1"]);assert!(!failed.status.success());
+    let stdout=String::from_utf8(failed.stdout).unwrap();
+    let receipt:Value=serde_json::from_str(stdout.lines().find_map(|s|s.strip_prefix("Monte Carlo archive: ")).expect("invalid base execution is archived")).unwrap();
+    let saved=sqx_project::archive::Archive::new(root.join("archive")).load(receipt["run_id"].as_str().unwrap()).unwrap();
+    assert!(!saved.run.result["report"]["robustness"]["base"]["errors"].as_array().unwrap().is_empty());
+    assert!(saved.run.result["report"]["robustness"]["monte_carlo"].is_null(),"failed base must not produce a distribution");
     let failed=run("robustness",&["--symbol","USDJPY","--timeframe","M1"]);assert!(!failed.status.success());
     let stdout=String::from_utf8(failed.stdout).unwrap();
     let receipt:Value=serde_json::from_str(stdout.lines().find_map(|s|s.strip_prefix("Robustness archive: ")).expect("invalid base execution is archived")).unwrap();
@@ -68,12 +73,26 @@ fn monte_carlo_reports_invalid_requests_as_failures_and_preserves_valid_runs(){
     for (runs,skip,valid,reason) in [("3","0.1",true,""),("0","0.1",false,"at least one run"),("3","1.1",false,"skip_prob")] {
         let output=Command::new(env!("CARGO_BIN_EXE_sqx-cli"))
             .args(["montecarlo","--symbol","EURUSD","--timeframe","M1","--runs",runs,"--skip",skip])
+            .arg("--archive-dir").arg(root.join("archive"))
             .arg("--strategy").arg(&strategy).arg("--data").arg(&data).output().unwrap();
         let stdout=String::from_utf8(output.stdout).unwrap();
         let context:Value=serde_json::from_str(stdout.lines().find_map(|s|s.strip_prefix("Research context: ")).expect("report context retained")).unwrap();
         assert_eq!(output.status.success(),valid,"{stdout}");
         assert_eq!(context["monte_carlo_errors"].as_array().unwrap().is_empty(),valid);
+        let receipt:Value=serde_json::from_str(stdout.lines().find_map(|s|s.strip_prefix("Monte Carlo archive: ")).unwrap()).unwrap();
+        let archive=sqx_project::archive::Archive::new(root.join("archive"));
+        let saved=archive.load(receipt["run_id"].as_str().unwrap()).unwrap();
+        let study=&saved.run.result["report"]["robustness"];
+        assert_eq!(study["monte_carlo"]["errors"],context["monte_carlo_errors"]);
+        assert!(study["what_if"].as_array().unwrap().is_empty());assert!(study["retest"].is_null());assert!(study["walk_forward"].is_null());
+        let outcomes=saved.run.result["event_ids"].as_array().unwrap().iter().filter(|id|archive.load(id.as_str().unwrap()).unwrap().run.result["event"].get("TradeManipulationOutcome").is_some()).count();
+        assert_eq!(outcomes,if valid{3}else{0});
         if !valid {assert!(String::from_utf8_lossy(&output.stderr).contains(reason));}
     }
+    let archive=sqx_project::archive::Archive::new(root.join("archive"));let before=archive.list().unwrap();
+    let nonfinite=Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["montecarlo","--symbol","EURUSD","--timeframe","M1","--skip","NaN"])
+        .arg("--archive-dir").arg(archive.root()).arg("--strategy").arg(&strategy).arg("--data").arg(&data).output().unwrap();
+    assert!(!nonfinite.status.success());assert!(String::from_utf8_lossy(&nonfinite.stderr).contains("skip_prob must be finite"));
+    assert_eq!(archive.list().unwrap(),before,"nonfinite input must not silently become JSON null in an executable checkpoint");
     fs::remove_dir_all(root).unwrap();
 }

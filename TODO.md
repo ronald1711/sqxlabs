@@ -87,7 +87,12 @@ remaining execution assumptions and unsupported cases are visible.
   ambiguous archives are preserved but cannot silently select a study on retry.
   Closing/clearing the browser session requires finding the study in
   Saved research rather than relying on the browser's retry identity.
-  CLI pipelines retain exact engine bytes, frozen inputs/configuration/seed,
+  CLI pipelines retain exact engine bytes and frozen inputs/configuration/seed.
+  Standalone CLI Monte Carlo now uses that same start/journal/completion
+  protocol. Its process-kill/source-deletion/portable-restore test preserves all
+  256 requested samples, matches direct configured computation and an uninterrupted
+  frozen replay, and verifies that no other robustness stages are added.
+  CLI pipelines also retain
   a pre-execution start record, ordered stage/family events, per-build/retest
   starts and outcomes, and the full returned report before reporting errors.
   Storage failures stop further evaluation. A process-kill/source-deletion
@@ -229,3 +234,27 @@ remaining execution assumptions and unsupported cases are visible.
 
 Do not mark this checklist complete solely because existing tests are green.
 See [README.md](README.md) for operation and [ci/README.md](ci/README.md) for checks.
+
+- [x] Keep MCP robustness walk-forward candidates within the supplied strategy's
+  exit-distance family, with the original strategy first in every window.
+  A regression reproduces the former unrelated-control failure; all 17 MCP tests
+  pass. MCP robustness now uses the shared durable pipeline journal and exposes
+  history, resume and portable export/import through MCP. Other unarchived MCP
+  entry points, large-study performance and power-loss evidence remain open.
+
+- [x] Journal build-pipeline retest base executions and individual Monte Carlo
+  paths, including ordered trade selections and failures, before survivor selection.
+  Failure injection covers retest start, base outcome, each trial and final outcome.
+  This closes a partial-result retention gap, not independent execution validation.
+
+- [x] Validate shared immutable dataset/strategy objects once per archive listing,
+  with a fresh validation set on every call and separate object namespaces.
+  Missing, corrupted and correctly hashed but invalid JSON inputs still fail.
+  This removes repeated input parsing within a listing; full recovery, payload
+  loading, large-backup memory and power-loss limits remain open.
+
+- [x] Distinguish empty, loading, unavailable and loaded dataset coverage in the
+  dashboard; provide a direct Data route when no market data is loaded.
+  Reject empty-data stress requests before submission and ignore stale asynchronous
+  coverage responses, including A/B/A selection changes. Browser checks cover the
+  empty state and import navigation; simulated delayed/failing responses cover races.

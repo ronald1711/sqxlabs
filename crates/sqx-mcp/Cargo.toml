@@ -6,6 +6,7 @@ license.workspace = true
 description = "MCP (Model Context Protocol) stdio server exposing the SqxLabs engine."
 
 [dependencies]
+sqx-pipeline = { path = "../sqx-pipeline" }
 sqx-project = { path = "../sqx-project" }
 sqx-core = { path = "../sqx-core" }
 sqx-data = { path = "../sqx-data" }

@@ -14,7 +14,6 @@ use sqx_optimizer::{genetic_evolve_observed, rank, random_strategy, Fitness, Gen
 use sqx_project::{Databank, MetricSummary, Project, StrategyRecord};
 use sqx_export::{export_report as export_strategy, Engine};
 use sqx_portfolio::{backtest_all, best_subset, combine, equal_weights};
-use sqx_robustness::monte_carlo_trade_manipulation;
 use sqx_strategy::{render as render_pseudocode, Strategy};
 
 #[derive(Parser)]
@@ -387,6 +386,8 @@ enum Cmd {
     },
     /// Monte Carlo trade-manipulation robustness test.
     Montecarlo {
+        #[arg(long, default_value = "data/research")]
+        archive_dir: PathBuf,
         #[command(flatten)]
         research:ResearchOptions,
         #[arg(long)]
@@ -925,13 +926,28 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Cmd::Montecarlo { research, strategy, data, runs, skip, seed } => {
+        Cmd::Montecarlo { archive_dir, research, strategy, data, runs, skip, seed } => {
             let s: Strategy = load_strategy(&strategy)?;
             let bars = load_bars(&data)?;
             let (inst,cfg,mut context)=research.prepare(&bars)?;
-            let result = backtest(&s, &bars, &inst, &cfg);
-            if !result.errors.is_empty(){anyhow::bail!(result.errors.join("; "));}
-            let report = monte_carlo_trade_manipulation(&result.trades, runs, skip, seed);
+            if !skip.is_finite(){anyhow::bail!("skip_prob must be finite");}
+            let pyp=resolve_periods_per_year(bars.len(),0.0,&bars);
+            let pipeline=sqx_pipeline::Pipeline{name:"Standalone Monte Carlo trade study".into(),tasks:vec![sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::Sensitivity{
+                strategy:s,scenarios:vec![],mc_runs:runs,mc_seed:seed,skip_probability:skip,
+            }}]};
+            let archive=sqx_project::archive::Archive::new(&archive_dir);
+            let engine=archive.retain_current_engine().map_err(anyhow::Error::msg)?;
+            let dataset=serde_json::json!({"bars":bars,"instrument":inst,"timeframe":context["timeframe"],"source_context":context});
+            let specification=serde_json::json!({"pipeline":pipeline,"generator":GeneratorConfig::default()});
+            let request=serde_json::json!({"research_kind":"cli_pipeline_started","attempt_id":format!("{:032x}",rand::random::<u128>()),"config":cfg,"seed":seed,"periods_per_year":pyp});
+            let started=archive.save(engine,dataset,specification,request,serde_json::json!({"status":"execution_not_recorded"})).map_err(anyhow::Error::msg)?;
+            println!("Monte Carlo checkpoint: {}",serde_json::json!({"run_id":started,"root":archive_dir}));
+            std::io::Write::flush(&mut std::io::stdout())?;
+            let recovered=pipeline_archive::recover(&archive,&started,true).map_err(|e|anyhow!("Monte Carlo stopped; inspect or resume checkpoint {started}: {e}"))?;
+            println!("Monte Carlo archive: {}",serde_json::json!({"run_id":recovered.completion_id,"started_run_id":started,"root":archive_dir,"replay_available":true}));
+            let study=recovered.report.robustness.ok_or_else(||anyhow!("Monte Carlo did not execute: {}",recovered.report.errors.join("; ")))?;
+            if !study.base.errors.is_empty(){anyhow::bail!(study.base.errors.join("; "));}
+            let report=study.monte_carlo.ok_or_else(||anyhow!("Missing archived Monte Carlo report"))?;
             println!("{}", sqx_robustness::render(&report));
             context["seed"]=serde_json::json!(seed);context["requested_runs"]=serde_json::json!(runs);context["skip_probability"]=serde_json::json!(skip);context["monte_carlo_errors"]=serde_json::json!(report.errors);
             println!("Research context: {context}");

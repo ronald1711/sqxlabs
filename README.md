@@ -146,7 +146,7 @@ cargo run -q -p sqx-cli -- robustness --symbol EURUSD --timeframe M1 --strategy 
 # Nonzero exit on invalid computation; exit 0 alone does not certify sufficient trade evidence.
 cargo run -q -p sqx-cli -- optimize --symbol EURUSD --timeframe M1 --data data/eurusd_sample.csv --windows 6 --oos 0.25
 
-# generate, optimize and robustness archive inputs and executions in data/research.
+# generate, optimize, robustness and montecarlo archive inputs and executions in data/research.
 # Use the printed checkpoint run_id with the shared recovery commands:
 cargo run -q -p sqx-cli -- pipeline-history --run-id <checkpoint-id>
 cargo run -q -p sqx-cli -- replay-pipeline --run-id <checkpoint-id> --resume
@@ -280,8 +280,25 @@ original. Selection uses each training window before its OOS evaluation. This
 does not establish an untouched holdout if the strategy was developed using those
 data. Older archived versions generated unrelated candidates in this stage and
 must not be interpreted as walk-forward validation of the supplied strategy;
-their original executable is required for replay. Standalone `montecarlo` and other entry
-points do not inherit this archival coverage automatically.
+their original executable is required for replay. Other entry points do not
+inherit this archival coverage automatically.
+
+Standalone CLI `montecarlo` also uses `--archive-dir` and the shared
+`pipeline-history`, `replay-pipeline`, `export-pipeline` and `import-pipeline`
+commands. Its checkpoint freezes the strategy, data, account configuration,
+requested run count, seed and skip probability. It retains the base execution
+and every selected trade order/outcome, including computation errors. It runs
+only trade resampling: no cost sweep, retest or walk-forward is added. A process
+kill, source deletion, portable restore and resume reproduce the uninterrupted
+completion identity. This is repeatability evidence, not a claim of independent
+samples, sufficient statistical power or execution correctness.
+
+The build pipeline's `Retest` stage also journals the full base execution and
+starts/outcomes for every trade-resampling path, indexed by pipeline step and
+candidate. Failure to write a checkpoint stops the stage before further trials
+or selection. Recovery verifies the saved prefix before appending missing events;
+old studies still require their original executable. These paths resample the
+same trades and do not constitute independent market observations.
 
 Web stress tests now use the same checkpoint/recovery protocol for their six
 cost scenarios and 1,000 trade-resampling paths. They save inputs before running,
@@ -359,6 +376,23 @@ weekly sessions and optional date overrides that explains market closures.
 Successful research responses include `research_context` with the quality report,
 full supplied calendar, cutoff time, symbol, timeframe and simulation settings.
 These checks do not establish broker execution parity or an untouched holdout.
+
+MCP `robustness` uses the supplied strategy as its walk-forward control and
+varies only exit distances within the same rule family. It no longer substitutes
+unrelated generated strategies. Before calculation it now freezes the inputs,
+account settings, engine identity and fixed study settings in the operator's
+`SQX_MCP_RESEARCH_DIR` archive (default `data/research`). It preserves base results,
+cost scenarios, all 500 trade-resampling paths, 200 retest attempts and four
+walk-forward windows through the shared pipeline journal, including failures.
+Use `research_history` to locate a study after a lost response; `research_resume`
+accepts only its `run_id`, verifies the recorded prefix with the original engine,
+and finishes missing work. `research_export` and `research_import` carry complete
+or partial studies without engine binaries. They never execute archived programs.
+Calculation errors remain errors after successful recovery. Fresh `robustness`
+calls are distinct attempts: inspect history before retrying an uncertain request.
+These operations are synchronous; large backups and responsive cancellation
+remain open. Walk-forward results are neither untouched-holdout nor independent
+execution evidence.
 
 MCP `generate` automatically retains its engine, frozen candidate family and input
 data, per-candidate checkpoints and full results before ranking. Storage defaults
