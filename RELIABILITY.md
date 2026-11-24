@@ -3986,3 +3986,33 @@ and release. The added dashboard refusal test, report JavaScript syntax and
 recovery UI checks passed. No new browser interaction or independent broker
 comparison is claimed for this increment. Whole-search portable backup and
 restore of linked trial records remain open.
+
+### Replay and explicitly restart one MCP generation trial
+
+The generation_trial tool compares a saved trial result against recomputation,
+or restarts a trial checkpoint when restart=true is explicit. It checks engine
+identity, search/checkpoint kinds and state, candidate index and full rule tree,
+dataset identity, frozen configuration/annualization and the result/checkpoint
+relationship before execution. Input overrides and ambiguous restart values are
+rejected. It uses the currently running engine, never an archived executable.
+
+Comparison uses the serialized outcome bytes, including the full backtest,
+metrics, errors and eligibility flag. Nonfinite values retain the existing JSON
+null encoding; this is equality of the retained representation, not recovered
+nonfinite payload bits or independent correctness. Restart retains the engine
+and refuses a conflicting prior outcome instead of replacing it. A deterministic
+repeat returns the same outcome identity. It neither executes other candidates
+nor creates a completed-search record; repeated restarts are not independent
+strategy trials or a complete count of execution invocations.
+
+Regressions reject wrong engine/strategy/index/settings and mode, detect modified
+results (including a signed-zero serialization difference), preserve conflicting
+outcomes, and restart an interrupted candidate without advancing the remaining
+family. The separate-process kill test also replays/restarts a saved trial through
+MCP after removing its source CSV. Whole-search resume, completion reconstruction,
+portable linked-search backup and the other MCP routes remain open.
+
+Validation: 12 MCP unit tests and the separate-process interruption/replay/restart
+test passed in both debug and release; the locked workspace build passed. The
+preceding published commit b0bd715 passed all four Linux/macOS CI jobs and profile
+comparisons in run 45390250514; that run predates the new archive/replay work.

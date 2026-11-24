@@ -36,4 +36,18 @@ fn killed_generation_retains_trials_and_can_be_inspected_without_source_files(){
     assert!(search["completion_records"].as_array().unwrap().is_empty());
     assert!(search["trial_checkpoints"].as_array().unwrap().len()>=results.len());
     assert_eq!(archive.engine_retention(search["engine_id"].as_str().unwrap())["status"],"verified");
+    // A fresh MCP process replays and explicitly restarts only this recorded trial,
+    // after the original CSV has gone. No batch completion may be synthesized.
+    let result_id=results[0]["result_id"].as_str().unwrap();
+    let checkpoint_id=results[0]["checkpoint_id"].as_str().unwrap();
+    for (id,restart) in [(result_id,false),(checkpoint_id,true)] {
+        let mut process=Command::new(env!("CARGO_BIN_EXE_sqx-mcp")).env("SQX_MCP_RESEARCH_DIR",&store).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+        writeln!(process.stdin.take().unwrap(),"{}",json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"generation_trial","arguments":{"run_id":id,"restart":restart}}})).unwrap();
+        let output=process.wait_with_output().unwrap();assert!(output.status.success());
+        let response:Value=serde_json::from_slice(&output.stdout).unwrap();assert!(response["result"].get("isError").is_none(),"{response}");
+        let report:Value=serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        if restart {assert_eq!(report["run_id"],result_id);assert_eq!(report["restarted"],true);}else{assert_eq!(report["matches"],true);}
+    }
+    for id in archive.list().unwrap(){assert_ne!(archive.load(&id).unwrap().run.request["research_kind"],"mcp_generation");}
+
 }

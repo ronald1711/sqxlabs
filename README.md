@@ -313,9 +313,15 @@ response or process restart, without loading the original CSV or contacting Ques
 Keep this archive private: it contains market data, strategy rules and account
 settings. Repeated requests receive distinct search identities and are not
 automatically independent trials. Missing results do not prove that a process
-stopped. Single-trial replay/resume and durable capture of the other MCP tools
-remain unavailable. Dashboard downloads preserve one record, not the whole linked
-search; JSON research backups do not include the retained executable.
+stopped. `generation_trial` with `run_id` replays a saved result; with a trial
+checkpoint ID and explicit `restart: true`, it restarts only that candidate from
+frozen inputs. The running executable must match the original engine. Candidate,
+search and result relationships are checked before execution; conflicting saved
+outcomes are never replaced. This does not advance other candidates or complete
+the search, and successful replay is not independent correctness evidence.
+Whole-search resume and durable capture of the other MCP tools remain unavailable.
+Dashboard downloads preserve one record, not the whole linked search; JSON
+research backups do not include the retained executable.
 
 CSV with header `timestamp,open,high,low,close,volume`, timestamp in unix
 seconds. `data/eurusd_sample.csv` is a 2000-bar synthetic EURUSD sample.

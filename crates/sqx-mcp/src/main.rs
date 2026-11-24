@@ -84,6 +84,7 @@ fn error_json(id: Value, code: i64, message: &str) -> Value {
 
 fn tools_list() -> Vec<Value> {
     let mut tools=vec![
+        json!({"name":"generation_trial","description":"Replay a saved MCP generation trial result, or explicitly restart one trial checkpoint with restart=true. Requires the original running engine; never executes stored binaries, advances other candidates or completes a search.","inputSchema":{"type":"object","properties":{"run_id":{"type":"string"},"restart":{"type":"boolean","default":false}},"required":["run_id"],"additionalProperties":false}}),
         json!({"name":"generation_history","description":"Inspect saved MCP generation searches and recorded trial progress without executing strategies. Pending records do not prove process liveness. The storage directory is configured by the server operator.","inputSchema":{"type":"object","properties":{}}}),
         json!({
             "name": "list_indicators",
@@ -160,6 +161,17 @@ fn call_tool(params: &Value) -> Value {
         "questdb_bars" => tool_questdb_bars(&args),
         "backtest" => tool_backtest(&args),
         "generate" => tool_generate(&args),
+        "generation_trial" => {
+            if !args.as_object().is_some_and(|object|object.keys().all(|key|matches!(key.as_str(),"run_id"|"restart"))) {
+                return err_result("Only run_id and restart are accepted; frozen inputs cannot be overridden".into());
+            }
+            let id=match args.get("run_id").and_then(Value::as_str){Some(id)=>id,None=>return err_result("run_id is required".into())};
+            let restart=match args.get("restart"){None=>false,Some(Value::Bool(value))=>*value,_=>return err_result("restart must be a boolean".into())};
+            match generation_archive::replay_trial(&generation_archive::configured_archive(),id,restart) {
+                Ok(report)=>{let invalid=report["matches"]==false || report["execution_valid"]==false;let mut result=text_result(report.to_string());if invalid{result["isError"]=json!(true);}result},
+                Err(error)=>err_result(error),
+            }
+        },
         "generation_history" => match generation_archive::history(&generation_archive::configured_archive()) {
             Ok(history)=>text_result(history.to_string()),Err(error)=>err_result(error),
         },
@@ -505,6 +517,14 @@ fn tool_robustness(args: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn trial_recovery_rejects_ambiguous_modes_and_input_overrides(){
+        for arguments in [json!({"run_id":"unused","restart":"true"}),json!({"run_id":"unused","config":{}}),json!({"restart":true})] {
+            let result=call_tool(&json!({"name":"generation_trial","arguments":arguments}));
+            assert_eq!(result["isError"],true);
+            assert!(!result.to_string().contains("No such file"),"reject arguments before accessing records");
+        }
+    }
     #[test]
     fn portfolio_failures_stop_selection_and_keep_research_context() {
         let strategy=Strategy::new("portfolio fixture");
