@@ -1,5 +1,35 @@
 # Reliability checks
 
+## Retaining the exact research engine
+
+Before upgrading or rebuilding an executable used for research, retain its bytes:
+
+```sh
+python3 scripts/retain_engine.py target/release/sqx-cli --out data/engines
+```
+
+For an existing research record, add `--expected-engine-id` followed by its
+`run.engine_id`. A mismatch fails before publication. The filename is the SHA-256
+engine identity used by research archives. Keep this directory with research
+backups, outside Git, and copy it to an independent backup location. The command
+does not delete older versions, invoke the engine or upload files. Concurrent
+publication is atomic on local POSIX filesystems; an existing corrupted object
+is reported and never silently replaced. Interrupted pending files are not
+published evidence. This is not a power-loss or network-filesystem guarantee.
+
+Retained files have no execute permission. To replay, verify the selected file's
+SHA-256 against the research record, copy it to a separate local executable path,
+grant that copy execute permission, and use its normal research replay command.
+Only execute a locally trusted build. Do not automatically execute binaries from
+downloaded research backups. The normal replay check still rejects a different
+engine identity. The original operating system, architecture and required runtime
+libraries must remain available: retaining bytes does not package those
+dependencies or authenticate the build's source. Record that environment with
+your research. This manual procedure does not yet provide automatic retention
+on every research route or durable GitHub release artifacts.
+
+## Running the gates
+
 Install the pinned compiler with `rustup toolchain install 1.100.0 --profile minimal`.
 Run `bash ci/check.sh debug` and `bash ci/check.sh release` from a checkout.
 The script stops at the first failure, uses the checked-in Cargo.lock, runs all

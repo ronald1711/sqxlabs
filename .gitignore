@@ -14,11 +14,13 @@ scripts/*
 !scripts/mt5_recording_status.py
 !scripts/mt5_reference_check.py
 !scripts/mt5_prefix_check.py
+!scripts/retain_engine.py
 !scripts/tests/
 scripts/tests/*
 !scripts/tests/test_*.py
 data/slice.db
 data/mt5/
+data/engines/
 data/*.csv
 data/assistant.json
 *.rs.bk

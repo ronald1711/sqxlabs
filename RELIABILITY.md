@@ -3611,3 +3611,23 @@ legacy uncertainty and restoration. The originally failing reproduction is retai
 locally as holdout-interval-probe.log; the corrected cases are in the regression
 suite. This addresses observation extents, not independent correctness of all
 higher-timeframe trading signals or proof of isolation from external research.
+
+### Exact executable retention (local procedure)
+
+`scripts/retain_engine.py` stores executable bytes under their SHA-256 identity,
+matching the engine IDs recorded in research archives. Publication uses a synced
+pending file and a no-replacement hard link. Existing objects are rehashed;
+corruption, identity mismatches and symlinks fail instead of silently replacing
+retained evidence. The copy is not executable and is never launched by this tool.
+
+Three regression tests cover concurrent retention, replacement of the original,
+wrong expected identity, existing corruption and symlink rejection. The Python
+suite passed all 37 tests. A retained copy of the current debug engine was copied
+to an isolated executable path and passed the independent eight-case reference,
+archive replay and future-mutation gate. This is local evidence of usable byte
+retention, not independent certification of all engine behavior.
+
+The manual operation and restoration boundaries are documented in ci/README.md.
+Automatic retention at every research entry point, permanent release artifacts,
+OS/runtime dependency retention and representative power-loss validation remain
+open. Research backups alone still do not include the executable.
