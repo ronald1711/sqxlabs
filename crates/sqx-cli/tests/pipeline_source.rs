@@ -22,7 +22,6 @@ fn pipeline_binds_seed_and_settings_and_assistant_checks_data_before_provider_ac
     assert_eq!(saved.run.request["seed"],731);
     assert_eq!(saved.strategy["pipeline"]["tasks"].as_array().unwrap().len(),3);
     let restored=sqx_project::archive::Archive::new(root.join("restored"));
-    restored.restore(&started).unwrap();restored.restore(&saved).unwrap();
     let events=saved.run.result["event_ids"].as_array().unwrap();
     let mut previous=Value::Null;
     let mut outcomes=0;
@@ -32,11 +31,10 @@ fn pipeline_binds_seed_and_settings_and_assistant_checks_data_before_provider_ac
         assert_eq!(event.run.request["previous_event_id"],previous);
         assert_eq!(event.run.request["started_run_id"],started.run_id);
         if event.run.result["kind"]=="build_outcome" {outcomes+=1;}
-        restored.restore(&event).unwrap();
         previous=id.clone();
     }
     assert_eq!(outcomes,2);
-    fs::remove_dir_all(root.join("archive")).unwrap();
+    portable_restore(&root,&started.run_id);
     assert_eq!(restored.load(&saved.run_id).unwrap().run.result,saved.run.result);
     let experiments=sqx_project::experiment::Experiments::new(root.join("restored"));
     let mut bars:Vec<sqx_core::Bar>=serde_json::from_value(saved.dataset["bars"].clone()).unwrap();
@@ -98,8 +96,8 @@ fn interrupted_pipeline_retains_frozen_family_and_completed_candidate() {
     assert!(!outcomes.is_empty());
     assert_eq!(outcomes[0].dataset["bars"].as_array().unwrap().len(),500);
     let restored=sqx_project::archive::Archive::new(root.join("restored"));
-    for record in &records {restored.restore(record).unwrap();}
-    fs::remove_dir_all(root.join("archive")).unwrap();
+    let start_id=&records.iter().find(|r|r.run.request["research_kind"]=="cli_pipeline_started").unwrap().run_id;
+    portable_restore(&root,start_id);
     for record in &records {assert_eq!(restored.load(&record.run_id).unwrap().run.result,record.run.result);}
     let started=records.iter().find(|r|r.run.request["research_kind"]=="cli_pipeline_started").unwrap();
     let command=|subcommand:&str,resume:bool|{
@@ -157,4 +155,26 @@ fn interrupted_pipeline_retains_frozen_family_and_completed_candidate() {
     assert!(String::from_utf8_lossy(&conflict.stderr).contains("Conflicting pipeline events"));
     assert!(!command("replay-pipeline",true).status.success());
     fs::remove_dir_all(root).unwrap();
+}
+
+// Exercise the public transport boundary, with the original archive unavailable
+// during import. No test-only record restoration can hide missing backup inputs.
+fn portable_restore(root:&std::path::Path, start_id:&str) {
+    let exported=Command::new(env!("CARGO_BIN_EXE_sqx-cli"))
+        .args(["export-pipeline","--archive-dir"]).arg(root.join("archive"))
+        .args(["--run-id",start_id]).output().unwrap();
+    assert!(exported.status.success(),"{}",String::from_utf8_lossy(&exported.stderr));
+    let file=root.join("backup.json");fs::write(&file,&exported.stdout).unwrap();
+    fs::remove_dir_all(root.join("archive")).unwrap();
+    let import=||Command::new(env!("CARGO_BIN_EXE_sqx-cli"))
+        .args(["import-pipeline","--archive-dir"]).arg(root.join("restored"))
+        .arg("--input").arg(&file).output().unwrap();
+    let imported=import();
+    assert!(imported.status.success(),"{}",String::from_utf8_lossy(&imported.stderr));
+    let receipt:Value=serde_json::from_slice(&imported.stdout).unwrap();
+    assert_eq!(receipt["started_run_id"],start_id);
+    assert_eq!(receipt["execution_replayed"],false);
+    assert_eq!(receipt["engine_bytes_included"],false);
+    let repeated=import();assert!(repeated.status.success());
+    assert_eq!(serde_json::from_slice::<Value>(&repeated.stdout).unwrap()["published_records"],0);
 }
