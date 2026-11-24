@@ -118,6 +118,15 @@ TA-Lib/MT5 seed parity, all periods, missing-value behavior, or all indicators.
 
 ## Execution contract migration
 
+Pine StochD parameter mapping was found to change the backtested rule: the engine
+uses fixed K14 followed by SMA(period), whereas the exporter emitted K(period)
+followed by SMA3. Pine now preserves K14 and uses the rounded/defaulted smoothing
+period from the engine contract. A regression failed on the old mapping and all
+nine exporter tests passed after repair (default, 3, 7 and fractional 7.6 -> 8).
+This is source-translation evidence, not TradingView compilation/execution parity.
+The MQL, NinjaScript and EasyLanguage StochD mappings still require equivalent
+correction and platform verification; the exporter remains explicitly a draft.
+
 The legacy `intrabar_up_first` flag describes an assumed OHLC path, not a
 side-independent pessimistic fill policy. A replacement ambiguity model is pending.
 Bar prices are treated as bid quotes for the initial spread correction: long entry

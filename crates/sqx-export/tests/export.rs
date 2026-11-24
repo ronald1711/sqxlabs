@@ -33,6 +33,23 @@ fn pine_exports_ta_rsi() {
 }
 
 #[test]
+fn pine_stoch_d_preserves_fixed_k_period_and_variable_smoothing() {
+    for (params, smoothing) in [
+        (vec![], 3),
+        (vec![sqx_strategy::Param::new("period", 3.0)], 3),
+        (vec![sqx_strategy::Param::new("period", 7.0)], 7),
+        (vec![sqx_strategy::Param::new("period", 7.6)], 8),
+    ] {
+        let mut strategy = rsi_strategy();
+        strategy.signals[0].conditions[0].left = Operand::Indicator("StochD".into(), params);
+        let report = sqx_export::export_report(&strategy, Engine::PineScript);
+        let code = report.code.expect("StochD has a Pine reference mapping");
+        assert!(code.contains(&format!("ta.sma(ta.stoch(close, high, low, 14), {smoothing})")), "{code}");
+        assert_eq!(report.status, "reference_draft");
+    }
+}
+
+#[test]
 fn mql4_exports_order_send() {
     let code = export(&rsi_strategy(), Engine::Mql4);
     assert!(code.contains("OrderSend"), "MQL4 should emit OrderSend");
