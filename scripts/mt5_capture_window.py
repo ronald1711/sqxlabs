@@ -15,6 +15,7 @@ import time
 
 from mt5_export import bar_lines, tick_lines
 from mt5_errors import HistoryUnavailable
+from mt5_account_context import account_context
 
 
 def capture(client, symbols, start, end, warmup_seconds=60):
@@ -28,7 +29,7 @@ def capture(client, symbols, start, end, warmup_seconds=60):
     account = client.account_info()
     if account is None:
         raise ValueError('account metadata unavailable')
-    identity = {k: getattr(account, k) for k in ('server', 'currency', 'leverage', 'trade_mode')}
+    identity = account_context(account)
     markets = []
     for symbol in symbols:
         spec_before_start=time.time_ns() // 1_000_000
@@ -76,7 +77,7 @@ def capture(client, symbols, start, end, warmup_seconds=60):
             'raw_bars': raw_bars, 'raw_ticks': raw_ticks, 'raw_tick_response': response_ticks, 'raw_warmup_ticks': rows(warmup),
             'warmup_ticks_csv':'timestamp_broker_ms,bid,ask\n'+''.join(tick_lines(warmup)), 'bars_csv': bar_csv, 'ticks_csv': tick_csv})
     after_account = client.account_info()
-    if after_account is None or identity != {k: getattr(after_account,k) for k in identity}:
+    if after_account is None or identity != account_context(after_account):
         raise ValueError('account context changed during capture')
     return {'schema':1, 'account':identity, 'broker_window_seconds':[start,end], 'tick_warmup_seconds':warmup_seconds,
             'host_capture_utc_ms':[before,time.time_ns() // 1_000_000], 'markets':markets,

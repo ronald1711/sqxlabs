@@ -691,3 +691,24 @@ preflight rejects the dataset, rather than proving a conversion failure during
 an actual open position. No successful comparison was published; comparison.json
 remained `verification_not_completed`. This observed rejection is useful negative
 evidence and must not be reported as successful strategy or broker parity.
+
+## Account identity across capture and resume
+
+New captures now include an `account_fingerprint` derived from the broker server
+and login, in addition to server/currency/leverage/demo mode. Previously, an
+account switch with identical settings could evade the context check. The new
+fingerprint is compared before/after capture and across recorder reconnects and
+resume. It avoids printing/storing the raw login, but is pseudonymous rather than
+anonymous or proof of broker authenticity; keep private captures private.
+
+Legacy journals remain verifiable and exportable. A new recorder invocation
+refuses to append to a nonempty journal without the fingerprint: preserve that
+journal and start a new one rather than inferring its historical account identity.
+The already-running fifteen-window probe loaded the previous code before this
+change and retains the explicitly weaker legacy binding. Its evidence must not
+be upgraded to fingerprint-bound after the fact.
+
+All 44 Python tests passed, including same-settings login switches during capture
+and resume, and legacy rejection before connecting. Two read-only observations
+of the installed bridge produced the same new fingerprint; no account switch or
+terminal setting was performed during this real-environment check.

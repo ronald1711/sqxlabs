@@ -48,7 +48,7 @@ class CaptureTests(unittest.TestCase):
     def client(self):
         class Client:
             TIMEFRAME_M1=1;COPY_TICKS_ALL=0
-            def account_info(self): return types.SimpleNamespace(server='fixture',currency='EUR',leverage=30,trade_mode=0)
+            def account_info(self): return types.SimpleNamespace(login=123,server='fixture',currency='EUR',leverage=30,trade_mode=0)
             def symbol_info(self,s):
                 keys=('name','digits','point','trade_contract_size','trade_tick_size','volume_min','volume_max','volume_step','currency_base','currency_profit','currency_margin','trade_calc_mode')
                 return types.SimpleNamespace(**dict.fromkeys(keys,1))
@@ -92,4 +92,14 @@ class CaptureTests(unittest.TestCase):
             return value
         client.symbol_info=info
         with self.assertRaisesRegex(ValueError,'specifications changed during capture'):
+            module.capture(client,['EURUSD'],120,180)
+
+    def test_login_change_with_same_settings_rejects_capture(self):
+        module=self.module();client=self.client();original=client.account_info;calls=[]
+        def account():
+            value=original();calls.append(1)
+            if len(calls)>1:value.login=456
+            return value
+        client.account_info=account
+        with self.assertRaisesRegex(ValueError,'account context changed'):
             module.capture(client,['EURUSD'],120,180)

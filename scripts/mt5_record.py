@@ -12,6 +12,7 @@ import sys
 import time
 from mt5_capture_journal import Journal
 from mt5_errors import HistoryUnavailable
+from mt5_account_context import account_context
 
 
 NETWORK_ERRORS=(ConnectionError,TimeoutError,EOFError)
@@ -20,6 +21,8 @@ def record_windows(journal,factory,capture_window,windows,follow=False,poll_seco
     emit=emit or (lambda value:print(json.dumps(value),flush=True))
     config=journal.config;client=None;completed=0;retries=0;history_retries=0
     expected_account=journal.verify()[1]
+    if expected_account is not None and 'account_fingerprint' not in expected_account:
+        raise ValueError('legacy recording lacks account fingerprint; preserve it for read-only export and start a new journal')
     def disconnect():
         nonlocal client
         old,client=client,None
@@ -35,7 +38,7 @@ def record_windows(journal,factory,capture_window,windows,follow=False,poll_seco
                     if not client.initialize():raise ConnectionError('MT5 initialization failed')
                 info=client.account_info()
                 if info is None:raise ConnectionError('account context unavailable')
-                observed={key:getattr(info,key) for key in ('server','currency','leverage','trade_mode')}
+                observed=account_context(info)
                 if observed['server']!=config['server'] or (expected_account is not None and observed!=expected_account):
                     raise ValueError('recording account context changed before reading window')
                 if expected_account is None:expected_account=observed

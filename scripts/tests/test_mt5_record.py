@@ -12,15 +12,34 @@ with patch.object(sys,'path',[str(ROOT),*sys.path]):
     recorder=importlib.util.module_from_spec(spec);spec.loader.exec_module(recorder)
 CONFIG={'schema':1,'symbols':['EURUSD'],'server':'fixture','broker_start':120,'window_seconds':60,'warmup_seconds':60}
 def capture(client,symbols,start,end,warmup):
-    return {'schema':1,'broker_window_seconds':[start,end],'tick_warmup_seconds':warmup,'account':{'server':'fixture','currency':'EUR','leverage':30,'trade_mode':0},'markets':[{'symbol':s,'spec':{'trade_contract_size':100000}} for s in symbols]}
+    return {'schema':1,'broker_window_seconds':[start,end],'tick_warmup_seconds':warmup,'account':recorder.account_context(client.account_info()),'markets':[{'symbol':s,'spec':{'trade_contract_size':100000}} for s in symbols]}
 class Client:
     def __init__(self):self.closed=False
     def initialize(self):return True
-    def account_info(self):return types.SimpleNamespace(server="fixture",currency="EUR",leverage=30,trade_mode=0)
+    def account_info(self):return types.SimpleNamespace(login=123,server="fixture",currency="EUR",leverage=30,trade_mode=0)
     def symbol_info_tick(self,symbol):return types.SimpleNamespace(time=600)
     def close(self):self.closed=True
 
 class ReconnectTests(unittest.TestCase):
+    def test_different_login_same_settings_cannot_resume_recording(self):
+        first=Client();second=Client()
+        second.account_info=lambda:types.SimpleNamespace(login=456,server='fixture',currency='EUR',leverage=30,trade_mode=0)
+        with tempfile.TemporaryDirectory() as root,recorder.Journal(root,CONFIG) as journal:
+            recorder.record_windows(journal,lambda:first,capture,1,emit=lambda _:None)
+            with self.assertRaisesRegex(ValueError,'account context changed'):
+                recorder.record_windows(journal,lambda:second,lambda *a:self.fail('history read after identity change'),1,emit=lambda _:None)
+            self.assertEqual(journal.verify()[0],180)
+        self.assertTrue(second.closed)
+
+    def test_legacy_recording_stays_readable_but_cannot_gain_inferred_identity(self):
+        with tempfile.TemporaryDirectory() as root,recorder.Journal(root,CONFIG) as journal:
+            payload=capture(Client(),['EURUSD'],120,180,60)
+            del payload['account']['account_fingerprint'];journal.append(payload)
+            self.assertEqual(journal.verify()[0],180)
+            with self.assertRaisesRegex(ValueError,'legacy recording lacks account fingerprint'):
+                recorder.record_windows(journal,lambda:self.fail('must reject before connecting'),capture,1,emit=lambda _:None)
+            self.assertEqual(journal.verify()[0],180)
+
     def test_partial_read_retries_same_window_then_commits_once(self):
         clients=[];starts=[];events=[];delays=[]
         def factory():
@@ -68,7 +87,7 @@ class ReconnectTests(unittest.TestCase):
         clients=[];reads=[]
         def factory():
             c=Client()
-            if clients:c.account_info=lambda:types.SimpleNamespace(server='fixture',currency='USD',leverage=30,trade_mode=0)
+            if clients:c.account_info=lambda:types.SimpleNamespace(login=123,server='fixture',currency='USD',leverage=30,trade_mode=0)
             clients.append(c);return c
         def read(*args):
             reads.append(args[2]);raise EOFError('transport failed')
@@ -107,7 +126,7 @@ class ReconnectTests(unittest.TestCase):
     def test_account_change_during_history_wait_is_rejected_before_retry_read(self):
         client=Client();attempts=[]
         def read(*args):attempts.append(args[2]);raise recorder.HistoryUnavailable('empty')
-        def change(_):client.account_info=lambda:types.SimpleNamespace(server='fixture',currency='USD',leverage=30,trade_mode=0)
+        def change(_):client.account_info=lambda:types.SimpleNamespace(login=123,server='fixture',currency='USD',leverage=30,trade_mode=0)
         with tempfile.TemporaryDirectory() as root,recorder.Journal(root,CONFIG) as journal:
             with self.assertRaisesRegex(ValueError,'account context changed'):
                 recorder.record_windows(journal,lambda:client,read,1,sleep=change,emit=lambda _:None)
@@ -123,7 +142,7 @@ class Client:
  def __init__(self,**kwargs):pass
  def initialize(self):return True
  def close(self):pass
- def account_info(self):return types.SimpleNamespace(server='fixture',currency='EUR',leverage=30,trade_mode=0)
+ def account_info(self):return types.SimpleNamespace(login=123,server='fixture',currency='EUR',leverage=30,trade_mode=0)
  def symbol_info_tick(self,s):return types.SimpleNamespace(time=600)
  def symbol_info(self,s):
   names=('name','digits','point','trade_contract_size','trade_tick_size','volume_min','volume_max','volume_step','currency_base','currency_profit','currency_margin','trade_calc_mode')
