@@ -3843,3 +3843,21 @@ The embedded page built successfully, inline JavaScript passed syntax validation
 and the rendered overview/disclosure were checked in the browser, including the
 current narrow viewport. No new runtime validation status is inferred from this
 informational UI change.
+
+### Isolated tester math-mode diagnostic
+
+A subsequent no-order probe in MT5's mathematical-calculation mode reached both
+OnInit and OnTester on its local test agent. The agent log records the expected
+OnTester result 42 and mathematical-test completion; an HTML report was created.
+The terminal nevertheless reported "some error after pass finished" before
+exiting with code 0, so this is not an unqualified successful tester run. Source,
+compiled program, config, logs and report hashes are recorded locally in
+`work/mt5-validation/isolated-tester/math-probe-evidence.json`.
+
+This narrows the earlier startup problem: compiled MQL can execute in the
+isolated test agent even though chart-attached startup probes did not produce
+handler evidence. Math mode has no market history, symbol information or order
+simulation, and is **not** independent signal/fill/account validation. Local
+agents were explicitly enabled and remote/cloud agents disabled. No shared
+terminal settings or broker account were changed.
+Reference: https://www.metatrader5.com/en/terminal/help/algotrading/tick_generation
