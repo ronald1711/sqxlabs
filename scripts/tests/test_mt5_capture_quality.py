@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mt5_capture_quality import check
+from mt5_capture_quality import check, conversion_coverage
 
 
 class CaptureQualityTests(unittest.TestCase):
@@ -35,6 +35,20 @@ class CaptureQualityTests(unittest.TestCase):
             with self.subTest(mutation=mutate):
                 data = copy.deepcopy(original); mutate(data)
                 with self.assertRaises(ValueError): check(data)
+
+    def test_conversion_never_borrows_future_quotes_and_enforces_age_boundary(self):
+        data = self.fixture(); conversion = copy.deepcopy(data['markets'][0]); conversion['symbol'] = 'FX'
+        conversion['raw_ticks'] = [dict(t, time_msc=60002) for t in conversion['raw_ticks']]
+        conversion['raw_warmup_ticks'] = [{'time': 59, 'time_msc': 59991, 'bid': 1.1, 'ask': 1.2}]
+        data['markets'].append(conversion)
+        result = conversion_coverage(data, 'TEST', ['FX'], 10)
+        self.assertEqual(result['status'], 'available')
+        self.assertEqual(result['symbols'][0]['maximum_age_ms'], 10)
+        self.assertEqual(conversion_coverage(data, 'TEST', ['FX'], 9)['symbols'][0]['stale_quote_events'], 2)
+        conversion['raw_warmup_ticks'] = []
+        result = conversion_coverage(data, 'TEST', ['FX'], 10000)
+        self.assertEqual(result['symbols'][0]['missing_previous_quote'], 2)
+        self.assertIsNone(result['symbols'][0]['maximum_age_ms'])
 
 
 if __name__ == '__main__':

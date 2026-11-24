@@ -664,3 +664,19 @@ A concurrent two-window export (hash a5137be1e54124c140dec232317227d79811f062387
 passed all six candle comparisons while recording continued. This is interim
 evidence, not completion of the fifteen-window probe. The 40-test Python suite
 passed, including mismatched OHLC, missing ticks and invalid-input regressions.
+
+The same checker optionally accepts `--event-symbol USDJPY
+--conversion-symbols EURUSD,EURJPY --max-conversion-age-ms 10000` (supply all three
+arguments together). It checks the last conversion quote at or before every
+observed event, using captured warmup quotes and rejecting future-quote borrowing.
+The age limit is inclusive. This checks quote availability across all event ticks,
+not actual strategy exposure or correctness of the chosen currency routes.
+
+The ongoing probe's first five-window snapshot
+8963c8390d6e6f0db380f278fa153b4456ae4e594fb87b994ba463aae50e825e had 15 matching
+bid candles. Of 458 USDJPY event ticks, 13 exceeded the 10,000 ms EURUSD quote-age
+limit (maximum 12,896 ms); EURJPY had no stale events (maximum 4,200 ms). No prior
+quotes were missing. The tool correctly returned a discrepancy/nonzero result;
+the limit was not relaxed. This does not establish a faulty broker quote: it
+establishes that these events do not satisfy the declared freshness contract.
+All 41 Python tests passed, including no-future-quote and exact-age-boundary cases.
