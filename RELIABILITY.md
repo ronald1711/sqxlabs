@@ -80,6 +80,20 @@ entry points need durable trial accounting. Power-loss and large-study behavior
 remain unverified. The CLI's generated walk-forward stage is a separate candidate
 search, not an out-of-sample evaluation of the supplied strategy.
 
+### Web stress-test interruption evidence (2026-11-24)
+
+The web route now journals its existing six cost scenarios and 1,000 Monte Carlo
+paths through the shared recovery protocol. Focused tests passed for complete
+2,016-event backup/restore/replay without live data, legacy report compatibility,
+storage failure at each sensitivity-event boundary, and UI error/recovery notices.
+The real server-kill regression initially failed because the CLI refused to open
+an empty data directory. After allowing an empty import/recovery workspace, it
+passed: kill after a durable Monte Carlo outcome, export the partial study, delete
+the original CSV/archive, restore over HTTP into a new empty server, and resume
+without changing saved event identities. Both existing CSV/manifest startup tests
+also passed. This does not establish power-loss durability, large-study performance
+or responsive progress/cancellation; the wider reliability programme remains open.
+
 ### Recovery integration evidence (2026-11-24)
 
 Integration PR #1 merged into `main` as `072f4f7`, retaining all commits originally

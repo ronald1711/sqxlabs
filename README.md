@@ -284,7 +284,11 @@ it may still be running. The whole-study backup includes the ordered journal.
 Recovery requires the matching application build and repeats the recorded prefix
 before continuing. Earlier single-report backups retain their original replay
 route. This adds interruption evidence, not independent execution validation;
-power-loss and large-study performance remain open.
+power-loss and large-study performance remain open. A real server-kill test also
+checks partial-backup restoration and resume after removing the original CSV and
+archive. To open an empty recovery workspace, use `serve --data-dir <empty-directory>
+--data-timeframe M1`; an empty directory now permits dashboard startup for import
+and recovery. Missing or malformed source files still fail their source checks.
 
 CLI `crosscheck` uses `--manifest` instead of inferring instruments from a folder.
 The schema-1 manifest contains a `markets` array with explicit `symbol`, `data`

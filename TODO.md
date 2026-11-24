@@ -72,8 +72,11 @@ remaining execution assumptions and unsupported cases are visible.
   The web stress-test route now uses the same journal for its existing cost and
   resampling stages. A full 2,016-event backup restores and replays without the
   original archive or live data. The UI identifies partial studies after lost
-  responses; legacy report replay is retained. A real web-process-kill test and
-  responsive progress/cancellation for long studies still need verification.
+  responses; legacy report replay is retained. A real HTTP process-kill test now
+  stops after a persisted Monte Carlo outcome, deletes the original archive and
+  CSV, restores through the web API into an empty server, and resumes all 2,016
+  events while preserving the saved prefix. Responsive progress/cancellation,
+  power loss and large-study limits still need verification.
   CLI pipelines retain exact engine bytes, frozen inputs/configuration/seed,
   a pre-execution start record, ordered stage/family events, per-build/retest
   starts and outcomes, and the full returned report before reporting errors.

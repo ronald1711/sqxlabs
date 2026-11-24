@@ -1015,7 +1015,7 @@ fn main() -> Result<()> {
                 }
             }
             if store.is_empty() && questdb_client.is_none() {
-                return Err(anyhow!("no data loaded"));
+                println!("No market data loaded. The dashboard is available for data import and archived research recovery.");
             }
             if open {
                 let url = format!("http://{addr}");
