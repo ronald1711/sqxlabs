@@ -106,3 +106,17 @@ and requires unchanged earlier evidence plus changed terminal results. No MT5
 installation, network connection or private market files are needed. These are
 bounded regression checks, not broker-execution certification. The GitHub workflow is active; unpublished local checks are not part of its
 remote coverage until their source changes are pushed and the resulting run passes.
+
+## Trigger and protection policy
+
+The reliability matrix runs for pull requests, pushes to `main`, and explicit
+manual dispatch. Feature-branch pushes rely on their pull request check rather
+than starting a second identical matrix. Before opening a pull request, run the
+local checks or explicitly dispatch the workflow for that branch. This changes
+scheduling, not test coverage: Linux/macOS and debug/release remain required.
+
+On 2026-11-24 the repository protection API confirmed all four named checks bound
+to GitHub Actions (app 15368), strict up-to-date enforcement, enforcement for
+administrators and disabled force pushes on `main`. A configured requirement is
+not evidence that a particular revision passed. Pending, cancelled or failed
+required checks do not authorize merging; do not use an administrator bypass.

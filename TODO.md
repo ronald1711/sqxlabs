@@ -124,7 +124,10 @@ remaining execution assumptions and unsupported cases are visible.
   45364814462. Fixed in fdee568; replacement run 45365576256 for 68a1319 passed
   all four jobs and both profile comparisons.
 - [x] Verify history-availability retry commit 44992ab in run 45369266431; all four platform/profile jobs and both profile comparisons passed.
-- [ ] Configure successful checks as required branch protections/ruleset checks.
+- [x] Require Linux/macOS debug/release checks on `main`, bound to GitHub Actions
+  (app 15368), with strict up-to-date enforcement, administrator enforcement and
+  force pushes disabled. Repository protection API reverified on 2026-11-24.
+  Individual revisions still need successful checks before merging.
 - [x] Retain exact engine bytes before creating new CLI evolution jobs; refuse creation on corrupt retained bytes and test separate-process resume.
 - [ ] Establish a versioned release/artifact retention procedure: archive replay
   requires the exact recorded executable, not merely compatible source code.
