@@ -258,3 +258,9 @@ See [README.md](README.md) for operation and [ci/README.md](ci/README.md) for ch
   Reject empty-data stress requests before submission and ignore stale asynchronous
   coverage responses, including A/B/A selection changes. Browser checks cover the
   empty state and import navigation; simulated delayed/failing responses cover races.
+
+- [x] Preserve MCP single-backtest input checkpoints, full execution results and
+  calculation errors through the shared pipeline history/recovery/backup tools.
+  Checkpoint-only and completed backups recover without source files; failed
+  calculations stay invalid. This route reruns a single backtest from the start.
+  MCP portfolio trial accounting and other remaining routes are still open.

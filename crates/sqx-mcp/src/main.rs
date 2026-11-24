@@ -9,7 +9,9 @@ use std::io::{BufRead, Write};
 
 use serde_json::{json, Value};
 
-use sqx_backtest::{backtest, BacktestConfig};
+use sqx_backtest::BacktestConfig;
+#[cfg(test)]
+use sqx_backtest::backtest;
 use sqx_core::{Bar, Instrument, Timeframe};
 use sqx_data::{read_csv_bars, DataStore, QuestdbClient, QuestdbConfig};
 use sqx_metrics::{compute as compute_metrics, Metrics};
@@ -17,7 +19,7 @@ use sqx_optimizer::{rank, random_strategy, Fitness, GeneratorConfig};
 use sqx_strategy::Strategy;
 
 mod generation_archive;
-mod robustness_archive;
+mod research_archive;
 
 const PROTOCOL: &str = "2024-11-05";
 
@@ -111,7 +113,7 @@ fn tools_list() -> Vec<Value> {
         }),
         json!({
             "name": "backtest",
-            "description": "Backtest a strategy JSON on CSV (data path, symbol and timeframe required) or QuestDB (symbol, optional timeframe default M5).",
+            "description": "Backtest and durably record a strategy on CSV (data path, symbol and timeframe required) or QuestDB (symbol, optional timeframe default M5). Use research_history after a lost response; recovery requires the exact original engine.",
             "inputSchema": { "type": "object", "properties": { "source": {"type":"string","enum":["csv","questdb"],"description":"CSV when data is present; otherwise QuestDB. CSV requires explicit symbol and timeframe."}, "config": { "type": "object", "description": "BacktestConfig: initial_deposit, spread_points, slippage_points, commission_per_lot and account (currency, max_leverage, stop_out_ratio, financing and historical conversion_rates)." }, "data": { "type": "string" }, "symbol": { "type": "string" }, "timeframe": { "type": "string" }, "limit": { "type": "integer" }, "strategy": { "type": "object" } }, "required": ["strategy"] }
         }),
         json!({
@@ -140,7 +142,7 @@ fn tools_list() -> Vec<Value> {
             schema["allOf"]=json!([{"if":{"required":["data"]},"then":{"required":["timeframe"]}}]);
         }
     }
-    tools.extend(robustness_archive::tools());
+    tools.extend(research_archive::tools());
     tools
 }
 
@@ -156,7 +158,7 @@ fn call_tool(params: &Value) -> Value {
     let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
     match name {
-        "research_history"|"research_resume"|"research_export"|"research_import"=>match robustness_archive::call(name,&args,&generation_archive::configured_archive()){
+        "research_history"|"research_resume"|"research_export"|"research_import"=>match research_archive::call(name,&args,&generation_archive::configured_archive()){
             Ok(value)=>{let mut response=text_result(value.to_string());if value["report"]["errors"].as_array().is_some_and(|errors|!errors.is_empty()){response["isError"]=json!(true);}response},
             Err(error)=>err_result(error),
         },
@@ -366,6 +368,10 @@ fn metrics_summary(m: &Metrics) -> String {
 }
 
 fn tool_backtest(args: &Value) -> Value {
+    tool_backtest_archived(args,&generation_archive::configured_archive())
+}
+
+fn tool_backtest_archived(args:&Value,archive:&sqx_project::archive::Archive)->Value{
     let strat_val = match args.get("strategy") {
         Some(v) => v.clone(),
         None => return err_result("missing strategy".to_string()),
@@ -382,10 +388,13 @@ fn tool_backtest(args: &Value) -> Value {
     let pyp = pyp_for(&bars);
     let cfg=match simulation_config(args,timeframe){Ok(config)=>config,Err(error)=>return err_result(error)};
     if let Err(error)=sqx_backtest::validate_backtest_inputs(&bars,&inst,&cfg){return err_result(error);}
-    let r = backtest(&strategy, &bars, &inst, &cfg);
-    if !r.errors.is_empty() { return err_result(r.errors.join("; ")); }
-    let m = compute_metrics(&r, bars.len(), pyp);
-    research_result(metrics_summary(&m),quality,&symbol,timeframe,&cfg)
+    let (report,start_id,completion_id)=match research_archive::execute_backtest(archive,&strategy,&bars,&inst,timeframe,&cfg,pyp,&quality){Ok(value)=>value,Err(error)=>return err_result(error)};
+    let summary=report.backtest.as_ref().map(|result|metrics_summary(&compute_metrics(result,bars.len(),pyp))).unwrap_or_else(||"Backtest unavailable".into());
+    let mut context=quality;context["errors"]=json!(report.errors);
+    let mut response=research_result(summary,context,&symbol,timeframe,&cfg);
+    response["archive"]=json!({"started_run_id":start_id,"run_id":completion_id,"replay_available":true});
+    if !report.errors.is_empty(){response["isError"]=json!(true);}
+    response
 }
 
 fn tool_generate(args: &Value) -> Value {
@@ -497,10 +506,10 @@ fn portfolio_result(strategies:&[Strategy],results:&[sqx_backtest::BacktestResul
 }
 
 fn tool_robustness(args: &Value) -> Value {
-    tool_robustness_archived(args,&generation_archive::configured_archive())
+    tool_research_archived(args,&generation_archive::configured_archive())
 }
 
-fn tool_robustness_archived(args:&Value,archive:&sqx_project::archive::Archive)->Value{
+fn tool_research_archived(args:&Value,archive:&sqx_project::archive::Archive)->Value{
     let strat_val = match args.get("strategy") {
         Some(v) => v.clone(),
         None => return err_result("missing strategy".to_string()),
@@ -517,7 +526,7 @@ fn tool_robustness_archived(args:&Value,archive:&sqx_project::archive::Archive)-
     let pyp = pyp_for(&bars);
     let cfg=match simulation_config(args,timeframe){Ok(config)=>config,Err(error)=>return err_result(error)};
     if let Err(error)=sqx_backtest::validate_backtest_inputs(&bars,&inst,&cfg){return err_result(error);}
-    let (report,start_id,completion_id)=match robustness_archive::execute(archive,&strategy,&bars,&inst,timeframe,&cfg,pyp,&quality){Ok(value)=>value,Err(error)=>return err_result(error)};
+    let (report,start_id,completion_id)=match research_archive::execute_robustness(archive,&strategy,&bars,&inst,timeframe,&cfg,pyp,&quality){Ok(value)=>value,Err(error)=>return err_result(error)};
     let mut lines=Vec::new();
     if let Some(study)=&report.robustness{
         lines.push(format!("base: {}",metrics_summary(&compute_metrics(&study.base,bars.len(),pyp))));
@@ -543,10 +552,16 @@ fn tool_robustness_archived(args:&Value,archive:&sqx_project::archive::Archive)-
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn archived_backtest_fixture(args:&Value)->Value{
+        let root=std::env::temp_dir().join(format!("sqx-mcp-backtest-{:032x}",rand::random::<u128>()));
+        let archive=sqx_project::archive::Archive::new(&root);let response=tool_backtest_archived(args,&archive);
+        let id=response["archive"]["run_id"].as_str().expect("backtest receipt");let saved=archive.load(id).unwrap();
+        assert!(saved.run.result["report"]["backtest"].is_object());std::fs::remove_dir_all(root).unwrap();response
+    }
     fn archived_robustness_fixture(args:&Value)->Value{
         let root=std::env::temp_dir().join(format!("sqx-mcp-robustness-{:032x}",rand::random::<u128>()));
         let archive=sqx_project::archive::Archive::new(&root);
-        let response=tool_robustness_archived(args,&archive);
+        let response=tool_research_archived(args,&archive);
         let id=response["archive"]["run_id"].as_str().expect("completed study retained, even on calculation errors");
         let saved=archive.load(id).unwrap();
         let start=archive.load(response["archive"]["started_run_id"].as_str().unwrap()).unwrap();
@@ -635,11 +650,11 @@ mod tests {
         let path=root.join("bars.csv");std::fs::write(&path,"timestamp,open,high,low,close,volume\n1700000000,1.1,1.101,1.099,1.1,1\n1700000060,1.1,1.101,1.099,1.1,1\n").unwrap();
         let archive=sqx_project::archive::Archive::new(root.join("archive"));
         let mut strategy=Strategy::new("invalid stop");strategy.stop_loss=Some(sqx_strategy::StopLoss::Points(-1.0));
-        let response=tool_robustness_archived(&json!({"data":path,"symbol":"EURUSD","timeframe":"M1","strategy":strategy}),&archive);
+        let response=tool_research_archived(&json!({"data":path,"symbol":"EURUSD","timeframe":"M1","strategy":strategy}),&archive);
         assert_eq!(response["isError"],true,"{response}");
         let id=response["archive"]["started_run_id"].as_str().expect("invalid base checkpoint");
         std::fs::remove_file(path).unwrap();
-        let resumed=robustness_archive::call("research_resume",&json!({"run_id":id}),&archive).unwrap();
+        let resumed=research_archive::call("research_resume",&json!({"run_id":id}),&archive).unwrap();
         assert_eq!(resumed["completion_id"],response["archive"]["run_id"]);assert_eq!(resumed["appended_events"],0);
         assert!(!resumed["report"]["errors"].as_array().unwrap().is_empty());assert!(resumed["report"]["robustness"]["monte_carlo"].is_null());
         std::fs::remove_dir_all(root).unwrap();
@@ -703,7 +718,7 @@ mod tests {
         request["config"]=json!({});
         assert_eq!(simulation_config(&request,timeframe).unwrap().bar_duration_ms,Some(60000));
         assert_eq!(simulation_config(&request,Timeframe::MN1).unwrap().bar_duration_ms,None);
-        let valid=tool_backtest(&request);
+        let valid=archived_backtest_fixture(&request);
         assert!(valid.get("isError").is_none(),"{valid}");
         assert!(valid.to_string().contains("research_context"));
         std::fs::write(&path,"timestamp,open,high,low,close,volume\n1700000000,150,151,149,150,1\n1700000120,150,151,149,150,1\n").unwrap();
@@ -711,7 +726,7 @@ mod tests {
             let response=tool(&request);assert_eq!(response["isError"],true,"{response}");assert!(response.to_string().contains("Unresolved data gaps"),"{response}");
         }
         request["allow_data_gaps"]=json!(true);
-        let exploratory=tool_backtest(&request);assert!(exploratory.get("isError").is_none(),"{exploratory}");
+        let exploratory=archived_backtest_fixture(&request);assert!(exploratory.get("isError").is_none(),"{exploratory}");
         let context:Value=serde_json::from_str(exploratory["content"][0]["text"].as_str().unwrap().split("research_context: ").nth(1).unwrap()).unwrap();
         assert_eq!(context["symbol"],"USDJPY");assert_eq!(context["timeframe"],"M1");
         assert_eq!(context["config"]["bar_duration_ms"],60000);assert_eq!(context["data_quality"]["unclassified_intervals"],1);

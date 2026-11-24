@@ -14,6 +14,7 @@ use sqx_strategy::Strategy;
 /// One pipeline step.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TaskKind {
+    Backtest { strategy: Strategy },
     Build { count: usize, keep: usize },
     Generate { count: usize, min_trades: usize },
     Retest { mc_runs: usize, min_positive_pct: f64 },
@@ -45,6 +46,8 @@ pub struct Pipeline {
 /// The outcome of running a pipeline.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PipelineReport {
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub backtest: Option<sqx_backtest::BacktestResult>,
     #[serde(skip_serializing_if="Option::is_none")]
     pub robustness: Option<RobustnessStudy>,
     #[serde(skip_serializing_if="Option::is_none")]
@@ -113,6 +116,8 @@ pub fn run(
 #[derive(Debug,serde::Serialize)]
 #[serde(tag="kind",rename_all="snake_case")]
 pub enum PipelineEvent<'a> {
+    BacktestStarted { step:usize, strategy:&'a Strategy },
+    BacktestOutcome { step:usize, result:&'a sqx_backtest::BacktestResult },
     RobustnessBaseStarted { step:usize, strategy:&'a Strategy },
     RobustnessBaseOutcome { step:usize, result:&'a sqx_backtest::BacktestResult },
     RobustnessScenario { step:usize, event:sqx_robustness::RobustnessEvent<'a> },
@@ -138,6 +143,9 @@ pub fn run_observed(
     observer:&mut impl FnMut(PipelineEvent<'_>)->Result<(),String>,
 )->Result<PipelineReport,String> {
     let failure=|error:String| Ok(PipelineReport{errors:vec![error],..Default::default()});
+    if pipeline.tasks.iter().any(|t|matches!(t.kind,TaskKind::Backtest{..})) && pipeline.tasks.len()!=1 {
+        return failure("A single backtest must be a standalone task; it does not select candidates".into());
+    }
     if pipeline.tasks.iter().any(|t|matches!(t.kind,TaskKind::Robustness{..}|TaskKind::Sensitivity{..})) && pipeline.tasks.len()!=1 {
         return failure("Robustness studies must be standalone tasks; they do not select a deployable strategy".into());
     }
@@ -156,7 +164,7 @@ pub fn run_observed(
             _=>{}
         }
     }
-    let mut retests=Vec::new();let mut builds=Vec::new();let mut optimizations=Vec::new();let mut errors=Vec::new();let mut discovery=None;let mut robustness=None;
+    let mut retests=Vec::new();let mut builds=Vec::new();let mut optimizations=Vec::new();let mut errors=Vec::new();let mut discovery=None;let mut robustness=None;let mut backtest_result=None;
     let mut rng = StdRng::seed_from_u64(seed);
     let mut databank: Vec<Strategy> = Vec::new();
     let mut log = Vec::new();
@@ -166,6 +174,12 @@ pub fn run_observed(
         steps += 1;
         observer(PipelineEvent::StepStarted{step:steps,task_index:pc,task:&pipeline.tasks[pc],inputs:&databank})?;
         match &pipeline.tasks[pc].kind {
+            TaskKind::Backtest{strategy}=>{
+                observer(PipelineEvent::BacktestStarted{step:steps,strategy})?;
+                let result=backtest(strategy,bars,instrument,config);
+                observer(PipelineEvent::BacktestOutcome{step:steps,result:&result})?;
+                errors.extend(result.errors.iter().cloned());backtest_result=Some(result);pc+=1;
+            },
             TaskKind::Robustness{strategy,scenarios,mc_runs,mc_seed,skip_probability,..} |
             TaskKind::Sensitivity{strategy,scenarios,mc_runs,mc_seed,skip_probability}=>{
                 observer(PipelineEvent::RobustnessBaseStarted{step:steps,strategy})?;
@@ -287,7 +301,7 @@ pub fn run_observed(
     }
     log.push(format!("Pipeline {} after {} steps; {} strategies in databank",if pc<pipeline.tasks.len(){"stopped at its limit"}else{"finished"}, steps, databank.len()));
     if pc<pipeline.tasks.len(){errors.push("Pipeline step limit reached before completion".into());}
-    Ok(PipelineReport {errors,retests,builds,optimizations,discovery,robustness,databank, log })
+    Ok(PipelineReport {backtest:backtest_result,errors,retests,builds,optimizations,discovery,robustness,databank, log })
 }
 
 /// A default demo pipeline: Build -> Retest -> Optimize.

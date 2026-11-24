@@ -141,3 +141,32 @@ fn retest_journal_records_each_trial_and_stops_before_selection_on_write_failure
   assert_eq!(result.unwrap_err(),"simulated trial journal failure");assert_eq!(seen,fail_at+1);
  }
 }
+
+#[test]
+fn standalone_backtest_retains_full_execution_and_stops_at_every_failed_checkpoint(){
+ let bars:Vec<_>=(0..20).map(|i|Bar::new(i*60000,1.1,1.101,1.099,1.1,1.0)).collect();
+ let instrument=Instrument::fx("EURUSD");let config=BacktestConfig::default();let generator=GeneratorConfig::default();
+ for invalid in [false,true]{
+  let mut strategy=sqx_strategy::Strategy::new("single control");strategy.long=true;strategy.short=false;
+  for kind in [sqx_strategy::SignalKind::LongEntry,sqx_strategy::SignalKind::LongExit]{strategy.signals.push(sqx_strategy::Signal::new(kind,vec![sqx_strategy::Condition::new(sqx_strategy::Operand::Const(1.0),sqx_strategy::Comparator::Gt,sqx_strategy::Operand::Const(0.0))],sqx_strategy::Join::And));}
+  if invalid{strategy.stop_loss=Some(sqx_strategy::StopLoss::Points(-1.0));}
+  let pipeline=Pipeline{name:"single".into(),tasks:vec![Task{kind:TaskKind::Backtest{strategy:strategy.clone()}}]};
+  let expected=sqx_backtest::backtest(&strategy,&bars,&instrument,&config);
+  if !invalid{assert!(!expected.trades.is_empty());}
+  let mut events=Vec::new();
+  let result=sqx_pipeline::run_observed(&pipeline,&bars,&instrument,&config,525600.0,&generator,42,&mut |event|{events.push(serde_json::to_value(event).unwrap());Ok(())}).unwrap();
+  assert_eq!(serde_json::to_value(result.backtest.as_ref().unwrap()).unwrap(),serde_json::to_value(&expected).unwrap());
+  assert_eq!(result.errors,expected.errors);assert!(result.databank.is_empty());assert!(result.builds.is_empty());assert!(result.robustness.is_none());
+  assert_eq!(events[1]["kind"],"backtest_started");assert_eq!(events[2]["kind"],"backtest_outcome");
+  assert_eq!(events[2]["result"],serde_json::to_value(expected).unwrap());
+  for failure in 0..events.len(){
+   let mut seen=0;
+   let interrupted=sqx_pipeline::run_observed(&pipeline,&bars,&instrument,&config,525600.0,&generator,42,&mut |event|{
+    assert_eq!(serde_json::to_value(event).unwrap(),events[seen]);let index=seen;seen+=1;if index==failure{Err("checkpoint failure".into())}else{Ok(())}
+   });
+   assert_eq!(interrupted.unwrap_err(),"checkpoint failure");assert_eq!(seen,failure+1);
+  }
+  let mixed=Pipeline{name:"invalid chain".into(),tasks:vec![pipeline.tasks[0].clone(),Task{kind:TaskKind::Build{count:1,keep:1}}]};
+  let report=run(&mixed,&bars,&instrument,&config,525600.0,&generator,42);assert!(!report.errors.is_empty());assert!(report.backtest.is_none());
+ }
+}
