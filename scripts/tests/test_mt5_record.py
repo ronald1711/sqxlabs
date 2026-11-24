@@ -78,6 +78,42 @@ class ReconnectTests(unittest.TestCase):
             self.assertEqual(reads,[120]);self.assertEqual(journal.verify()[0],120)
         self.assertEqual(len(clients),2);self.assertTrue(all(c.closed for c in clients))
 
+    def test_history_availability_retries_same_window_and_resets_only_after_commit(self):
+        client=Client();starts=[];events=[];counts={};delays=[]
+        def read(*args):
+            start=args[2];starts.append(start);counts[start]=counts.get(start,0)+1
+            if counts[start]<=2:raise recorder.HistoryUnavailable('fixture history pending')
+            return capture(*args)
+        with tempfile.TemporaryDirectory() as root,recorder.Journal(root,CONFIG) as journal:
+            def wait(delay):
+                delays.append(delay)
+                self.assertEqual(journal.verify()[0],starts[-1], 'unavailable history cannot advance progress')
+            result=recorder.record_windows(journal,lambda:client,read,2,history_attempts=2,sleep=wait,emit=events.append)
+            self.assertEqual(result,2);self.assertEqual(journal.verify()[0],240)
+        self.assertEqual(starts,[120,120,120,180,180,180]);self.assertEqual(delays,[5]*4)
+        self.assertEqual([e['status'] for e in events],['waiting_for_history']*2+['window_committed']+['waiting_for_history']*2+['window_committed'])
+        self.assertTrue(client.closed)
+
+    def test_exhausted_history_wait_keeps_cursor_and_closes_client(self):
+        client=Client();attempts=[]
+        def read(*args):attempts.append(args[2]);raise recorder.HistoryUnavailable('empty')
+        with tempfile.TemporaryDirectory() as root,recorder.Journal(root,CONFIG) as journal:
+            with self.assertRaises(recorder.HistoryUnavailable):
+                recorder.record_windows(journal,lambda:client,read,1,history_attempts=2,sleep=lambda _:None,emit=lambda _:None)
+            self.assertEqual(journal.verify()[0],120)
+            self.assertFalse(list((Path(root)/'records').glob('*.json')))
+        self.assertEqual(attempts,[120]*3);self.assertTrue(client.closed)
+
+    def test_account_change_during_history_wait_is_rejected_before_retry_read(self):
+        client=Client();attempts=[]
+        def read(*args):attempts.append(args[2]);raise recorder.HistoryUnavailable('empty')
+        def change(_):client.account_info=lambda:types.SimpleNamespace(server='fixture',currency='USD',leverage=30,trade_mode=0)
+        with tempfile.TemporaryDirectory() as root,recorder.Journal(root,CONFIG) as journal:
+            with self.assertRaisesRegex(ValueError,'account context changed'):
+                recorder.record_windows(journal,lambda:client,read,1,sleep=change,emit=lambda _:None)
+            self.assertEqual(journal.verify()[0],120)
+        self.assertEqual(attempts,[120]);self.assertTrue(client.closed)
+
     def test_cli_empty_history_fails_without_committing_or_retrying(self):
         import subprocess,json
         code="""import sys,types,runpy
@@ -97,7 +133,7 @@ class Client:
 module=types.ModuleType('siliconmetatrader5');module.MetaTrader5=Client
 sys.modules['siliconmetatrader5']=module
 root=sys.argv[2];script=sys.argv[1]+'/mt5_record.py'
-sys.argv=[script,'--symbols','EURUSD','--server','fixture','--broker-start','120','--out',root]
+sys.argv=[script,'--symbols','EURUSD','--server','fixture','--broker-start','120','--out',root,'--history-attempts','0']
 runpy.run_path(script,run_name='__main__')
 """
         with tempfile.TemporaryDirectory() as root:

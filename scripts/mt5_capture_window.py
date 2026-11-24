@@ -14,6 +14,7 @@ import tempfile
 import time
 
 from mt5_export import bar_lines, tick_lines
+from mt5_errors import HistoryUnavailable
 
 
 def capture(client, symbols, start, end, warmup_seconds=60):
@@ -43,7 +44,7 @@ def capture(client, symbols, start, end, warmup_seconds=60):
         bars = client.copy_rates_range(symbol, client.TIMEFRAME_M1, start, end-1)
         ticks = client.copy_ticks_range(symbol, start-warmup_seconds, end, client.COPY_TICKS_ALL)
         if bars is None or ticks is None or len(bars) == 0 or len(ticks) == 0:
-            raise ValueError(f'{symbol}: empty or failed history response')
+            raise HistoryUnavailable(f'{symbol}: empty or failed history response (bars={None if bars is None else len(bars)}, ticks={None if ticks is None else len(ticks)})')
         # Preserve all source fields and duplicate-millisecond observations.
         def rows(data):
             return [{name: row[name].item() for name in data.dtype.names} for row in data]

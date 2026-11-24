@@ -9,6 +9,7 @@ scripts/*
 !scripts/mt5_capture_window.py
 !scripts/mt5_capture_journal.py
 !scripts/mt5_record.py
+!scripts/mt5_errors.py
 !scripts/mt5_recording_export.py
 !scripts/mt5_recording_status.py
 !scripts/mt5_reference_check.py

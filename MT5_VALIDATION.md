@@ -612,3 +612,36 @@ changed candles, and clearing evidence on plain replacement. Browser checks on
 an isolated localhost server imported a synthetic two-candle bundle and visibly
 confirmed its limited verification status. The file-reader checks preserve exact
 bytes, reject missing/duplicate/oversized selections and propagate read failures.
+
+## Closed-window history can arrive late
+
+A five-minute live observation encountered an empty/failed EURJPY history response
+immediately after the first minute closed. No record was committed. A later
+read-only request for that identical window returned one M1 candle and ticks.
+The preserved journal resumed from the same cursor; the first failed attempt was
+retained locally. This is evidence of delayed history availability, not permission
+to skip a market or fabricate a candle.
+
+Capture now distinguishes `HistoryUnavailable` (empty/None rates or ticks) from
+malformed data. The recorder retries only this availability condition, by default
+three times at the polling interval; `--history-attempts 0` preserves immediate
+failure, and 0–10 is accepted. Each attempt rechecks account identity and rereads
+the same complete window. Counters reset only after a durable commit. Exhaustion
+still exits with recording_failed and leaves the cursor unchanged. Malformed
+candles, changed metadata/account context and storage failures remain fatal.
+
+The 34-test Python suite covers bounded availability retries, reset after commit,
+unchanged progress while waiting, exhaustion, account changes before rereading,
+and the zero-retry CLI diagnostic. No real broker-outage, multi-day or power-loss
+guarantee follows from this change.
+
+The resumed observation committed five windows [1795520640,1795520940) and
+exported the first two while its writer was still alive. The final immutable
+capture was ce2207c0415b09a1228d989aa00f3fcb28f678cb3fdde5ecc5899a6d3ed96807.
+All 15 recorded M1 bid candles matched their observed tick OHLC. This does not
+prove every broker tick was received. At USDJPY event times, EURJPY conversion
+quotes were at most 2402 ms old; EURUSD reached 11769 ms at one event, exceeding
+the current 10000 ms reference contract. That contract was not relaxed to declare
+the new sample fully covered. A later invocation of the updated recorder appended
+one more window successfully; automatic late-history recovery itself is covered
+by the controlled tests, not claimed as observed in that successful invocation.
