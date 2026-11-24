@@ -4425,3 +4425,15 @@ Final selected executions, walk-forward trial executions and portfolio execution
 have fuller evidence. Complete execution-level accounting for all rejected generic
 build/generation candidates therefore remains open; a saved trial count alone
 must not be described as full fill/account evidence for every candidate.
+
+
+Full build-execution follow-up: new generic pipeline Build/Generate records now
+include each complete BacktestResult alongside the existing metrics/errors, both
+in the pre-selection outcome event and final build report. The unchanged ranking
+uses the same seed, candidate names and fitness rules. The pipeline test suite
+passes, including direct full-execution comparison for all 100 generated
+candidates (selected and rejected), and existing seed/ranking and write-failure
+checks. Legacy records are not backfilled; replay still requires their exact
+recorded engine. The real HTTP pipeline crash/portable-restore check is running.
+Retaining full results increases archive and memory requirements; scale limits
+remain an explicit unresolved requirement.

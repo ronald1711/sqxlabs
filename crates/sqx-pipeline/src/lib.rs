@@ -8,7 +8,7 @@ use rand::SeedableRng;
 
 use sqx_backtest::{backtest, BacktestConfig};
 use sqx_core::{Bar, Instrument};
-use sqx_optimizer::{backtest_batch_detailed, rank, random_strategy, Fitness, GeneratorConfig};
+use sqx_optimizer::{rank, random_strategy, Fitness, GeneratorConfig};
 use sqx_strategy::Strategy;
 
 /// One pipeline step.
@@ -108,6 +108,7 @@ pub struct RobustnessStudy {
 
 #[derive(Debug,Clone,serde::Serialize)]
 pub struct BuildEvaluation {
+    pub execution:sqx_backtest::BacktestResult,
     pub step: usize,
     pub candidate_index: usize,
     pub evaluation: sqx_optimizer::BatchEvaluation,
@@ -167,7 +168,7 @@ pub enum PipelineEvent<'a> {
     StepStarted { step:usize, task_index:usize, task:&'a Task, inputs:&'a [Strategy] },
     BuildFamily { step:usize, candidates:&'a [Strategy] },
     BuildStarted { step:usize, candidate_index:usize, strategy:&'a Strategy },
-    BuildOutcome { step:usize, candidate_index:usize, evaluation:&'a sqx_optimizer::BatchEvaluation },
+    BuildOutcome { step:usize, candidate_index:usize, evaluation:&'a sqx_optimizer::BatchEvaluation, execution:&'a sqx_backtest::BacktestResult },
     RetestStarted { step:usize, candidate_index:usize, strategy:&'a Strategy },
     RetestBaseOutcome { step:usize, candidate_index:usize, result:&'a sqx_backtest::BacktestResult },
     RetestTrial { step:usize, candidate_index:usize, event:sqx_robustness::RobustnessEvent<'a> },
@@ -329,21 +330,25 @@ pub fn run_observed(
                 let mut evaluations=Vec::with_capacity(cands.len());
                 for (candidate_index,strategy) in cands.iter().enumerate() {
                     observer(PipelineEvent::BuildStarted{step:steps,candidate_index,strategy})?;
-                    let evaluation=backtest_batch_detailed(std::slice::from_ref(strategy),bars,instrument,config,periods_per_year).remove(0);
-                    observer(PipelineEvent::BuildOutcome{step:steps,candidate_index,evaluation:&evaluation})?;
-                    evaluations.push(evaluation);
+                    let execution=backtest(strategy,bars,instrument,config);
+                    let metrics=sqx_metrics::compute(&execution,bars.len(),periods_per_year);
+                    let mut evaluation_errors=execution.errors.clone();
+                    if let Err(error)=sqx_metrics::validate_observations(&execution){evaluation_errors.push(error);}
+                    let evaluation=sqx_optimizer::BatchEvaluation{strategy:strategy.clone(),metrics,errors:evaluation_errors};
+                    observer(PipelineEvent::BuildOutcome{step:steps,candidate_index,evaluation:&evaluation,execution:&execution})?;
+                    evaluations.push((evaluation,execution));
                 }
                 let mut scored=Vec::new();
-                for (index,evaluation) in evaluations.iter().enumerate(){
+                for (index,(evaluation,_)) in evaluations.iter().enumerate(){
                     if !evaluation.errors.is_empty(){
                         errors.push(format!("Build step {steps}, candidate {index} ({}): {}",evaluation.strategy.name,evaluation.errors.join("; ")));
                     }else{scored.push((evaluation.strategy.clone(),evaluation.metrics));}
                 }
                 let ranked = rank(scored, Fitness::ProfitFactor, min_trades);
                 databank = ranked.into_iter().take(keep).map(|(s, _)| s).collect();
-                for (candidate_index,evaluation) in evaluations.into_iter().enumerate(){
+                for (candidate_index,(evaluation,execution)) in evaluations.into_iter().enumerate(){
                     let selected=databank.contains(&evaluation.strategy);
-                    builds.push(BuildEvaluation{step:steps,candidate_index,evaluation,selected});
+                    builds.push(BuildEvaluation{execution,step:steps,candidate_index,evaluation,selected});
                 }
                 log.push(format!("Build: {} candidates -> {} kept", count, databank.len()));
                 pc += 1;

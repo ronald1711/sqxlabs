@@ -17,6 +17,14 @@ fn final_databank_execution_is_full_reproducible_and_write_failures_abort(){
   assert_eq!(serde_json::to_value(&row.execution).unwrap(),serde_json::to_value(direct).unwrap());
  }
  assert_eq!(events.iter().filter(|e|e["kind"]=="final_evaluation_outcome").count(),2);
+ assert_eq!(report.builds.len(),100);assert!(report.builds.iter().any(|r|!r.selected));
+ for row in &report.builds {
+  let direct=sqx_backtest::backtest(&row.evaluation.strategy,&bars,&instrument,&config);
+  assert_eq!(serde_json::to_value(&row.execution).unwrap(),serde_json::to_value(direct).unwrap());
+  let event=events.iter().find(|e|e["kind"]=="build_outcome"&&e["candidate_index"]==row.candidate_index).unwrap();
+  assert_eq!(event["execution"],serde_json::to_value(&row.execution).unwrap());
+ }
+
  for fail_on_outcome in [false,true]{
   let mut seen=0;
   let error=run_observed(&pipeline,&bars,&instrument,&config,525600.0,&generator,42,&mut |event|{
