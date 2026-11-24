@@ -4400,3 +4400,28 @@ summary label: that counter counts only OOS executions, not all examined windows
 The label now says “Windows with OOS execution”. Inline syntax and request tests
 pass; the final label-only revision has not been recaptured in the browser.
 This was a local fixture; no MT5 or broker connection was used.
+
+### Dashboard pipeline pre-execution journal (unmerged, 2026-11-24)
+
+The dashboard build/retest/optimize route now stores its frozen request before
+execution and uses the shared ordered journal/recovery protocol. A final
+EvaluateDatabank stage retains complete selected-strategy executions and metrics;
+rendering no longer performs an unrecorded extra backtest. Returned databank rows
+carry the completion/start identities and final candidate index. Legacy report
+replay keeps its prior calculation path and remains tested.
+
+Five targeted web pipeline tests pass, including a two-candidate search with no
+survivors restored after deleting its original archive and removing live data.
+The zero-survivor result is a completed exploratory search, not sufficient trading
+evidence. The new final-evaluation test compares both full executions with direct
+backtests and verifies immediate abort at failed start/outcome writes. Browser
+request tests cover lost replies, frozen-input retry and duplicate-start prevention.
+Full workspace/platform checks, rendered pipeline review and actual HTTP process
+kill for this route remain pending.
+
+Coverage caveat: generic Build/Generate events currently retain BatchEvaluation
+(strategy, metrics and errors), not full per-candidate BacktestResult values.
+Final selected executions, walk-forward trial executions and portfolio executions
+have fuller evidence. Complete execution-level accounting for all rejected generic
+build/generation candidates therefore remains open; a saved trial count alone
+must not be described as full fill/account evidence for every candidate.

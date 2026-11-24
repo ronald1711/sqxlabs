@@ -449,7 +449,7 @@
           <input type="number" id="proj-count" value="300" min="1" max="2000">
           <label class="muted">Keep</label>
           <input type="number" id="proj-keep" value="20" min="1" max="200">
-          <button id="proj-run">Run pipeline</button>
+          <button id="proj-run">Run pipeline</button><button id="proj-new-request" class="secondary" hidden>Use current settings for a new study</button>
         </div>
         <pre id="proj-log" class="muted" style="white-space:pre-wrap; margin-top:12px;"></pre>
       </div>
@@ -1247,21 +1247,39 @@ async function loadCatalog() {
   initializeWorkspace();
 }
 
-document.getElementById("proj-run").onclick = async function() {
-  const box = document.getElementById("proj-log");
-  box.textContent = "Running pipeline (build → retest → optimize)...";
-  const inputs=generatorInputs(box);if(!inputs)return;
-  const body = Object.assign({
-    count: Number(document.getElementById("proj-count").value),
-    keep: Number(document.getElementById("proj-keep").value),
-    symbol: selectedSymbol()
-  }, inputs);
-  const d = await postJSON("/api/pipeline", JSON.stringify(body));
-  const archiveNote=d.archive ? "\nReport archived: "+d.archive.run_id : "";
-  if(d.archive)refreshResearchRuns();
-  if (d.error) { box.textContent = d.error+archiveNote; return; }
-  box.textContent = researchNotice(d.research_context)+"\nDatabank: " + (d.databank || 0) + " strategies\n\n" + (d.log || []).join("\n")+archiveNote;
+let pipelineRequestPending=false;
+const pipelinePendingKey='sqx.pendingPipeline.v1';
+document.getElementById('proj-new-request').onclick=function(){
+  if(pipelineRequestPending)return;
+  localStorage.removeItem(pipelinePendingKey);this.hidden=true;
+  document.getElementById('proj-log').textContent='The next run will use current settings. This does not cancel an earlier pipeline; inspect Builder → Saved research for its status.';
 };
+async function runPipeline(){
+  const box=document.getElementById('proj-log'),button=document.getElementById('proj-run'),fresh=document.getElementById('proj-new-request');
+  if(pipelineRequestPending)return;
+  pipelineRequestPending=true;button.disabled=true;
+  try{
+    let body;const pending=localStorage.getItem(pipelinePendingKey);
+    if(pending){body=JSON.parse(pending);if(!body||typeof body.request_key!=='string')throw Error('Stored request is invalid. Inspect Saved research before choosing a new study.');}
+    else{
+      const inputs=generatorInputs(box);if(!inputs)return;
+      body=Object.assign({count:Number(document.getElementById('proj-count').value),keep:Number(document.getElementById('proj-keep').value),symbol:selectedSymbol()},inputs);
+      if(!body.symbol)throw Error('Load and select market data before running a pipeline.');
+      body.request_key=crypto.randomUUID();localStorage.setItem(pipelinePendingKey,JSON.stringify(body));
+    }
+    fresh.hidden=false;box.textContent=pending?'Retrying the saved pipeline settings…':'Running and saving pipeline research…';
+    let d;try{d=await postJSON('/api/pipeline',JSON.stringify(body));}
+    catch(error){box.textContent='The response could not be received. The pipeline may still be running. Retry to locate the same request, or inspect Builder → Saved research before starting a new study.';return;}
+    const id=d.archive&&d.archive.started_run_id;
+    const saved=id?'\nSaved pipeline: '+id+'. Open Builder → Saved research to inspect, back up or resume. Replay checks repeatability, not independent correctness.':'';
+    if(id){localStorage.removeItem(pipelinePendingKey);fresh.hidden=true;refreshResearchRuns();}
+    if(d.recovery_required){box.textContent=(d.message||'This pipeline already exists; inspect its saved status.')+saved;return;}
+    if(d.error){box.textContent=d.error+saved;return;}
+    box.textContent=researchNotice(d.research_context)+'\nDatabank: '+(d.databank||0)+' strategies\n\n'+(d.log||[]).join('\n')+saved;
+  }catch(error){box.textContent=error.message||String(error);fresh.hidden=false;}
+  finally{pipelineRequestPending=false;button.disabled=false;}
+}
+document.getElementById('proj-run').onclick=runPipeline;
 
 let optimizationRequestPending=false;
 const optimizationPendingKey='sqx.pendingOptimization.v1';
