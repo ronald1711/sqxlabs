@@ -239,3 +239,8 @@ See [README.md](README.md) for operation and [ci/README.md](ci/README.md) for ch
   exit-distance family, with the original strategy first in every window.
   A regression reproduces the former unrelated-control failure; all 17 MCP tests
   pass. Durable checkpoints for MCP robustness remain outstanding.
+
+- [x] Journal build-pipeline retest base executions and individual Monte Carlo
+  paths, including ordered trade selections and failures, before survivor selection.
+  Failure injection covers retest start, base outcome, each trial and final outcome.
+  This closes a partial-result retention gap, not independent execution validation.

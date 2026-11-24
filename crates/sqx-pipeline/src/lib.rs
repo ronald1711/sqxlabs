@@ -9,7 +9,6 @@ use rand::SeedableRng;
 use sqx_backtest::{backtest, BacktestConfig};
 use sqx_core::{Bar, Instrument};
 use sqx_optimizer::{backtest_batch_detailed, rank, random_strategy, Fitness, GeneratorConfig};
-use sqx_robustness::monte_carlo_trade_manipulation;
 use sqx_strategy::Strategy;
 
 /// One pipeline step.
@@ -122,6 +121,8 @@ pub enum PipelineEvent<'a> {
     BuildStarted { step:usize, candidate_index:usize, strategy:&'a Strategy },
     BuildOutcome { step:usize, candidate_index:usize, evaluation:&'a sqx_optimizer::BatchEvaluation },
     RetestStarted { step:usize, candidate_index:usize, strategy:&'a Strategy },
+    RetestBaseOutcome { step:usize, candidate_index:usize, result:&'a sqx_backtest::BacktestResult },
+    RetestTrial { step:usize, candidate_index:usize, event:sqx_robustness::RobustnessEvent<'a> },
     RetestOutcome { step:usize, candidate_index:usize, evaluation:&'a RetestEvaluation },
     OptimizeFamily { step:usize, candidate_index:usize, original:&'a Strategy, family:&'a [Strategy] },
     OptimizeFailure { step:usize, candidate_index:usize, original:&'a Strategy, error:&'a str },
@@ -242,12 +243,13 @@ pub fn run_observed(
                 for (candidate_index,s) in databank.drain(..).enumerate() {
                     observer(PipelineEvent::RetestStarted{step:steps,candidate_index,strategy:&s})?;
                     let r = backtest(&s, bars, instrument, config);
+                    observer(PipelineEvent::RetestBaseOutcome{step:steps,candidate_index,result:&r})?;
                     if !r.errors.is_empty(){
                         retests.push(RetestEvaluation{step:steps,strategy:s,requested_runs:*mc_runs,seed,minimum_positive_pct:*min_positive_pct,errors:r.errors.clone(),report:None,selected:false});
                         observer(PipelineEvent::RetestOutcome{step:steps,candidate_index,evaluation:retests.last().unwrap()})?;
                         errors.extend(r.errors);continue;
                     }
-                    let mc = monte_carlo_trade_manipulation(&r.trades, *mc_runs, 0.1, seed);
+                    let mc = sqx_robustness::monte_carlo_trade_manipulation_observed(&r.trades, *mc_runs, 0.1, seed,&mut |event|observer(PipelineEvent::RetestTrial{step:steps,candidate_index,event}))?;
                     if !mc.errors.is_empty(){let error=format!("Retest step {steps}, {} unavailable: {}",s.name,mc.errors.join("; "));log.push(error.clone());errors.push(error);}
                     let selected=mc.meets_positive_threshold(*min_positive_pct);
                     retests.push(RetestEvaluation{step:steps,strategy:s.clone(),requested_runs:*mc_runs,seed,minimum_positive_pct:*min_positive_pct,errors:mc.errors.clone(),report:Some(mc),selected});

@@ -293,6 +293,13 @@ kill, source deletion, portable restore and resume reproduce the uninterrupted
 completion identity. This is repeatability evidence, not a claim of independent
 samples, sufficient statistical power or execution correctness.
 
+The build pipeline's `Retest` stage also journals the full base execution and
+starts/outcomes for every trade-resampling path, indexed by pipeline step and
+candidate. Failure to write a checkpoint stops the stage before further trials
+or selection. Recovery verifies the saved prefix before appending missing events;
+old studies still require their original executable. These paths resample the
+same trades and do not constitute independent market observations.
+
 Web stress tests now use the same checkpoint/recovery protocol for their six
 cost scenarios and 1,000 trade-resampling paths. They save inputs before running,
 and preserve completed steps if execution stops. In **Saved research runs**,
