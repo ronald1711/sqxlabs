@@ -3834,3 +3834,12 @@ cover stop-change time/level, exit reason/time/price, PnL and final equity. All 
 fixed-price cases passed in debug and release. These cover the declared ten-pip
 distance and fixed-size USD-account contract only; ATR distances, combined stop
 types, financing, conversion and broker parity need separate evidence.
+
+The dashboard Overview now distinguishes execution-model reference examples,
+per-run data/replay records and the still-required independent strategy/broker
+comparison. Its disclosure explains holdout discipline and explicitly states that
+this is validation guidance, not live CI status or approval of a selected strategy.
+The embedded page built successfully, inline JavaScript passed syntax validation,
+and the rendered overview/disclosure were checked in the browser, including the
+current narrow viewport. No new runtime validation status is inferred from this
+informational UI change.
