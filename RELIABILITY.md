@@ -4388,3 +4388,15 @@ completion identity matches an uninterrupted frozen-input replay, and a second
 recovery appends nothing. Full workspace, platform checks and rendered
 optimization UI verification remain pending for this increment. This is reproducibility evidence, not an
 independent review of walk-forward arithmetic or untouched holdout provenance.
+
+
+Rendered optimization review (2026-11-24): an isolated local dashboard ran a
+1500-bar EURUSD/M1 synthetic fixture, two walk-forward windows and two candidates
+per window, with deliberately unmet 999/777 trade thresholds. The page showed
+four attempts, both rejected windows, unchanged equity, the immutable saved-study
+receipt and explicit insufficient-evidence/holdout limitations. It did not present
+missing trades as validation success. The review exposed an ambiguous “Windows”
+summary label: that counter counts only OOS executions, not all examined windows.
+The label now says “Windows with OOS execution”. Inline syntax and request tests
+pass; the final label-only revision has not been recaptured in the browser.
+This was a local fixture; no MT5 or broker connection was used.

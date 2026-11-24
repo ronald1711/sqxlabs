@@ -1309,7 +1309,7 @@ async function runOptimization() {
     box.innerHTML = saved+html;
     refreshDatabank();
   } else if (d.kind === "walk-forward") {
-    let html = "<table><tr><th>Windows</th><th>OOS trades</th><th>OOS net</th><th>OOS PF</th><th>OOS win %</th><th>OOS DD %</th></tr>";
+    let html = "<table><tr><th>Windows with OOS execution</th><th>OOS trades</th><th>OOS net</th><th>OOS PF</th><th>OOS win %</th><th>OOS DD %</th></tr>";
     html += "<tr><td>" + d.windows + "</td><td>" + d.oos_trades + "</td><td>" + fmt(d.oos_net_profit, 2) + "</td><td>" + fmt(d.oos_profit_factor, 2) + "</td><td>" + fmt(d.oos_winning_pct, 1) + "</td><td>" + fmt(d.oos_max_dd_pct, 2) + "</td></tr></table>";
     html += '<p><b>'+ (d.evidence_sufficient ? 'Trade-count criteria met' : 'Insufficient or incomplete evidence') + '</b> · '+d.candidates_attempted+' candidates attempted. This is not a robustness certificate or an untouched final holdout.</p>';
     if(d.errors && d.errors.length)html+='<p class="neg">'+d.errors.map(escapeHtml).join('; ')+'</p>';
