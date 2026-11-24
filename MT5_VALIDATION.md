@@ -746,3 +746,45 @@ not proof of prolonged-outage or power-loss recovery. Account binding remains
 `legacy_settings_only` because this process started before fingerprint support.
 Private status and quality reports remain under `work/mt5-validation/`; no raw
 account history or market capture is published. No broker orders were sent.
+
+## Prospective fingerprint-bound five-window observation
+
+Before recording, a private plan fixed broker interval [1795530840,1795531140),
+the next complete future minute plus four more minutes, EURUSD/USDJPY/EURJPY,
+60-second warmup, and the unchanged 10,000 ms conversion-age limit. There was no
+post-capture range selection. The recorder exited successfully with five verified
+contiguous windows and `server_login_fingerprint` binding. Final capture hash:
+`f406d795b3680173386e5a7d8bee700107cada01a91ed6dfbc7252726d9aae9f`.
+
+All 15 bid OHLC candles matched observed ticks. Across 495 USDJPY event ticks,
+no prior conversion quotes were missing or stale: maximum EURUSD age was 9,600 ms
+and EURJPY age 2,079 ms. This is availability/observed OHLC agreement, not proof
+of complete broker history, UTC authenticity or actual fill correspondence.
+The earlier 15-window stale-quote rejection remains valid negative evidence.
+
+The original eight-case checker stopped on SMA(2)-short because it assumed every
+case would execute one trade. Independent close/SMA comparison found eligible
+long signals at indices 1, 2 and 3, and no eligible short signal with a following
+fill bar. The engine correctly recorded no short entry attempts, no trades and
+unchanged initial/final EUR 10,000 equity. The initial failed attempt/log and its
+checker identity are retained privately; the window and freshness rule were not
+changed to obtain coverage.
+
+The checker now records per-case progress, verifies the no-trade result and replay
+when a SMA signal is absent, continues the remaining cases, and returns nonzero
+`coverage_incomplete` unless all eight distinct execution cases are exercised.
+On the same entire capture, seven execution cases passed independent Decimal
+calculations and archive replay: constant long/short, SMA(2) long, stop long/short
+and signal-exit long/short. SMA(2) short is `not_exercised`, with its no-trade
+behavior separately verified. This must not be presented as eight successful
+execution cases.
+
+Simulation assumptions remain EUR 10,000, 0.1 lot USDJPY, EUR 3.5/lot round-trip
+commission, one broker point adverse slippage per fill, forex-base margin at
+1:30 and directional account conversion from the observed EURUSD/EURJPY quotes.
+Engine hash: `38e0661c4e18ce7c8ee41c146c034eac626a039f05561d0bf22086b83bd4e269`.
+Checker hash: `a714cfa2ec49f936a2bf2cccf17430dd506fceaf5df12ec4dcb585cfa235bffa`.
+These are independent calculations under the declared simulation contract, not
+MT5 Strategy Tester trades, actual broker fills or certified broker fees. Raw
+captures, fingerprints, plans and comparison reports remain private under work/.
+No orders or shared-terminal setting changes were performed.

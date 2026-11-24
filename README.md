@@ -619,6 +619,12 @@ CLOCK_POLICY_JSON` from the repository root for an independent Decimal check of
 eight USDJPY tick trials (constant-entry, close-versus-SMA(2), stop-loss and signal exit, each long/short) on a captured EUR account dataset. The script
 requires the built CLI, normalizes source bundles, freezes account conversion
 rates, archives and replays each trial, and writes reference/comparison.json.
+If a SMA(2) direction has no executable signal in the fixed capture, the script
+verifies zero trades and unchanged equity, continues the remaining cases, and
+returns nonzero `coverage_incomplete`. Correct no-trade behavior is not evidence
+that entry/fill/cost execution for that direction was exercised. Per-case progress
+is retained if a later check fails; do not select a different subwindow merely to
+turn missing coverage into a passing report.
 It independently calculates the first eligible signal and SMA(2) value, and checks
 entry/exit prices and times, commission, net profit, final equity and
 entry margin. Scope is fixed 0.1 lot, EUR 10,000, 1:30 leverage, 0.4-pip stops for stop cases (one entry per day),

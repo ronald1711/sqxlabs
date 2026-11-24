@@ -43,7 +43,7 @@ resolved by a later increment. The numbered requirements above remain unchanged.
 | 3. Independent evidence | Indicator cross-checks use pinned Rust reference packages with seed/convention exceptions. Separate Decimal references cover eight scoped USDJPY/EUR strategy cases, and integer-price fixtures cover walk-forward and symmetric/dynamic stop cases. Run 45392742726 passed Linux/macOS debug/release checks and profile comparisons for f15c790; later commits require their own evidence. The isolated MT5 mathematical tester runs, but no market-mode strategy comparison has completed. | Coverage of every advertised indicator/convention and supported execution feature; independently sourced MT5/broker strategy/fill fixtures; required server-side checks and durable release artifacts. Green checks do not prove these. |
 | 4. Reproducible records | Immutable inputs/results, restore/replay and process-kill tests cover selected CLI, assistant and evolution routes. Browser imports persist as immutable versions and can be explicitly reloaded after restart, including optional calendar/normalization evidence. Selected routes automatically retain exact engine bytes; CLI evolution inspection distinguishes missing and verified copies. MCP generation preserves every candidate checkpoint/full result and supports single-trial and whole-search recovery with engine checks, replay and writer exclusion; recovery reproduces all 64 outcomes of a separate uninterrupted fixture. MT5 journals support verified export and process resume; new captures bind server/login through a private fingerprint. | Complete recording/conversion provenance and durable accounting on all research routes; linked MCP search backup/restore; legacy missing-engine recovery, provider-conversation recovery and bounded retained-result memory. Executable copies do not preserve runtime dependencies. |
 | 5. Research validity | Walk-forward warms from history, carries capital and records candidate outcomes/selection; an independent integer-price SMA fixture checks segmented selection and capital. Holdout audits include declared candle extents, assistant/crosscheck/comparison/evolution exposure and MCP generation phases; record counts remain distinct from independent trial counts. Commitment evidence survives experiment restore. | Complete durable trial accounting across every entry point and independent boundary/evidence review. Search-history completeness and no-known-overlap labels do not establish untouched data outside the registry. |
-| 6. Operational workspace | Resumable evolution and MCP generation, raw backups, saved comparisons and bounded assistant tools have tests. UI trade explanations show protection, financing, stop-out and settlement; overview explains limited evidence. A 15-window read-only live capture matched all 45 bid candles but failed the declared conversion freshness limit at 13 USDJPY events; it retained legacy account binding. A separate new fingerprint-bound recording resumed across processes. HTTP remote addresses are rejected. | Broader live recording/outage/power-loss validation, complete evidence/recovery UI, AI provider-conversation recovery, known-strategy paper reconciliation and export parity. Remote authenticated service is not supported. |
+| 6. Operational workspace | Resumable evolution and MCP generation, raw backups, saved comparisons and bounded assistant tools have tests. UI trade explanations show protection, financing, stop-out and settlement; overview explains limited evidence. A 15-window read-only live capture matched all 45 bid candles but failed the declared conversion freshness limit at 13 USDJPY events; it retained legacy account binding. A separate fingerprint-bound recording resumed across processes. A prospective five-window capture passed observed OHLC/freshness checks; seven execution cases matched independent arithmetic, while one absent SMA signal left execution coverage incomplete. HTTP remote addresses are rejected. | Broader live recording/outage/power-loss validation, complete evidence/recovery UI, AI provider-conversation recovery, known-strategy paper reconciliation and export parity. Remote authenticated service is not supported. |
 
 The successful nonselected walk-forward candidate gap found during this audit has
 now been addressed in the report (see the later verification entry). Remaining
@@ -4070,3 +4070,20 @@ passed in debug and release, the workspace build passed, and JavaScript syntax
 and holdout-label checks passed. The new boundary assertion was corrected to
 the audit API’s documented inclusive final millisecond (5,999,999), not the
 exclusive candle-end boundary; the engine interval convention was unchanged.
+
+### Preserve missing scenario coverage instead of forcing a passing live fixture
+
+A newly predeclared five-minute read-only MT5 window passed account binding and
+quote/OHLC availability checks, but contained no executable SMA(2)-short signal.
+The reference checker now distinguishes verified no-trade behavior from exercised
+execution coverage, persists per-case progress, checks all remaining cases and
+keeps a nonzero incomplete-coverage result rather than declaring all eight passed.
+Seven execution cases matched independent calculations on this fixed dataset.
+The original failed attempt remains evidence; no date-range or freshness-limit
+selection was made after seeing prices. See MT5_VALIDATION.md for hashes, exact
+scope and the still-missing market-mode MT5/broker comparison.
+
+Validation for reference coverage reporting: all 46 Python tests passed. The
+synthetic eight-case reference fixture still passed with archive replay and
+future-price invariance. The prospective real-data run deliberately returned
+nonzero coverage_incomplete (seven exercised cases, one verified no-signal case).
