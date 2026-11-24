@@ -32,6 +32,20 @@ verification evidence. Scope must not be reduced to the currently passing tests.
 
 ## Current completion audit (supersedes historical pending notes below)
 
+Latest integration status (2026-11-24): PR #8 merged as `8ef3ef2` after all four
+required checks passed on `871daf7`. Standalone generation/walk-forward recovery
+and their saved-research labels are therefore on main. Subsequent indicator,
+stochastic export, generator-threshold and inventory-CI changes remain pending
+integration. Earlier statements below describing PR #8 as pending are historical.
+At `08db843`, the complete local workspace suite passed 441 tests with zero failed
+or ignored, and the workspace build passed. The independent synthetic reference
+also passed eight execution cases, archive replay and future-price invariance.
+The later merge of current main and the PR #9 branch introduced no source changes.
+The combined revision still needs its own four required remote checks; the earlier
+PR #9 head `f02bb05` passed its four checks but does not include the later repairs.
+No completion requirement or independent platform-execution gap is closed by
+these test counts.
+
 This table is an incomplete-work audit, not certification. Later sections are an
 append-only implementation history; an older “pending” statement may have been
 resolved by a later increment. The numbered requirements above remain unchanged.
@@ -78,21 +92,91 @@ power loss/disk-full interruption, runtime packaging, all-route trial accounting
 independent broker execution and real paper reconciliation remain unproven.
 Further MT5 work is temporarily deferred at the user's request, not completed.
 
-Standalone optimization and generation recovery are separate follow-ups in PRs
-#6 and #7. Optimization passed 430 local workspace tests and four remote checks
-at `f9bffe9`; its merge with current main requires its own checks. Generation's
-64-candidate process-kill/restore comparison passed, but a subsequent workspace
-run exposed colliding timestamp-based test directories under parallel execution.
-Route-specific random directory identities fix that isolation defect, and the
-two parallel recovery tests pass after the fix. Full replacement workspace and
-remote runs are required before that increment is accepted.
+Standalone optimization, generation recovery and clearer saved-research labels
+are consolidated in [PR #8](https://github.com/ronald1711/sqxlabs/pull/8), based on
+main `072f4f7`. PRs #6 and #7 are closed as superseded, not separately merged;
+their commits remain in the combined head `871daf7`. Optimization passed 430
+local workspace tests and four remote checks at the earlier `f9bffe9`.
+Generation's 64-candidate process-kill/restore comparison passed, but a subsequent
+workspace run exposed colliding timestamp-based test directories under parallel
+execution. Route-specific random directory identities fix that isolation defect.
+The replacement full workspace run at `066235d` passed 433 tests with zero failed
+or ignored; its workspace build passed. The later presentation-only `871daf7`
+passed four relevant web tests, JavaScript syntax/recovery checks and a build.
+A browser check confirmed the search name, inspection controls and retained
+“Not independently validated” warning. These checks do not establish responsive
+or accessibility coverage.
+
+Combined-head GitHub run `45447951438` remains pending as of this audit. Required
+Linux/macOS debug/release checks must pass before merge; earlier component checks
+do not substitute for those gates. Superseded component runs were cancelled to
+avoid duplicate work; neither the combined run nor main's post-merge run was
+cancelled. No independent MT5 execution evidence was added.
 
 The successful nonselected walk-forward candidate gap found during this audit has
 now been addressed in the report (see the later verification entry). Remaining
 priorities include durable per-execution checkpoints and complete account/order
 records. Actual broker correspondence remains unproven without independent fixtures.
 
+## Indicator arithmetic reference scope (2026-11-24)
+
+DeMarker follow-up: a fixed arithmetic reference exposed a fabricated early value
+because the first unclassifiable movement was initialized to zero. Missing/nonfinite
+extrema also became zero movements through false comparisons. Both regressions
+failed before repair. Movement buffers now start undefined and require finite
+current/previous extrema, so period N requires N+1 observations and a missing bar
+invalidates both adjacent movements. Complete later windows recover. The local
+flat-window neutral value remains 0.5 after warmup. The reference follows the
+[published formula](https://www.metatrader5.com/en/terminal/help/indicators/oscillators/demarker);
+no running-terminal comparison or platform initialization parity is claimed.
+Earlier backtests containing DeMarker may change and require their original engine
+for exact replay. The previous 439-test workspace result predates this repair.
+
+The former MACD check in `talib_crosscheck.rs` compared local MACD components
+with local EMA outputs. It is now named as an internal-consistency check rather
+than independent reference evidence. `reference.rs` additionally fixes rational
+expected values for SMA-seeded MACD(2,3), signal EMA(2) and histogram on seven
+nonlinear prices. It checks every truncated history, the first defined line and
+signal values, both histogram signs, and invariance after appending extreme
+future prices. All 13 arithmetic-reference tests pass locally in debug and
+release. The fixture supports that declared convention only: it does not prove
+TA-Lib/MT5 seed parity, all periods, missing-value behavior, or all indicators.
+
 ## Execution contract migration
+
+### Generator threshold ranges
+
+The generator previously sampled positive 20..80 thresholds for Williams %R
+(engine range -100..0) and DeMarker (engine range 0..1). These could produce
+impossible crossings or constant comparisons. New searches use -80..-20 and
+0.2..0.8 respectively. Arithmetic fixtures exercise both crossing directions
+against the actual registry output. The Williams regression failed before repair;
+all 23 optimizer tests pass afterward, including deterministic checkpoint resume
+and independent walk-forward reference cases. This does not prove suitable
+threshold selection for all remaining catalog entries.
+
+This intentionally changes generated strategies for affected random draws.
+Existing saved strategies are not rewritten. Reproducing searches from earlier
+versions still requires their recorded exact engine; a seed alone does not imply
+cross-version identity. The earlier 437-test workspace result predates this fix.
+
+Pine StochD parameter mapping was found to change the backtested rule: the engine
+uses fixed K14 followed by SMA(period), whereas the exporter emitted K(period)
+followed by SMA3. Pine now preserves K14 and uses the rounded/defaulted smoothing
+period from the engine contract. A regression failed on the old mapping and all
+nine exporter tests passed after repair (default, 3, 7 and fractional 7.6 -> 8).
+This is source-translation evidence, not TradingView compilation/execution parity.
+The follow-up corrects stochastic K/D parameter roles across MQL, NinjaScript and
+EasyLanguage too: raw K has no extra slowing, D averages fixed K14 for the declared
+period. A separate fixed-extrema arithmetic test checks registry K warmup and D
+default/custom smoothing. Ten exporter tests pass for default and rounded custom
+parameters, preserving draft status. Source references:
+[MQL4 iStochastic](https://docs.mql4.com/indicators/istochastic),
+[NinjaTrader Stochastics](https://static.ninjatrader.com/support/helpGuides/nt8/stochastics.htm),
+[TradeStation FastK](https://help.tradestation.com/10_00/eng/tsdevhelp/elword/function/fastk_function_.htm).
+Platform compilation/execution, flat-range conventions and platform warmup remain
+unverified. In particular MQL5 still requires handle/buffer-based code generation;
+correcting parameter roles does not repair that separate exporter limitation.
 
 The legacy `intrabar_up_first` flag describes an assumed OHLC path, not a
 side-independent pessimistic fill policy. A replacement ambiguity model is pending.

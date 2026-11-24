@@ -27,6 +27,38 @@ fn ema_reference() {
 }
 
 #[test]
+fn macd_sma_seeded_reference_includes_first_signal_and_histogram() {
+    // Exact rational arithmetic for the declared SMA-seeded convention, not
+    // values produced by this crate's EMA (nor TA-Lib's late-seeded MACD).
+    // Fast EMA2 starts at 3; slow EMA3 starts at 14/3. Thereafter:
+    // fast = (2*close + previous_fast)/3; slow = (close + previous_slow)/2.
+    // Fast tail: 19/3,55/9,235/27,451/81,2395/243.
+    // Slow tail: 14/3,16/3,23/3,35/6,107/12.
+    // Signal EMA2 starts at mean(5/3,7/9)=11/9, then uses weight 2/3.
+    let close = [2.0, 4.0, 8.0, 6.0, 10.0, 4.0, 12.0];
+    let line = [f64::NAN, f64::NAN, 5.0/3.0, 7.0/9.0, 28.0/27.0, -43.0/162.0, 913.0/972.0];
+    let signal = [f64::NAN, f64::NAN, f64::NAN, 11.0/9.0, 89.0/81.0, 46.0/243.0, 335.0/486.0];
+    let histogram = [f64::NAN, f64::NAN, f64::NAN, -4.0/9.0, -5.0/81.0, -221.0/486.0, 0.25];
+    // Every truncated history must produce the same defined prefix, including
+    // empty/insufficient histories and the very first signal/histogram sample.
+    for end in 0..=close.len() {
+        let got_line = ind::macd(&close[..end], 2, 3);
+        let got_signal = ind::macd_signal(&got_line, 2);
+        assert_series(&got_line, &line[..end]);
+        assert_series(&got_signal, &signal[..end]);
+        assert_series(&ind::macd_hist(&got_line, &got_signal), &histogram[..end]);
+    }
+    // A large subsequent reversal cannot alter earlier signals.
+    let mut extended = close.to_vec();
+    extended.extend([10000.0, 0.01, 5000.0]);
+    let got_line = ind::macd(&extended, 2, 3);
+    let got_signal = ind::macd_signal(&got_line, 2);
+    assert_series(&got_line[..close.len()], &line);
+    assert_series(&got_signal[..close.len()], &signal);
+    assert_series(&ind::macd_hist(&got_line, &got_signal)[..close.len()], &histogram);
+}
+
+#[test]
 fn rsi_all_gains_is_100() {
     let r = ind::rsi(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2);
     assert!(r[..2].iter().all(|v| v.is_nan()));
@@ -143,5 +175,34 @@ fn tii_current_baseline_and_two_to_one_periods_have_independent_values(){
     assert!(values[..59].iter().all(|v|v.is_nan()));assert!(approx(values[59],175.0/3.0));
     for period in [0,31,usize::MAX/2+1,usize::MAX] {
         let short=ind::tii(&closes,period);assert_eq!(short.len(),closes.len());assert!(short.iter().all(|v|v.is_nan()));
+    }
+}
+
+#[test]
+fn demarker_requires_actual_movements_and_matches_independent_ratios() {
+    // MetaTrader formula: sum positive high changes / (that sum + sum
+    // positive low declines), over N actual movements, requiring N+1 bars.
+    // https://www.metatrader5.com/en/terminal/help/indicators/oscillators/demarker
+    // DeMax = [3,0,4,0]; DeMin = [1,2,0,3].
+    let high=[10.0,13.0,12.0,16.0,15.0];
+    let low=[5.0,4.0,2.0,3.0,0.0];
+    assert_series(&ind::demarker(&high,&low,2),&[f64::NAN,f64::NAN,0.5,2.0/3.0,4.0/7.0]);
+    assert_series(&ind::demarker(&high,&low,1),&[f64::NAN,0.75,0.0,1.0,0.0]);
+    assert!(ind::demarker(&[],&[],2).is_empty());
+    assert!(ind::demarker(&high,&low,0).iter().all(|v|v.is_nan()));
+    // No movement gives the explicitly local neutral convention, after warmup.
+    assert_series(&ind::demarker(&[10.0;4],&[5.0;4],2),&[f64::NAN,f64::NAN,0.5,0.5]);
+}
+
+#[test]
+fn demarker_missing_extrema_invalidate_movements_and_recover() {
+    for missing in [f64::NAN,f64::INFINITY,f64::NEG_INFINITY] {
+        for bad_high in [false,true] {
+            let mut high=[10.0,13.0,12.0,16.0,15.0,18.0];
+            let mut low=[5.0,4.0,2.0,3.0,0.0,1.0];
+            if bad_high { high[1]=missing; } else { low[1]=missing; }
+            // Movements 1/2 cannot be classified; first complete pair is 3/4.
+            assert_series(&ind::demarker(&high,&low,2),&[f64::NAN,f64::NAN,f64::NAN,f64::NAN,4.0/7.0,0.5]);
+        }
     }
 }

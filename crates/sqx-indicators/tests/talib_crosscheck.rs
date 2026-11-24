@@ -180,9 +180,11 @@ fn c_of(x: &[f64]) -> usize { x.len() }
 // MACD is deliberately NOT asserted equal to ta-lib: ta-lib late-seeds the fast
 // EMA (from bar slow-fast rather than bar 0) as a lockstep shortcut, so its
 // early MACD values differ from the standard EMA(fast) - EMA(slow). Both
-// converge in the far tail. This crate computes the standard definition.
+// converge in the far tail. This check only establishes internal consistency;
+// reference.rs separately checks fixed rational values and first-signal warmup
+// for this crate's explicitly SMA-seeded (2,3,2) convention.
 #[test]
-fn macd_is_the_standard_definition() {
+fn macd_components_are_internally_consistent() {
     let (_, _, _, _, c, _) = make_series(200);
     let line = ind::macd(&c, 12, 26);
     let sig = ind::macd_signal(&line, 9);
