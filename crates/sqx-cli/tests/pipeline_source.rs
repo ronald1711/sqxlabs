@@ -317,6 +317,15 @@ fn standalone_optimization_survives_kill_backup_and_source_deletion(){
 
 #[test]
 fn robustness_survives_kill_source_deletion_and_portable_restore(){
+    stress_recovery(false);
+}
+
+#[test]
+fn montecarlo_survives_kill_source_deletion_and_portable_restore(){
+    stress_recovery(true);
+}
+
+fn stress_recovery(montecarlo_only:bool){
     use sqx_project::archive::Archive;
     use std::process::Stdio;
     let root=std::env::temp_dir().join(format!("sqx-robustness-recovery-{:032x}",rand::random::<u128>()));
@@ -330,9 +339,11 @@ fn robustness_survives_kill_source_deletion_and_portable_restore(){
     s["signals"]=serde_json::json!(["LongEntry","LongExit"].map(|kind|serde_json::json!({"kind":kind,"conditions":[{"left":{"Const":1.0},"cmp":"Gt","right":{"Const":0.0}}],"join":"And","fuzzy":null})));
     fs::write(&strategy,s.to_string()).unwrap();
     struct Child(std::process::Child);impl Drop for Child{fn drop(&mut self){let _=self.0.kill();let _=self.0.wait();}}
-    let mut child=Child(Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["robustness","--data"]).arg(&data).arg("--strategy").arg(&strategy)
-        .args(["--symbol","EURUSD","--timeframe","M1","--mc-runs","16","--retest-runs","8","--windows","2","--archive-dir"]).arg(root.join("archive"))
-        .stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
+    let mut command=Command::new(env!("CARGO_BIN_EXE_sqx-cli"));
+    command.args([if montecarlo_only{"montecarlo"}else{"robustness"},"--data"]).arg(&data).arg("--strategy").arg(&strategy)
+        .args(["--symbol","EURUSD","--timeframe","M1","--archive-dir"]).arg(root.join("archive"));
+    if montecarlo_only{command.args(["--runs","256","--skip","0.25","--seed","731"]);}else{command.args(["--mc-runs","16","--retest-runs","8","--windows","2"]);}
+    let mut child=Child(command.stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
     let archive=Archive::new(root.join("archive"));let deadline=std::time::Instant::now()+std::time::Duration::from_secs(90);
     let start_id=loop{
         let found=archive.list().unwrap_or_default().into_iter().find_map(|id|{
@@ -352,15 +363,24 @@ fn robustness_survives_kill_source_deletion_and_portable_restore(){
     let receipt:Value=serde_json::from_slice(&out.stdout).unwrap();assert!(receipt["appended_events"].as_u64().unwrap()>0);
     let done=restored.load(receipt["completion_id"].as_str().unwrap()).unwrap();
     let report=&done.run.result["report"]["robustness"];
-    assert_eq!(report["what_if"].as_array().unwrap().len(),5);
-    assert_eq!(report["monte_carlo"]["samples"].as_array().unwrap().len(),16);
-    assert_eq!(report["retest"]["requested_runs"],8);
+    assert_eq!(report["what_if"].as_array().unwrap().len(),if montecarlo_only{0}else{5});
+    assert_eq!(report["monte_carlo"]["samples"].as_array().unwrap().len(),if montecarlo_only{256}else{16});
+    if montecarlo_only{
+        assert!(report["retest"].is_null());assert!(report["walk_forward"].is_null());
+        let bars:Vec<sqx_core::Bar>=serde_json::from_value(start.dataset["bars"].clone()).unwrap();
+        let instrument:sqx_core::Instrument=serde_json::from_value(start.dataset["instrument"].clone()).unwrap();
+        let config:sqx_backtest::BacktestConfig=serde_json::from_value(start.run.request["config"].clone()).unwrap();
+        let strategy:sqx_strategy::Strategy=serde_json::from_value(s.clone()).unwrap();
+        let base=sqx_backtest::backtest(&strategy,&bars,&instrument,&config);
+        assert_eq!(report["base"],serde_json::to_value(&base).unwrap());
+        assert_eq!(report["monte_carlo"],serde_json::to_value(sqx_robustness::monte_carlo_trade_manipulation(&base.trades,256,0.25,731)).unwrap());
+    }else{assert_eq!(report["retest"]["requested_runs"],8);}
     let mut counts=[0;3];
     for id in done.run.result["event_ids"].as_array().unwrap(){
         let b=restored.load(id.as_str().unwrap()).unwrap();
         for (i,key) in ["WhatIfOutcome","TradeManipulationOutcome","RetestOutcome"].iter().enumerate(){if b.run.result["event"].get(key).is_some(){counts[i]+=1;}}
     }
-    assert_eq!(counts,[5,16,8]);
+    assert_eq!(counts,if montecarlo_only{[0,256,0]}else{[5,16,8]});
     let fresh=Archive::new(root.join("fresh"));fresh.restore(&start).unwrap();let out=replay("fresh");assert!(out.status.success());
     let receipt:Value=serde_json::from_slice(&out.stdout).unwrap();assert_eq!(receipt["completion_id"],done.run_id);
     let before=restored.list().unwrap();let out=replay("restored");assert!(out.status.success());assert_eq!(restored.list().unwrap(),before);

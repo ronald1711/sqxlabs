@@ -87,7 +87,12 @@ remaining execution assumptions and unsupported cases are visible.
   ambiguous archives are preserved but cannot silently select a study on retry.
   Closing/clearing the browser session requires finding the study in
   Saved research rather than relying on the browser's retry identity.
-  CLI pipelines retain exact engine bytes, frozen inputs/configuration/seed,
+  CLI pipelines retain exact engine bytes and frozen inputs/configuration/seed.
+  Standalone CLI Monte Carlo now uses that same start/journal/completion
+  protocol. Its process-kill/source-deletion/portable-restore test preserves all
+  256 requested samples, matches direct configured computation and an uninterrupted
+  frozen replay, and verifies that no other robustness stages are added.
+  CLI pipelines also retain
   a pre-execution start record, ordered stage/family events, per-build/retest
   starts and outcomes, and the full returned report before reporting errors.
   Storage failures stop further evaluation. A process-kill/source-deletion

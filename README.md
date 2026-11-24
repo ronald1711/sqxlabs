@@ -146,7 +146,7 @@ cargo run -q -p sqx-cli -- robustness --symbol EURUSD --timeframe M1 --strategy 
 # Nonzero exit on invalid computation; exit 0 alone does not certify sufficient trade evidence.
 cargo run -q -p sqx-cli -- optimize --symbol EURUSD --timeframe M1 --data data/eurusd_sample.csv --windows 6 --oos 0.25
 
-# generate, optimize and robustness archive inputs and executions in data/research.
+# generate, optimize, robustness and montecarlo archive inputs and executions in data/research.
 # Use the printed checkpoint run_id with the shared recovery commands:
 cargo run -q -p sqx-cli -- pipeline-history --run-id <checkpoint-id>
 cargo run -q -p sqx-cli -- replay-pipeline --run-id <checkpoint-id> --resume
@@ -280,8 +280,18 @@ original. Selection uses each training window before its OOS evaluation. This
 does not establish an untouched holdout if the strategy was developed using those
 data. Older archived versions generated unrelated candidates in this stage and
 must not be interpreted as walk-forward validation of the supplied strategy;
-their original executable is required for replay. Standalone `montecarlo` and other entry
-points do not inherit this archival coverage automatically.
+their original executable is required for replay. Other entry points do not
+inherit this archival coverage automatically.
+
+Standalone CLI `montecarlo` also uses `--archive-dir` and the shared
+`pipeline-history`, `replay-pipeline`, `export-pipeline` and `import-pipeline`
+commands. Its checkpoint freezes the strategy, data, account configuration,
+requested run count, seed and skip probability. It retains the base execution
+and every selected trade order/outcome, including computation errors. It runs
+only trade resampling: no cost sweep, retest or walk-forward is added. A process
+kill, source deletion, portable restore and resume reproduce the uninterrupted
+completion identity. This is repeatability evidence, not a claim of independent
+samples, sufficient statistical power or execution correctness.
 
 Web stress tests now use the same checkpoint/recovery protocol for their six
 cost scenarios and 1,000 trade-resampling paths. They save inputs before running,
