@@ -188,7 +188,10 @@ fn run(
         }
         execution.mode = if ranges.iter().skip(1).any(|(a,b)| a==b) { "hybrid_ticks_ohlc" } else { "supplied_ticks" }.into();
         for tick in ts {
-            if let Err(error) = config.account.quote_rate(instrument, tick.time, tick.bid) { return invalid(error); }
+            for direction in [Direction::Long,Direction::Short] {
+                if let Err(error)=config.account.profit_rate(instrument,tick.time,tick.bid,direction) {return invalid(error);}
+                if let Err(error)=config.account.margin_base_rate(instrument,tick.time,tick.bid,direction) {return invalid(error);}
+            }
         }
     }
     let point = instrument.point;
@@ -320,7 +323,8 @@ fn run(
                     || bar.open + if dir == Direction::Long { config.spread_points * point } else { 0.0 },
                     |t| if dir == Direction::Long { t.ask } else { t.bid });
                 let fill = quote + dir.sign() * config.slippage_points * point;
-                let quote_rate=match config.account.quote_rate(instrument,entry_time,fill){Ok(rate)=>rate,Err(error)=>return invalid(format!("entry valuation: {error}"))};
+                let quote_rate=match config.account.profit_rate(instrument,entry_time,fill,dir){Ok(rate)=>rate,Err(error)=>return invalid(format!("entry valuation: {error}"))};
+                let margin_rate=match config.account.margin_base_rate(instrument,entry_time,fill,dir){Ok(rate)=>rate,Err(error)=>return invalid(format!("entry margin: {error}"))};
                 let (sl, pt) = stop_profit_levels(strategy, &atr_sl, &atr_pt, i - 1, fill, dir, point);
                 let sl_points = sl_distance_points(sl, fill, point);
                 let size = match &strategy.money_management {
@@ -334,14 +338,14 @@ fn run(
                 attempt.requested_lots=Some(requested);
                 let size = config.account.lots(requested);
                 let allowed = size.filter(|size| {
-                    let margin = size * instrument.contract_size * fill * quote_rate / config.account.max_leverage;
+                    let margin = size * instrument.contract_size * margin_rate / config.account.max_leverage;
                     let spread = interval_ticks.first().map_or(config.spread_points * point, |t| t.ask-t.bid);
                     let spread_and_slippage_cost = (spread + config.slippage_points * point) * instrument.contract_size * size * quote_rate;
                     let commission=config.commission_per_lot * size;
                     let entry_cost=spread_and_slippage_cost+commission;
                     let equity_after_entry_costs=cash-entry_cost;
                     let accepted=equity_after_entry_costs>=margin;
-                    attempt.margin_check=Some(crate::MarginCheck{balance:cash,normalized_lots:*size,proposed_fill_price:fill,quote_to_account_rate:quote_rate,max_leverage:config.account.max_leverage,required_margin:margin,spread_and_slippage_cost,commission,equity_after_entry_costs,free_margin_after_entry:equity_after_entry_costs-margin,accepted});
+                    attempt.margin_check=Some(crate::MarginCheck{balance:cash,normalized_lots:*size,proposed_fill_price:fill,quote_to_account_rate:quote_rate,margin_base_to_account_rate:margin_rate,max_leverage:config.account.max_leverage,required_margin:margin,spread_and_slippage_cost,commission,equity_after_entry_costs,free_margin_after_entry:equity_after_entry_costs-margin,accepted});
                     accepted
                 });
                 if let Some(size) = allowed {
@@ -445,15 +449,16 @@ fn run(
                     let px = if reason == ExitReason::ProfitTarget { px } else { px - pos.direction.sign() * config.slippage_points * point };
                     if reason==ExitReason::StopOut {
                         let risk_at_close=AccountRisk{time:close_time,..risk};
-                        let rate=match config.account.quote_rate(instrument,close_time,before_slippage){Ok(rate)=>rate,Err(error)=>return invalid(format!("stop-out valuation: {error}"))};
+                        let rate=match config.account.profit_rate(instrument,close_time,before_slippage,pos.direction){Ok(rate)=>rate,Err(error)=>return invalid(format!("stop-out valuation: {error}"))};
                         let unrealized=(before_slippage-pos.open_price)*pos.direction.sign()/point*pos.size*point_value*rate;
                         let commission=config.commission_per_lot*pos.size;
-                        let margin=pos.size*instrument.contract_size*before_slippage*rate/config.account.max_leverage;
-                        execution.stop_out_decisions.push(crate::StopOutDecision{trade_id,time:close_time,liquidation_price_before_slippage:before_slippage,fill_price:px,threshold_price:risk_at_close.stop_out_price(&pos,before_slippage),quote_to_account_rate:rate,balance:cash,unrealized_profit_account:unrealized,commission_reserve:commission,financing_accrued:pos.financing,equity_before_slippage:cash+unrealized-commission-pos.financing,required_margin:margin,stop_out_ratio:config.account.stop_out_ratio,minimum_equity:margin*config.account.stop_out_ratio});
+                        let margin_rate=match config.account.margin_base_rate(instrument,close_time,before_slippage,pos.direction){Ok(rate)=>rate,Err(error)=>return invalid(format!("stop-out margin: {error}"))};
+                        let margin=pos.size*instrument.contract_size*margin_rate/config.account.max_leverage;
+                        execution.stop_out_decisions.push(crate::StopOutDecision{trade_id,time:close_time,liquidation_price_before_slippage:before_slippage,fill_price:px,threshold_price:risk_at_close.stop_out_price(&pos,before_slippage),quote_to_account_rate:rate,margin_base_to_account_rate:margin_rate,balance:cash,unrealized_profit_account:unrealized,commission_reserve:commission,financing_accrued:pos.financing,equity_before_slippage:cash+unrealized-commission-pos.financing,required_margin:margin,stop_out_ratio:config.account.stop_out_ratio,minimum_equity:margin*config.account.stop_out_ratio});
                     }
                     let commission = config.commission_per_lot * pos.size;
                     let pnl_points = (px - pos.open_price) * pos.direction.sign() / point;
-                    let rate = match config.account.quote_rate(instrument,close_time,px){Ok(rate)=>rate,Err(error)=>return invalid(format!("exit valuation: {error}"))};
+                    let rate = match config.account.profit_rate(instrument,close_time,px,pos.direction){Ok(rate)=>rate,Err(error)=>return invalid(format!("exit valuation: {error}"))};
                     let pnl = pnl_points * pos.size * point_value * rate - commission - pos.financing;
                     let balance_before=cash;
                     cash += pnl;
@@ -505,17 +510,19 @@ fn run(
         }
 
         // 4. Sample the equity curve at close.
-        let mut snapshot=crate::AccountSnapshot{phase:"bar_close",bar_open_time:bar.time,quote_time:interval_ticks.last().map(|tick|tick.time),trade_id:None,liquidation_price:None,quote_to_account_rate:None,balance:cash,gross_unrealized:0.0,commission_reserve:0.0,financing_accrued:0.0,equity:cash,required_margin:0.0,free_margin:cash};
+        let mut snapshot=crate::AccountSnapshot{phase:"bar_close",bar_open_time:bar.time,quote_time:interval_ticks.last().map(|tick|tick.time),trade_id:None,liquidation_price:None,quote_to_account_rate:None,margin_base_to_account_rate:None,balance:cash,gross_unrealized:0.0,commission_reserve:0.0,financing_accrued:0.0,equity:cash,required_margin:0.0,free_margin:cash};
         if let Some(p)=position.as_ref() {
             let close = interval_ticks.last().map_or_else(
                 || bar.close + if p.direction == Direction::Short { config.spread_points * point } else { 0.0 },
                 |t| if p.direction == Direction::Long { t.bid } else { t.ask });
-            let rate=match config.account.quote_rate(instrument,interval_ticks.last().map_or(bar.time,|t|t.time),close){Ok(rate)=>rate,Err(error)=>return invalid(format!("equity valuation: {error}"))};
+            let rate=match config.account.profit_rate(instrument,interval_ticks.last().map_or(bar.time,|t|t.time),close,p.direction){Ok(rate)=>rate,Err(error)=>return invalid(format!("equity valuation: {error}"))};
             snapshot.trade_id=Some(trade_id);snapshot.liquidation_price=Some(close);snapshot.quote_to_account_rate=Some(rate);
             snapshot.gross_unrealized=(close-p.open_price)*p.direction.sign()/point*p.size*point_value*rate;
             snapshot.commission_reserve=config.commission_per_lot*p.size;snapshot.financing_accrued=p.financing;
             snapshot.equity=cash+(snapshot.gross_unrealized-snapshot.commission_reserve-p.financing);
-            snapshot.required_margin=p.size*instrument.contract_size*close*rate/config.account.max_leverage;
+            let margin_rate=match config.account.margin_base_rate(instrument,interval_ticks.last().map_or(bar.time,|t|t.time),close,p.direction){Ok(rate)=>rate,Err(error)=>return invalid(format!("account margin: {error}"))};
+            snapshot.margin_base_to_account_rate=Some(margin_rate);
+            snapshot.required_margin=p.size*instrument.contract_size*margin_rate/config.account.max_leverage;
             snapshot.free_margin=snapshot.equity-snapshot.required_margin;
         }
         equity.push((bar.time,snapshot.equity));
@@ -536,7 +543,7 @@ fn run(
             |t| if pos.direction == Direction::Long {t.bid} else {t.ask}) - pos.direction.sign() * config.slippage_points * point;
         let commission = config.commission_per_lot * pos.size;
         let pnl_points = (px - pos.open_price) * pos.direction.sign() / point;
-        let rate = match config.account.quote_rate(instrument,close_time,px){Ok(rate)=>rate,Err(error)=>return invalid(format!("exit valuation: {error}"))};
+        let rate = match config.account.profit_rate(instrument,close_time,px,pos.direction){Ok(rate)=>rate,Err(error)=>return invalid(format!("exit valuation: {error}"))};
         let pnl = pnl_points * pos.size * point_value * rate - commission - pos.financing;
         let balance_before=cash;
         cash += pnl;
@@ -547,7 +554,7 @@ fn run(
             gross_profit_account:pnl_points * pos.size * point_value * rate,
             commission,financing:pos.financing,net_change:pnl,balance_before,balance_after:cash,
         });
-        execution.account_snapshots.push(crate::AccountSnapshot{phase:"terminal_liquidation",bar_open_time:last.time,quote_time:last_tick.map(|tick|tick.time),trade_id:None,liquidation_price:None,quote_to_account_rate:None,balance:cash,gross_unrealized:0.0,commission_reserve:0.0,financing_accrued:0.0,equity:cash,required_margin:0.0,free_margin:cash});
+        execution.account_snapshots.push(crate::AccountSnapshot{phase:"terminal_liquidation",bar_open_time:last.time,quote_time:last_tick.map(|tick|tick.time),trade_id:None,liquidation_price:None,quote_to_account_rate:None,margin_base_to_account_rate:None,balance:cash,gross_unrealized:0.0,commission_reserve:0.0,financing_accrued:0.0,equity:cash,required_margin:0.0,free_margin:cash});
         trades.push(Trade {
             id: trade_id,
             direction: pos.direction,
@@ -821,8 +828,13 @@ impl AccountRisk<'_> {
         if self.instrument.base_currency == account.currency && self.instrument.quote_currency != account.currency {
             units * sign * pos.open_price / (balance + units * sign - fraction * units)
         } else {
-            let rate = account.quote_rate(self.instrument, self.time, price).expect("validated conversion");
-            (units * sign * pos.open_price * rate - balance) / (units * rate * (sign - fraction))
+            let rate = account.profit_rate(self.instrument, self.time, price, pos.direction).expect("validated conversion");
+            if account.margin_model==crate::MarginModel::ForexBase && self.instrument.quote_currency!=account.currency {
+                let margin_rate=account.margin_base_rate(self.instrument,self.time,price,pos.direction).expect("validated margin conversion");
+                pos.open_price+(fraction*units*margin_rate-balance)/(units*sign*rate)
+            } else {
+                (units * sign * pos.open_price * rate - balance) / (units * rate * (sign - fraction))
+            }
         }
     }
 }
@@ -850,7 +862,7 @@ pub fn validate_backtest_inputs(bars: &[Bar], instrument: &Instrument, config: &
             || bar.low > bar.high || (i > 0 && bar.time <= bars[i - 1].time) {
             return Err(format!("invalid or non-increasing bar at index {i}"));
         }
-        config.account.quote_rate(instrument, bar.time, bar.open)?;
+        for direction in [Direction::Long,Direction::Short] {config.account.profit_rate(instrument,bar.time,bar.open,direction)?;config.account.margin_base_rate(instrument,bar.time,bar.open,direction)?;}
     }
     Ok(())
 }

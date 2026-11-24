@@ -46,6 +46,7 @@ pub fn validate_account_evidence(result: &BacktestResult) -> Result<(), String> 
                     margin.normalized_lots,
                     margin.proposed_fill_price,
                     margin.quote_to_account_rate,
+                    margin.margin_base_to_account_rate,
                     margin.max_leverage,
                 ]
                 .iter()
@@ -211,6 +212,7 @@ pub fn validate_account_evidence(result: &BacktestResult) -> Result<(), String> 
             [
                 decision.liquidation_price_before_slippage,
                 decision.quote_to_account_rate,
+                decision.margin_base_to_account_rate,
             ]
             .iter()
             .all(|v| v.is_finite() && *v > 0.0),
@@ -509,6 +511,7 @@ pub fn validate_account_evidence(result: &BacktestResult) -> Result<(), String> 
                 snapshot
                     .liquidation_price
                     .is_some_and(|p| p.is_finite() && p > 0.0)
+                    && snapshot.margin_base_to_account_rate.is_some_and(|r|r.is_finite() && r>0.0)
                     && snapshot
                         .quote_to_account_rate
                         .is_some_and(|r| r.is_finite() && r > 0.0),
@@ -518,6 +521,7 @@ pub fn validate_account_evidence(result: &BacktestResult) -> Result<(), String> 
             require(
                 snapshot.liquidation_price.is_none()
                     && snapshot.quote_to_account_rate.is_none()
+                    && snapshot.margin_base_to_account_rate.is_none()
                     && equal(snapshot.gross_unrealized, 0.0)
                     && equal(snapshot.commission_reserve, 0.0)
                     && equal(snapshot.financing_accrued, 0.0)

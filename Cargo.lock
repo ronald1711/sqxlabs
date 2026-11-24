@@ -611,6 +611,7 @@ name = "sqx-backtest"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
  "sqx-core",
  "sqx-indicators",
  "sqx-strategy",
@@ -669,6 +670,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+ "sha2",
  "sqx-core",
  "ureq",
 ]

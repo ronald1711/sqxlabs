@@ -25,6 +25,9 @@ struct Cli {
 
 #[derive(clap::Args)]
 struct SourceOptions {
+    /// Verified normalization bundle for these exact candles; embeds raw clock provenance.
+    #[arg(long)]
+    normalization_bundle:Option<PathBuf>,
     /// Declared candle timeframe (M1, M5, H1, D1, MN1, ...).
     #[arg(long)]
     timeframe:Timeframe,
@@ -45,7 +48,12 @@ impl SourceOptions {
             anyhow::bail!("Unresolved data gaps; supply --calendar or explicitly --allow-data-gaps for exploratory research. data_quality: {}",serde_json::to_string(&quality)?);
         }
         let duration=if self.timeframe==Timeframe::MN1 {None}else{self.timeframe.minutes().and_then(|n|n.checked_mul(60000))};
-        Ok((duration,serde_json::json!({"timeframe":self.timeframe,"calendar":calendar,"as_of_ms":cutoff,"data_quality":quality,"data_gaps_acknowledged":self.allow_data_gaps,"scope":"Exploratory research; no independent execution parity or untouched holdout certified."})))
+        let normalization=if let Some(path)=&self.normalization_bundle {
+            let bundle=sqx_data::normalization::Bundle::load(path).map_err(anyhow::Error::msg)?;
+            let verified=bundle.verify_bars(bars,duration).map_err(anyhow::Error::msg)?;
+            Some(serde_json::json!({"verification":verified,"bundle":bundle}))
+        }else{None};
+        Ok((duration,serde_json::json!({"normalization":normalization,"timeframe":self.timeframe,"calendar":calendar,"as_of_ms":cutoff,"data_quality":quality,"data_gaps_acknowledged":self.allow_data_gaps,"scope":"Exploratory research; no independent execution parity or untouched holdout certified."})))
     }
 }
 
@@ -89,6 +97,7 @@ struct CrosscheckManifest { schema:u32, markets:Vec<CrosscheckMarket> }
 #[serde(deny_unknown_fields)]
 struct CrosscheckMarket {
     symbol:String,data:PathBuf,timeframe:Timeframe,
+    #[serde(default)] normalization_bundle:Option<PathBuf>,
     #[serde(default)] calendar:Option<PathBuf>,
     #[serde(default)] config:Option<PathBuf>,
     #[serde(default)] allow_data_gaps:bool,
@@ -123,6 +132,26 @@ fn load_data_manifest(path:&std::path::Path)->Result<DataStore>{
     Ok(DataStore{series:staged})
 }
 
+type PreparedMarket=(Vec<Bar>,Instrument,BacktestConfig,serde_json::Value);
+fn execute_crosscheck(s:&Strategy,prepared:Vec<PreparedMarket>,min_trades:usize)->Result<serde_json::Value>{
+            let mut executions=Vec::new();
+            let requested=prepared.len();let mut rows=Vec::new();let mut profitable=0;let mut eligible=0;let mut invalid=0;
+            for (bars,instrument,config,context) in prepared {
+                let pyp=resolve_periods_per_year(bars.len(),0.0,&bars);
+                let result=backtest(s,&bars,&instrument,&config);
+                executions.push(serde_json::to_value(&result)?);
+                if !result.errors.is_empty(){
+                    invalid+=1;rows.push(serde_json::json!({"context":context,"status":"invalid","errors":result.errors}));continue;
+                }
+                let metrics=compute_metrics(&result,bars.len(),pyp);
+                let enough=metrics.number_of_trades>=min_trades as f64;
+                if enough {eligible+=1;if metrics.net_profit>0.0{profitable+=1;}}
+                rows.push(serde_json::json!({"context":context,"status":if enough{"eligible"}else{"insufficient_trades"},"metrics":metrics}));
+            }
+            let report=serde_json::json!({"markets":rows,"requested_markets":requested,"invalid_markets":invalid,"eligible_markets":eligible,"profitable_markets":profitable,"minimum_trades":min_trades,"scope":"Exploratory cross-market comparison; no untouched holdout or execution parity certified."});
+    Ok(serde_json::json!({"report":report,"executions":executions}))
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// List frozen AI trial checkpoints/results without contacting a provider.
@@ -154,6 +183,12 @@ enum Cmd {
         #[arg(long)]
         run_id: String,
     },
+    /// Reproduce a recorded cross-check, or restart its frozen checkpoint.
+    ReplayCrosscheck {
+        #[arg(long)] resume:bool,
+        #[arg(long, default_value="data/research")] archive_dir:PathBuf,
+        #[arg(long)] run_id:String,
+    },
     /// Backtest a single strategy over CSV data.
     Backtest {
         /// Save full inputs and execution evidence here (default: data/research).
@@ -170,6 +205,9 @@ enum Cmd {
         /// Optional tick CSV (timestamp,bid,ask) for tick-precision exits.
         #[arg(long)]
         ticks: Option<PathBuf>,
+        /// Verified clock-normalization bundle for the exact supplied ticks.
+        #[arg(long, requires = "ticks")]
+        tick_normalization_bundle: Option<PathBuf>,
         /// Optional legacy tick duration; must match the declared source timeframe.
         #[arg(long, requires = "ticks")]
         tick_bar_ms: Option<i64>,
@@ -185,10 +223,10 @@ enum Cmd {
         /// Initial deposit.
         #[arg(long, default_value_t = 10_000.0)]
         deposit: f64,
-        /// Spread in points.
+        /// Spread in SqxLabs points (FX pips: EURUSD 0.0001, USDJPY 0.01); tick runs use observed bid/ask.
         #[arg(long, default_value_t = 0.0)]
         spread: f64,
-        /// Slippage in points.
+        /// Slippage per fill in FX pips; one 0.001 USDJPY broker point is --slippage 0.1.
         #[arg(long, default_value_t = 0.0)]
         slippage: f64,
         /// Commission per lot (round-trip).
@@ -436,6 +474,8 @@ enum Cmd {
     },
     /// Multi-market cross-check over an explicit source manifest.
     Crosscheck {
+        #[arg(long, default_value = "data/research")]
+        archive_dir: PathBuf,
         #[arg(long)]
         strategy: PathBuf,
         #[arg(long)]
@@ -549,6 +589,18 @@ fn main() -> Result<()> {
             let ticks:Option<Vec<sqx_core::Tick>>=serde_json::from_value(bundle.dataset["ticks"].clone())?;
             let instrument:Instrument=serde_json::from_value(bundle.dataset["instrument"].clone())?;
             let config:BacktestConfig=serde_json::from_value(bundle.run.request["config"].clone())?;
+            let provenance=&bundle.run.request["source_context"]["normalization"];
+            if !provenance.is_null() {
+                let normalization:sqx_data::normalization::Bundle=serde_json::from_value(provenance["bundle"].clone())?;
+                let verified=normalization.verify_bars(&bars,config.bar_duration_ms).map_err(anyhow::Error::msg)?;
+                if serde_json::to_value(verified)?!=provenance["verification"] {anyhow::bail!("archived normalization verification metadata differs from its bundle");}
+            }
+            let provenance=&bundle.run.request["source_context"]["tick_normalization"];
+            if !provenance.is_null() {
+                let normalization:sqx_data::normalization::Bundle=serde_json::from_value(provenance["bundle"].clone())?;
+                let verified=normalization.verify_ticks(ticks.as_deref().ok_or_else(||anyhow!("archived tick provenance has no ticks"))?).map_err(anyhow::Error::msg)?;
+                if serde_json::to_value(verified)?!=provenance["verification"] {anyhow::bail!("archived tick normalization verification metadata differs from its bundle");}
+            }
             let result=match ticks {Some(t)=>backtest_ticks(&strategy,&bars,&t,&instrument,&config),None=>backtest(&strategy,&bars,&instrument,&config)};
             if resume {
                 let mut request=bundle.run.request.clone();request["research_kind"]=serde_json::json!("cli_backtest");request["started_run_id"]=serde_json::json!(run_id);
@@ -562,7 +614,7 @@ fn main() -> Result<()> {
             if !matches {anyhow::bail!("replayed execution differs from the recorded result");}
             Ok(())
         }
-        Cmd::Backtest { archive_dir, strategy, data, source, ticks, account_config, tick_bar_ms, allow_tick_fallback, symbol, deposit, spread, slippage, commission, periods_per_year } => {
+        Cmd::Backtest { archive_dir, strategy, data, source, ticks, tick_normalization_bundle, account_config, tick_bar_ms, allow_tick_fallback, symbol, deposit, spread, slippage, commission, periods_per_year } => {
             let s: Strategy = load_strategy(&strategy)?;
             let bars = load_bars(&data)?;
             let instrument = instrument(&symbol);
@@ -584,6 +636,11 @@ fn main() -> Result<()> {
                 Some(path)=>Some(sqx_data::read_ticks_csv(path.to_str().ok_or_else(||anyhow!("tick path is not UTF-8"))?).map_err(anyhow::Error::msg)?),
                 None=>None,
             };
+            if let Some(path)=tick_normalization_bundle {
+                let bundle=sqx_data::normalization::Bundle::load(&path).map_err(anyhow::Error::msg)?;
+                let verified=bundle.verify_ticks(tick_data.as_deref().ok_or_else(||anyhow!("tick normalization requires ticks"))?).map_err(anyhow::Error::msg)?;
+                context["tick_normalization"]=serde_json::json!({"verification":verified,"bundle":bundle});
+            }
             let checkpoint=if let Some(root)=&archive_dir {
                 let archive=sqx_project::archive::Archive::new(root);
                 let engine=sqx_project::archive::content_id(&std::fs::read(std::env::current_exe()?)?);
@@ -695,7 +752,7 @@ fn main() -> Result<()> {
                 let result=serde_json::json!({"candidate_evaluations":a.candidate_evaluations(),"detail_evaluations":a.detail_evaluations(),"trial_executions":a.trial_executions(),"session_completed":answer.is_ok(),"scope":"Generation and details summaries with full executed trial results. Per-trial checkpoints preserve inputs/results; provider-conversation resume and independent validation are unavailable."});
                 let id=archive.save(engine,dataset,serde_json::json!({"name":"AI candidate research","kind":"assistant_candidates"}),request,result)
                     .map_err(|error|anyhow!("Assistant evidence could not be archived: {error}"))?;
-                println!("Assistant archive: {}",serde_json::json!({"run_id":id,"root":"data/research","replay_available":false}));
+                println!("Assistant archive: {}",serde_json::json!({"run_id":id,"root":"data/research","replay_available":true,"replay_command":"replay-crosscheck"}));
             }
             match answer {
                 Ok(answer) => {
@@ -1053,7 +1110,45 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Cmd::Crosscheck { strategy, manifest, min_trades } => {
+        Cmd::ReplayCrosscheck {archive_dir,run_id,resume}=>{
+            let archive=sqx_project::archive::Archive::new(&archive_dir);
+            let bundle=archive.load(&run_id).map_err(anyhow::Error::msg)?;
+            if bundle.run.request["research_kind"]!=if resume{"cli_crosscheck_started"}else{"cli_crosscheck"}{anyhow::bail!("record type does not match replay/resume mode");}
+            let engine=sqx_project::archive::content_id(&std::fs::read(std::env::current_exe()?)?);
+            if engine!=bundle.run.engine_id {anyhow::bail!("engine executable differs from the recorded run; use the matching build");}
+            let strategy:Strategy=serde_json::from_value(bundle.strategy.clone())?;
+            let min_trades:usize=serde_json::from_value(bundle.run.request["minimum_trades"].clone())?;
+            if min_trades==0 {anyhow::bail!("minimum trades must be positive");}
+            let markets=bundle.dataset["markets"].as_array().ok_or_else(||anyhow!("missing archived markets"))?;
+            if markets.is_empty(){anyhow::bail!("empty archived markets");}
+            let mut prepared=Vec::new();
+            for market in markets {
+                let bars:Vec<Bar>=serde_json::from_value(market["bars"].clone())?;
+                let instrument:Instrument=serde_json::from_value(market["instrument"].clone())?;
+                let config:BacktestConfig=serde_json::from_value(market["config"].clone())?;
+                let context=market["source_context"].clone();
+                let provenance=&context["normalization"];
+                if !provenance.is_null(){
+                    let normalization:sqx_data::normalization::Bundle=serde_json::from_value(provenance["bundle"].clone())?;
+                    let verified=normalization.verify_bars(&bars,config.bar_duration_ms).map_err(anyhow::Error::msg)?;
+                    if serde_json::to_value(verified)?!=provenance["verification"]{anyhow::bail!("archived normalization verification metadata differs from its bundle");}
+                }
+                prepared.push((bars,instrument,config,context));
+            }
+            let result=execute_crosscheck(&strategy,prepared,min_trades)?;
+            if resume {
+                let mut request=bundle.run.request.clone();request["research_kind"]=serde_json::json!("cli_crosscheck");request["started_run_id"]=serde_json::json!(run_id);
+                let id=archive.save(engine,bundle.dataset,bundle.strategy,request,result.clone()).map_err(anyhow::Error::msg)?;
+                println!("Crosscheck archive: {}",serde_json::json!({"run_id":id,"root":archive_dir,"replay_available":true,"replay_command":"replay-crosscheck"}));
+                if result["report"]["invalid_markets"]!=0 {anyhow::bail!("resumed crosscheck contains invalid simulations");}
+            }else{
+                let matches=result==bundle.run.result;
+                println!("Crosscheck replay: {}",serde_json::json!({"run_id":run_id,"matches":matches,"execution_valid":result["report"]["invalid_markets"]==0,"scope":"Exact archived execution comparison; not independent broker validation."}));
+                if !matches{anyhow::bail!("replayed crosscheck differs from the recorded result");}
+            }
+            Ok(())
+        }
+        Cmd::Crosscheck { archive_dir, strategy, manifest, min_trades } => {
             if min_trades==0 {anyhow::bail!("min-trades must be positive");}
             let s:Strategy=load_strategy(&strategy)?;
             let input:CrosscheckManifest=serde_json::from_str(&std::fs::read_to_string(&manifest)?)?;
@@ -1065,25 +1160,26 @@ fn main() -> Result<()> {
             for market in input.markets {
                 if !seen.insert((market.symbol.trim().to_uppercase(),market.timeframe)){anyhow::bail!("duplicate symbol/timeframe in crosscheck manifest");}
                 let bars=load_bars(&resolve(market.data))?;
-                let options=ResearchOptions{source:SourceOptions{timeframe:market.timeframe,calendar:market.calendar.map(&resolve),allow_data_gaps:market.allow_data_gaps},symbol:market.symbol,config:market.config.map(&resolve)};
+                let options=ResearchOptions{source:SourceOptions{normalization_bundle:market.normalization_bundle.map(&resolve),timeframe:market.timeframe,calendar:market.calendar.map(&resolve),allow_data_gaps:market.allow_data_gaps},symbol:market.symbol,config:market.config.map(&resolve)};
                 let (instrument,config,context)=options.prepare(&bars)?;
                 prepared.push((bars,instrument,config,context));
             }
-            let requested=prepared.len();let mut rows=Vec::new();let mut profitable=0;let mut eligible=0;let mut invalid=0;
-            for (bars,instrument,config,context) in prepared {
-                let pyp=resolve_periods_per_year(bars.len(),0.0,&bars);
-                let result=backtest(&s,&bars,&instrument,&config);
-                if !result.errors.is_empty(){
-                    invalid+=1;rows.push(serde_json::json!({"context":context,"status":"invalid","errors":result.errors}));continue;
-                }
-                let metrics=compute_metrics(&result,bars.len(),pyp);
-                let enough=metrics.number_of_trades>=min_trades as f64;
-                if enough {eligible+=1;if metrics.net_profit>0.0{profitable+=1;}}
-                rows.push(serde_json::json!({"context":context,"status":if enough{"eligible"}else{"insufficient_trades"},"metrics":metrics}));
-            }
-            println!("Multi-market cross-check for {}",s.name);
-            println!("Research context: {}",serde_json::json!({"markets":rows,"requested_markets":requested,"invalid_markets":invalid,"eligible_markets":eligible,"profitable_markets":profitable,"minimum_trades":min_trades,"scope":"Exploratory cross-market comparison; no untouched holdout or execution parity certified."}));
-            println!("Profitable on {profitable}/{eligible} eligible markets out of {requested} requested; invalid: {invalid}");
+            let archive=sqx_project::archive::Archive::new(&archive_dir);
+            let engine=sqx_project::archive::content_id(&std::fs::read(std::env::current_exe()?)?);
+            let dataset=serde_json::json!({"markets":prepared.iter().map(|(bars,instrument,config,context)|serde_json::json!({"bars":bars,"instrument":instrument,"config":config,"source_context":context})).collect::<Vec<_>>()});
+            let strategy_value=serde_json::to_value(&s)?;
+            let mut request=serde_json::json!({"research_kind":"cli_crosscheck_started","minimum_trades":min_trades});
+            let started=archive.save(engine.clone(),dataset.clone(),strategy_value.clone(),request.clone(),serde_json::json!({"status":"execution_not_recorded"})).map_err(anyhow::Error::msg)?;
+            println!("Crosscheck checkpoint: {}",serde_json::json!({"run_id":started,"root":archive_dir}));
+            std::io::Write::flush(&mut std::io::stdout())?;
+            let result=execute_crosscheck(&s,prepared,min_trades)?;
+            let report=&result["report"];
+            let invalid=report["invalid_markets"].as_u64().expect("count");
+            request["research_kind"]=serde_json::json!("cli_crosscheck");request["started_run_id"]=serde_json::json!(started);
+            let id=archive.save(engine,dataset,strategy_value,request,result.clone()).map_err(anyhow::Error::msg)?;
+            println!("Crosscheck archive: {}",serde_json::json!({"run_id":id,"root":archive_dir,"replay_available":false}));
+            println!("Research context: {report}");
+            println!("Profitable on {}/{} eligible markets out of {} requested; invalid: {invalid}",report["profitable_markets"],report["eligible_markets"],report["requested_markets"]);
             if invalid>0 {anyhow::bail!("crosscheck contains invalid simulations; inspect per-market errors");}
             Ok(())
         }

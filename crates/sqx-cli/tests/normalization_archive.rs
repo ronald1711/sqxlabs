@@ -1,0 +1,83 @@
+use std::{fs,path::PathBuf,process::Command};
+use serde_json::{json,Value};
+struct Temp(PathBuf);
+impl Drop for Temp{fn drop(&mut self){let _=fs::remove_dir_all(&self.0);}}
+#[test]
+fn normalization_is_bound_archived_and_reverified_without_source_files() {
+    let root=Temp(std::env::temp_dir().join(format!("sqx-normalization-archive-{}",std::process::id())));fs::create_dir_all(&root.0).unwrap();
+    let raw="timestamp_broker,open,high,low,close,volume\n1700000000,1,1,1,1,1\n1700000060,1,1,1,1,1\n";
+    fs::write(root.0.join("raw.csv"),raw).unwrap();
+    fs::write(root.0.join("policy.json"),json!({"schema":1,"server":"fixture","intervals":[{"raw_start_ms":1700000000000i64,"raw_end_ms":1700000600000i64,"offset_seconds":7200,"source":"synthetic fixture"}]}).to_string()).unwrap();
+    let script=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/mt5_normalize.py");
+    let output=Command::new("python3").current_dir(&root.0).arg(&script).args(["--input","raw.csv","--policy","policy.json","--server","fixture","--bar-duration-ms","60000","--out","bundles"]).output().unwrap();
+    assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
+    let receipt:Value=serde_json::from_slice(&output.stdout).unwrap();
+    let bundle_path=receipt["bundle"].as_str().unwrap();let csv=receipt["utc_csv"].as_str().unwrap();
+    let raw_ticks="timestamp_broker_ms,bid,ask\n1700000060000,1,1\n1700000060000,1,1.00001\n";
+    fs::write(root.0.join("raw-ticks.csv"),raw_ticks).unwrap();
+    let output=Command::new("python3").current_dir(&root.0).arg(&script).args(["--input","raw-ticks.csv","--policy","policy.json","--server","fixture","--out","bundles"]).output().unwrap();
+    assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
+    let tick_receipt:Value=serde_json::from_slice(&output.stdout).unwrap();
+    let tick_bundle=tick_receipt["bundle"].as_str().unwrap();let ticks=tick_receipt["utc_csv"].as_str().unwrap();
+    fs::write(root.0.join("strategy.json"),serde_json::to_string(&sqx_strategy::Strategy::new("clock-provenance")).unwrap()).unwrap();
+    let run=|args:&[&str]|Command::new(env!("CARGO_BIN_EXE_sqx-cli")).current_dir(&root.0).args(args).output().unwrap();
+    let output=run(&["backtest","--data",csv,"--strategy","strategy.json","--timeframe","M1","--normalization-bundle",bundle_path,"--ticks",ticks,"--tick-normalization-bundle",tick_bundle]);
+    assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
+    let stdout=String::from_utf8(output.stdout).unwrap();
+    let receipt:Value=serde_json::from_str(stdout.lines().find_map(|l|l.strip_prefix("Backtest archive: ")).unwrap()).unwrap();
+    let archive=sqx_project::archive::Archive::new(root.0.join("data/research"));let id=receipt["run_id"].as_str().unwrap();
+    let record=archive.load(id).unwrap();
+    assert_eq!(record.run.request["source_context"]["normalization"]["bundle"]["raw_csv"],raw);
+    assert_eq!(record.run.request["source_context"]["normalization"]["verification"]["server"],"fixture");
+    assert_eq!(record.run.request["source_context"]["tick_normalization"]["bundle"]["raw_csv"],raw_ticks);
+    fs::write(root.0.join("wrong-ticks.csv"),"timestamp_ms,bid,ask\n1699992860000,1,1.00001\n1699992860000,1,1\n").unwrap();
+    let wrong=run(&["backtest","--data",csv,"--strategy","strategy.json","--timeframe","M1","--ticks","wrong-ticks.csv","--tick-normalization-bundle",tick_bundle]);
+    assert!(!wrong.status.success());assert!(String::from_utf8_lossy(&wrong.stderr).contains("supplied ticks"));
+    fs::write(root.0.join("different.csv"),"timestamp,open,high,low,close,volume\n1699992800,2,2,2,2,1\n1699992860,2,2,2,2,1\n").unwrap();
+    let wrong=run(&["backtest","--data","different.csv","--strategy","strategy.json","--timeframe","M1","--normalization-bundle",bundle_path]);
+    assert!(!wrong.status.success());assert!(String::from_utf8_lossy(&wrong.stderr).contains("does not match the supplied candles"));
+    let changed_duration=root.0.join("changed-duration");fs::create_dir_all(&changed_duration).unwrap();
+    for name in ["raw.csv","utc.csv","policy.json","manifest.json"] {fs::copy(root.0.join(bundle_path).join(name),changed_duration.join(name)).unwrap();}
+    let mut manifest:Value=serde_json::from_str(&fs::read_to_string(changed_duration.join("manifest.json")).unwrap()).unwrap();
+    manifest["bar_duration_ms"]=json!(120000);fs::write(changed_duration.join("manifest.json"),manifest.to_string()).unwrap();
+    let wrong_timeframe=run(&["backtest","--data",csv,"--strategy","strategy.json","--timeframe","M1","--normalization-bundle","changed-duration"]);
+    assert!(!wrong_timeframe.status.success());assert!(String::from_utf8_lossy(&wrong_timeframe.stderr).contains("declared candle timeframe"));
+    // Manifest-relative bundle paths are resolved before any comparison executes.
+    fs::create_dir_all(root.0.join("manifests")).unwrap();
+    let market=json!({"symbol":"EURUSD","data":format!("../{csv}"),"timeframe":"M1","normalization_bundle":format!("../{bundle_path}")});
+    let mut manifest=json!({"schema":1,"markets":[market]});
+    fs::write(root.0.join("manifests/markets.json"),manifest.to_string()).unwrap();
+    let cross=run(&["crosscheck","--manifest","manifests/markets.json","--strategy","strategy.json"]);
+    assert!(cross.status.success(),"{}",String::from_utf8_lossy(&cross.stderr));
+    let text=String::from_utf8(cross.stdout).unwrap();
+    let cross_receipt:Value=serde_json::from_str(text.lines().find_map(|l|l.strip_prefix("Crosscheck archive: ")).unwrap()).unwrap();
+    let cross_record=archive.load(cross_receipt["run_id"].as_str().unwrap()).unwrap();
+    let report:Value=serde_json::from_str(text.lines().find_map(|l|l.strip_prefix("Research context: ")).unwrap()).unwrap();
+    assert_eq!(report["markets"][0]["context"]["normalization"]["bundle"]["raw_csv"],raw);
+    // A bad later market must not leave a partial, seemingly successful report.
+    let mut wrong_market=manifest["markets"][0].clone();wrong_market["symbol"]=json!("GBPUSD");wrong_market["data"]=json!("../different.csv");
+    manifest["markets"].as_array_mut().unwrap().push(wrong_market);
+    fs::write(root.0.join("manifests/markets.json"),manifest.to_string()).unwrap();
+    let cross=run(&["crosscheck","--manifest","manifests/markets.json","--strategy","strategy.json"]);
+    assert!(!cross.status.success());assert!(cross.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&cross.stderr).contains("supplied candles"));
+    let restored=sqx_project::archive::Archive::new(root.0.join("restored"));restored.restore(&record).unwrap();
+    fs::remove_dir_all(root.0.join("bundles")).unwrap();fs::remove_file(root.0.join("raw.csv")).unwrap();fs::remove_file(root.0.join("policy.json")).unwrap();
+    restored.restore(&cross_record).unwrap();
+    let replay=run(&["replay-crosscheck","--archive-dir","restored","--run-id",&cross_record.run_id]);
+    assert!(replay.status.success(),"{}",String::from_utf8_lossy(&replay.stderr));
+    let mut changed=cross_record.dataset.clone();changed["markets"][0]["source_context"]["normalization"]["verification"]["rows"]=json!(999);
+    let bad=restored.save(cross_record.run.engine_id,changed,cross_record.strategy,cross_record.run.request,cross_record.run.result).unwrap();
+    let replay=run(&["replay-crosscheck","--archive-dir","restored","--run-id",&bad]);
+    assert!(!replay.status.success());assert!(String::from_utf8_lossy(&replay.stderr).contains("normalization verification metadata differs"));
+    let replay=run(&["replay-backtest","--archive-dir","restored","--run-id",id]);
+    assert!(replay.status.success(),"{}",String::from_utf8_lossy(&replay.stderr));
+    let mut altered_ticks=record.run.request.clone();altered_ticks["source_context"]["tick_normalization"]["verification"]["rows"]=json!(1);
+    let bad=restored.save(record.run.engine_id.clone(),record.dataset.clone(),record.strategy.clone(),altered_ticks,record.run.result.clone()).unwrap();
+    let replay=run(&["replay-backtest","--archive-dir","restored","--run-id",&bad]);
+    assert!(!replay.status.success());assert!(String::from_utf8_lossy(&replay.stderr).contains("tick normalization verification metadata differs"));
+    let mut altered=record.run.request.clone();altered["source_context"]["normalization"]["verification"]["server"]=json!("wrong server");
+    let bad=restored.save(record.run.engine_id,record.dataset,record.strategy,altered,record.run.result).unwrap();
+    let replay=run(&["replay-backtest","--archive-dir","restored","--run-id",&bad]);
+    assert!(!replay.status.success());assert!(String::from_utf8_lossy(&replay.stderr).contains("normalization verification metadata differs"));
+}

@@ -395,13 +395,14 @@
       </div>
       <div class="card" style="margin-top:18px">
         <h2>Broker profiles</h2>
+        <p class="muted">Spread and slippage use SqxLabs points (FX pips). These values need conversion from your broker’s point size; see Settings.</p>
         <div id="bp-list" class="muted">No profiles yet.</div>
         <div class="row" style="margin-top:10px">
           <input type="text" id="bp-name" placeholder="name" style="width:120px">
           <input type="number" id="bp-deposit" value="10000" style="width:100px">
-          <input type="number" id="bp-spread" value="0" style="width:80px">
-          <input type="number" id="bp-slippage" value="0" style="width:80px">
-          <input type="number" id="bp-commission" value="0" style="width:80px">
+          <input type="number" id="bp-spread" step="any" aria-label="spread in SqxLabs points (FX pips)" value="0" style="width:80px">
+          <input type="number" id="bp-slippage" step="any" aria-label="slippage in SqxLabs points (FX pips)" value="0" style="width:80px">
+          <input type="number" id="bp-commission" step="any" aria-label="commission round-trip per lot in account currency" value="0" style="width:80px">
           <button id="bp-save">Save profile</button>
         </div>
       </div>
@@ -439,13 +440,14 @@
         <div class="row">
           <label class="muted">Initial deposit</label>
           <input type="number" id="set-deposit" value="10000">
-          <label class="muted">Spread (pts)</label>
-          <input type="number" id="set-spread" value="0">
-          <label class="muted">Slippage (pts)</label>
-          <input type="number" id="set-slippage" value="0">
-          <label class="muted">Commission/lot</label>
-          <input type="number" id="set-commission" value="0">
+          <label class="muted" for="set-spread">Spread (FX pips)</label>
+          <input type="number" id="set-spread" step="any" aria-label="spread in SqxLabs points (FX pips)" value="0">
+          <label class="muted" for="set-slippage">Slippage per fill (FX pips)</label>
+          <input type="number" id="set-slippage" step="any" aria-label="slippage in SqxLabs points (FX pips)" value="0">
+          <label class="muted" for="set-commission">Round-trip commission/lot (account currency)</label>
+          <input type="number" id="set-commission" step="any" aria-label="commission round-trip per lot in account currency" value="0">
         </div>
+        <p class="muted" id="cost-unit-help">One SqxLabs point is one FX pip: 0.0001 for EURUSD and 0.01 for USDJPY. For a broker quoting five or three decimals, 10 broker points equal 1 pip. Example: one USDJPY broker point of 0.001 means entering 0.1 here. Slippage applies to each fill; commission is charged once per completed trade. Tick backtests use observed bid/ask spread.</p>
         <label><input type="checkbox" id="set-allow-gaps"> Allow unresolved data gaps for exploratory runs</label><p class="muted">Off by default. Inspect the dataset and calendar first. Acknowledging gaps does not repair missing data or validate the result.</p>
         <h3>Candle execution assumption</h3>
         <label for="set-intrabar">Order of prices within each OHLC candle</label>
@@ -990,7 +992,7 @@ async function askAssistant() {
     }
     if(d.research_context){
       const c=d.research_context.config;
-      out.textContent += "\n\nResearch scope: " + d.research_context.scope + "\nAssumptions: deposit " + c.initial_deposit + " " + c.account.currency + ", spread " + c.spread_points + " points, slippage " + c.slippage_points + " points, commission " + c.commission_per_lot + "/lot, maximum leverage " + c.account.max_leverage + ":1. " + d.research_context.backtests_attempted + " backtests attempted.";
+      out.textContent += "\n\nResearch scope: " + d.research_context.scope + "\nAssumptions: deposit " + c.initial_deposit + " " + c.account.currency + ", spread " + c.spread_points + " FX pips, slippage " + c.slippage_points + " FX pips, commission " + c.commission_per_lot + "/lot, maximum leverage " + c.account.max_leverage + ":1. " + d.research_context.backtests_attempted + " backtests attempted.";
     }
   } catch (e) {
     out.textContent = "Error: " + e;

@@ -38,7 +38,7 @@ resolved by a later increment. The numbered requirements above remain unchanged.
 
 | Requirement | Current inspected evidence | Still required before completion |
 | --- | --- | --- |
-| 1. Accounting/execution | Account fixtures and engine/tick tests exercise costs, conversions, margin, stops and financing. Schema-1 results reconcile settlement chains, financing accruals, sampled account components, admission/exit/stop-out correspondence, effective stop chains and final equity; inconsistent evidence is rejected by metrics. | Independent end-to-end execution comparisons across supported instrument/account combinations; complete auditable account/order event reconciliation. |
+| 1. Accounting/execution | Account fixtures and engine/tick tests exercise costs, conversions, margin, stops and financing. Frozen MT5 calculation references cover four EURUSD/EUR and four USDJPY/EUR cases; the opt-in forex-base margin model separates margin conversion from profit conversion (not actual-fill parity). Schema-1 results reconcile settlement chains, financing accruals, sampled account components, admission/exit/stop-out correspondence, effective stop chains and final equity; inconsistent evidence is rejected by metrics. | Independent end-to-end execution comparisons across supported instrument/account combinations; complete auditable account/order event reconciliation. |
 | 2. Simulation contract | `ExecutionEvidence` stores entry attempts, scheduled exit decisions, tick coverage and currency; `BarAmbiguity` explicitly limits two-path comparisons to local scenarios. | Full intrabar order lifecycle and state transitions; distinguish local path scenarios from global adverse/favourable bounds; remaining confirmation/calendar coverage cases. |
 | 3. Independent evidence | Indicator cross-checks use pinned Rust reference packages and explicitly document seed/convention exceptions; debug/release parity exercises two evolution seeds plus long/short OHLC and supplied-tick execution records. | Coverage matrix for every advertised indicator/convention and supported execution feature; independently sourced strategy/broker fixtures; actual remote matrix execution. Existing checks do not prove these. |
 | 4. Reproducible records | Content-addressed snapshots, restore and replay tests exist; AI generation/details trials checkpoint inputs before execution and full results immediately afterwards, with process-kill retention evidence and CLI/dashboard single-trial restart/replay; session summaries archive on return; standalone CLI backtests automatically checkpoint/archive full inputs/results, support discovery/restart and replay under exact executable identity with a process-kill recovery test; MT5 export preserves price/millisecond precision with atomic publication and structural row checks. | AI provider-session recovery and bounded retained-result memory; equivalent durable accounting on every research entry point. |
@@ -3340,3 +3340,173 @@ an active .github/workflows file. Publish that template to its active location
 with an authorized workflow-capable connection, verify the matrix and configure
 required checks. Earlier references to the local workflow do not establish active
 remote automation. TODO.md tracks this prerequisite.
+
+## MT5 reference margin-policy increment
+
+See MT5_VALIDATION.md for the observed demo configuration, clock limitations,
+read-only collection and explicit forex-base margin policy. Local debug/release
+workspace gates passed 372 Rust tests, 16 frontend scripts, five exporter tests
+and builds. Four execution and two evolution debug/release parity fixtures also
+passed. An additional tick-specific margin-rate change test was added after the
+full gates; its targeted debug run passed. Logs are under work/mt5-validation:
+margin-policy-debug-gate-fixed.log, margin-policy-release-gate.log,
+margin-policy-parity.log and margin-tick-final.log. The initial debug gate found
+a test fixture missing the new margin evidence field; that fixture was corrected
+before the successful rerun. New UI labels have regression/syntax coverage but no
+new rendered-browser verification. General directional profit conversion and
+independent execution coverage remain incomplete.
+The final targeted release run also passed all three margin-model tests, including
+the added tick case (work/mt5-validation/margin-tick-release-final.log).
+
+## Directional profit conversion validation
+
+Opt-in directional historical profit rates now feed sizing/admission reserves,
+account valuation, cash settlement and stop-out consistently by position side.
+Independent margin conversion remains separate. The frozen USDJPY/EUR reference
+uses both directions in one account configuration; mixed-strategy and tick-time
+causality regressions are included. See MT5_VALIDATION.md for scope and source
+limitations. Debug and release workspace gates each passed 376 Rust tests,
+16 frontend checks, five exporter tests and builds. Four execution and two seeded
+evolution profile comparisons passed. Logs: work/mt5-validation/directional-debug-gate.log,
+directional-release-gate.log and directional-parity.log. This does not establish
+actual-fill or general broker-conversion-policy parity.
+
+## Broker-clock import boundary
+
+New MT5 exports declare raw broker time in their CSV header. The shared Rust
+import functions reject these until normalized. The normalizer emits UTC headers
+and rejects ordinary UTC input unless the caller explicitly declares it as an
+older broker-clock export. End-to-end Python-to-Rust coverage preserves raw data,
+price precision and duplicate-millisecond ticks. The full debug gate passed
+377 Rust tests, 16 frontend checks, ten Python tests and workspace build (log:
+work/mt5-validation/broker-header-debug-gate.log). No full release or profile-parity
+rerun was performed for this increment. Normalization-bundle provenance is not yet
+automatically embedded by the research import/archive paths; misdeclared older
+or headerless CSV remains possible. See MT5_VALIDATION.md for remaining scope.
+
+
+## Verified CLI normalization provenance
+
+The latest debug and release workspace gates each passed 378 Rust tests,
+16 frontend checks, ten Python tests and workspace builds. Logs:
+work/mt5-validation/provenance-debug-gate.log and provenance-release-gate.log.
+Explicit CLI candle bundle attachment now validates hashes, clock arithmetic,
+unchanged price payloads, exact input candles and timeframe. Archives embed the
+original bundle; replay/resume verifies it again after restore without source
+files. Rehashed false timestamps and contradictory verification metadata fail.
+This extends the preceding import-boundary increment; it does not authenticate
+broker data or prove the declared clock policy. Dashboard, manifest imports and
+tick provenance attachment remain unfinished. CI activation and independent
+execution/papertrading comparison remain open. No additional profile-parity or
+rendered-browser run was performed for this provenance-only increment.
+
+
+## Tick normalization provenance
+
+CLI backtests now accept an explicit tick-normalization bundle, bind it to the
+exact input tick sequence and preserve it in the archive. Replay/resume verifies
+the embedded bundle and derived metadata. Targeted sqx-data broker-clock and
+CLI normalization-archive regressions passed, including reordered/missing
+same-millisecond ticks, source-free restored replay and altered metadata.
+Logs: work/mt5-validation/tick-provenance-tests.log and tick-archive-tests.log.
+The preceding full-workspace gates predate this increment. This proves neither
+complete tick capture nor independent execution parity; dashboard and manifest
+provenance integration remain open.
+
+
+Cross-check provenance follow-up: each market manifest can now supply a
+normalization_bundle, resolved relative to that manifest. Exact candle/timeframe
+verification runs for all markets before any comparison output. Regression tests
+prove source retention and whole-request rejection when a later market's bundle
+mismatches. Existing cross-check source tests also pass (log:
+work/mt5-validation/crosscheck-provenance-tests.log). This does not add durable
+cross-check registration, dashboard import provenance or symbol authentication.
+
+
+Cross-check durable-registration follow-up: the CLI now writes the full market
+inputs, configurations, source evidence and strategy before execution, followed
+by all execution results and the summary, including failed simulations. Results
+reference their starting checkpoint and executable hash. Targeted integration
+checks confirm input/result retention, checkpoint linkage, preflight rejection
+without run publication and retained errors (crosscheck-archive-final.log).
+The provenance integration also passed (crosscheck-archive-tests.log). Dedicated
+cross-check replay/resume remains unfinished; no recovery guarantee is claimed.
+
+
+Cross-check replay/resume follow-up: replay-crosscheck now requires the exact
+recorded executable, verifies embedded candle provenance, and compares the full
+execution arrays and summary. --resume restarts all frozen markets from a starting
+checkpoint and records the result; it does not continue midway through a market.
+Restored archives work without original source files. Tests cover unchanged replay,
+identical resumed result identity, invalid execution disclosure, changed results,
+wrong executable, wrong record type and altered provenance metadata. All 19 CLI
+tests passed (crosscheck-replay-cli-gate.log); the extended provenance test passed
+separately (crosscheck-replay-provenance-final.log). This increment has not received
+a full workspace/release rerun or a process-kill recovery test. Independent broker
+execution validation and the remaining programme requirements are still open.
+
+
+Cross-check interruption evidence: a real CLI process with two markets of 50,000
+candles each was killed after its checkpoint was published and while still alive.
+The test verified that no final result existed, removed the original CSV, strategy
+and manifest, restarted from the checkpoint, and checked both complete executions
+and exact replay. The targeted debug test passed (crosscheck-crash.log). This
+covers process interruption, not power loss or disk corruption. Resume recomputes
+all markets; it is not incremental continuation from a partially executed market.
+
+
+Post-cross-check full verification: debug and release workspace tests/builds
+both passed, each with 379 Rust tests, 16 frontend checks and ten Python tests.
+The real-process cross-check interruption regression passed in both profiles.
+Logs: work/mt5-validation/crosscheck-full-debug.log and crosscheck-full-release.log.
+This supersedes the preceding increments' missing full-gate status, not their
+remaining functional limitations. CI remains a local template, not active GitHub
+Actions. Broker execution parity, synchronized conversion data, dashboard source
+provenance and recoverable live capture/paper comparison remain unfinished.
+
+
+## Cost-unit disclosure after captured-data comparison
+
+The captured-data reference exposed that CLI/UI "points" could be mistaken for
+MT5 broker points. Settings, saved-profile help, research summaries and recorded
+run headers now name FX pips; Settings explains EURUSD 0.0001 and USDJPY 0.01,
+with an explicit 0.001 broker-point -> 0.1 pip example. Slippage is per fill;
+commission is round-trip per lot in account currency. Fractional cost inputs have
+step=any, including profile fields. CLI help carries the same distinction. No
+stored value is silently rescaled. JavaScript syntax, backtest-error and comparison
+UI regressions passed. This increment has not had rendered-browser verification;
+custom instrument definitions and broker point-size mapping still need validation.
+
+
+## Independent fixture checks in the local gate
+
+ci/check.sh now invokes ci/check-reference-fixture.py after its existing checks.
+The generated synthetic fixture exercises eight long/short reference cases,
+independent Decimal arithmetic, archive replay and future-data invariance without
+MT5 access or private source files. It includes nonempty trades and actual stop
+quote jumps; a changed terminal result is required in the mutation check.
+The standalone added gate passed against both debug and release executables
+(independent-fixture-debug.log and independent-fixture-release.log). The whole
+combined gate has not been rerun for this wiring-only change. This establishes
+portable regression coverage, not real-market completeness or broker fill parity.
+The tracked workflow remains a template; remote CI activation is still open.
+
+
+## Remote CI activation and first verified run
+
+The connected GitHub app published .github/workflows/reliability.yml in commit
+e832c2f12ca209f7cabdedde4ce815d9b155cb9e. The earlier Git OAuth scope limitation
+was specific to that connection. GitHub run 45357592150 completed successfully:
+https://github.com/ronald1711/sqxlabs/actions/runs/45357592150
+All four Linux/macOS × debug/release jobs passed; both release jobs also passed
+debug/release trace comparisons. This verifies the published baseline only.
+New local MT5/provenance/reference changes have not yet been pushed.
+
+The full current local gates passed separately: 379 Rust tests, workspace builds,
+16 frontend checks, 12 Python tests, plus the eight-case independent arithmetic,
+archive replay and future-mutation gate in each profile. Logs:
+activated-ci-local-debug-fixed.log and activated-ci-local-release.log. The initial
+debug attempt caught an outdated UI-test expectation for points versus FX pips;
+the test now checks both spread and slippage units, and the full gates were rerun.
+Required branch-protection checks and remote verification of the expanded local
+changes remain open. Green CI is regression evidence, not broker certification.

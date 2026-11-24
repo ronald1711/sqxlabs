@@ -9,7 +9,7 @@ mod engine;
 mod evidence;
 pub use evidence::validate_account_evidence;
 pub mod account;
-pub use account::{AccountConfig, ConversionRate};
+pub use account::{AccountConfig, ConversionRate, MarginModel, MarginConversionRate, DirectionalConversionRate, ProfitConversionModel};
 mod evaluate;
 pub mod registry;
 
@@ -118,6 +118,7 @@ pub struct MarginCheck {
     pub normalized_lots: f64,
     pub proposed_fill_price: f64,
     pub quote_to_account_rate: f64,
+    pub margin_base_to_account_rate: f64,
     pub max_leverage: f64,
     pub required_margin: f64,
     pub spread_and_slippage_cost: f64,
@@ -194,6 +195,7 @@ pub struct AccountSnapshot {
     pub trade_id: Option<usize>,
     pub liquidation_price: Option<f64>,
     pub quote_to_account_rate: Option<f64>,
+    pub margin_base_to_account_rate: Option<f64>,
     pub balance: f64,
     pub gross_unrealized: f64,
     pub commission_reserve: f64,
@@ -229,6 +231,7 @@ pub struct StopOutDecision {
     pub fill_price: f64,
     pub threshold_price: f64,
     pub quote_to_account_rate: f64,
+    pub margin_base_to_account_rate: f64,
     pub balance: f64,
     pub unrealized_profit_account: f64,
     pub commission_reserve: f64,

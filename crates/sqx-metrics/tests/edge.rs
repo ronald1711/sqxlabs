@@ -39,7 +39,7 @@ fn schema_one_account_evidence_must_reconcile_before_metrics_are_computed(){
     result.execution.account_evidence_schema=1;result.execution.account_currency=Some("USD".into());
     assert!(sqx_metrics::validate_observations(&result).is_err());
     assert!(compute(&result,1,252.0).net_profit.is_nan());
-    result.execution.account_snapshots.push(sqx_backtest::AccountSnapshot{phase:"bar_close",bar_open_time:0,quote_time:None,trade_id:None,liquidation_price:None,quote_to_account_rate:None,balance:10000.0,gross_unrealized:0.0,commission_reserve:0.0,financing_accrued:0.0,equity:10000.0,required_margin:0.0,free_margin:10000.0});
+    result.execution.account_snapshots.push(sqx_backtest::AccountSnapshot{phase:"bar_close",bar_open_time:0,quote_time:None,trade_id:None,liquidation_price:None,quote_to_account_rate:None,margin_base_to_account_rate:None,balance:10000.0,gross_unrealized:0.0,commission_reserve:0.0,financing_accrued:0.0,equity:10000.0,required_margin:0.0,free_margin:10000.0});
     assert!(sqx_metrics::validate_observations(&result).is_ok());assert_eq!(compute(&result,1,252.0).net_profit,0.0);
     result.execution.account_snapshots[0].free_margin=9000.0;
     assert!(sqx_metrics::validate_observations(&result).is_err());assert!(compute(&result,1,252.0).net_profit.is_nan());

@@ -6,6 +6,7 @@ license.workspace = true
 description = "Data Manager: multi-symbol/timeframe bar store and CSV import."
 
 [dependencies]
+sha2 = "0.10"
 serde.workspace = true
 sqx-core = { path = "../sqx-core" }
 serde_json.workspace = true

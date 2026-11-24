@@ -1,0 +1,92 @@
+{
+  "schema": 1,
+  "source": "MT5 read-only order_calc_profit/order_calc_margin",
+  "client_version": "1.2.3",
+  "account": {
+    "server": "TickmillEU-Demo",
+    "currency": "EUR",
+    "leverage": 30,
+    "trade_mode": 0
+  },
+  "cases": [
+    {
+      "symbol": "EURUSD",
+      "direction": "buy",
+      "lots": 1.0,
+      "open": 1.09041,
+      "close": 1.08941,
+      "contract_size": 100000.0,
+      "point": 1e-05,
+      "profit_currency": "USD",
+      "margin_currency": "EUR",
+      "calculation_mode": 0,
+      "profit_account": -91.79,
+      "margin_account": 3333.33,
+      "host_utc_seconds": [
+        1795505573.749739,
+        1795505573.7533991
+      ]
+    },
+    {
+      "symbol": "EURUSD",
+      "direction": "buy",
+      "lots": 1.0,
+      "open": 1.09041,
+      "close": 1.09141,
+      "contract_size": 100000.0,
+      "point": 1e-05,
+      "profit_currency": "USD",
+      "margin_currency": "EUR",
+      "calculation_mode": 0,
+      "profit_account": 91.62,
+      "margin_account": 3333.33,
+      "host_utc_seconds": [
+        1795505573.763747,
+        1795505573.764647
+      ]
+    },
+    {
+      "symbol": "EURUSD",
+      "direction": "sell",
+      "lots": 1.0,
+      "open": 1.09025,
+      "close": 1.08925,
+      "contract_size": 100000.0,
+      "point": 1e-05,
+      "profit_currency": "USD",
+      "margin_currency": "EUR",
+      "calculation_mode": 0,
+      "profit_account": 91.81,
+      "margin_account": 3333.33,
+      "host_utc_seconds": [
+        1795505573.774317,
+        1795505573.7752059
+      ]
+    },
+    {
+      "symbol": "EURUSD",
+      "direction": "sell",
+      "lots": 1.0,
+      "open": 1.09025,
+      "close": 1.09125,
+      "contract_size": 100000.0,
+      "point": 1e-05,
+      "profit_currency": "USD",
+      "margin_currency": "EUR",
+      "calculation_mode": 0,
+      "profit_account": -91.64,
+      "margin_account": 3333.33,
+      "host_utc_seconds": [
+        1795505573.784469,
+        1795505573.785294
+      ]
+    }
+  ],
+  "limitations": [
+    "Calculations, not actual fills",
+    "Conversion quotes may change between calls",
+    "Raw broker timestamps not normalized to UTC",
+    "No commission or financing validation"
+  ],
+  "scope": "MT5 calculation API reference only; synthetic flat bars below reproduce supplied calculation prices, not market execution. Account outputs rounded to EUR cents; compare with half-cent tolerance. Source timestamp clocks are not used for the synthetic scenarios."
+}

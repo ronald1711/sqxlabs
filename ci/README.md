@@ -8,11 +8,12 @@ backup transport without converting hash-sensitive JSON numbers, and exercises
 search-start recovery after a lost response and page reload. It does not
 publish anything or launch the app against the user's data directory.
 
-The workflow template [reliability-workflow.yml](reliability-workflow.yml) is not
-active yet. The current GitHub OAuth connection cannot create workflow files
-without the `workflow` scope. Publish this template as
-`.github/workflows/reliability.yml` using a connection with that permission, then
-verify its first run. The configured workflow runs both profiles on Linux and macOS, with Rust 1.100.0,
+The reliability workflow is active at `.github/workflows/reliability.yml` as of
+commit e832c2f12ca209f7cabdedde4ce815d9b155cb9e. The connected GitHub app could
+publish it although the earlier Git OAuth connection lacked workflow scope.
+The first run is https://github.com/ronald1711/sqxlabs/actions/runs/45357592150;
+all four jobs passed, including profile parity on both platforms. This run covers
+the published baseline, not newer uncommitted local changes. It runs both profiles on Linux and macOS, with Rust 1.100.0,
 Node 22.23.4 and commit-pinned official checkout/setup-node actions. Runner images
 and external curl/system libraries are not pinned; this is cross-platform
 regression evidence, not a claim of identical binaries across machines. Archive
@@ -46,3 +47,16 @@ stub verifies CSV price precision without requiring SiliconMT5 or a broker login
 It is exporter regression coverage, not independent broker evidence.
 The supplied tick fixture uses explicit millisecond CSV and checks that its
 123ms component survives in both executed entry and account quote timestamps.
+
+The Rust data-import integration test also invokes Python 3 to exercise real
+broker-clock normalization and UTC CSV ingestion end to end. Python 3 must be
+available when running the workspace Rust tests, not only the exporter suite.
+
+The local gate also runs `check-reference-fixture.py` against the selected profile's
+CLI. It generates a small synthetic EUR-account dataset with USDJPY and conversion
+quotes, runs eight independent Decimal comparisons (constant/SMA entry, stops and
+signal exits, long and short), replays the archives, then mutates future prices
+and requires unchanged earlier evidence plus changed terminal results. No MT5
+installation, network connection or private market files are needed. These are
+bounded regression checks, not broker-execution certification. The GitHub workflow is active; unpublished local checks are not part of its
+remote coverage until their source changes are pushed and the resulting run passes.

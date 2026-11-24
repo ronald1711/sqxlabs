@@ -415,8 +415,10 @@ Remaining reliability work and release priorities: [TODO.md](TODO.md).
 
 Run `cargo test --workspace` and `cargo build --workspace`. The broader local
 gate, `bash ci/check.sh debug`, also checks dashboard JavaScript regressions.
-The latest debug and release gates each passed 368 Rust tests, 16 frontend
-regression checks and four Python exporter tests, plus workspace builds. The
+The latest debug gate passed 377 Rust tests, 16 frontend checks and ten Python
+export/normalization tests, plus the workspace build. The previous release gate
+passed 376 Rust tests, 16 frontend checks and five Python exporter tests; the
+latest broker-clock header changes have not yet had a full release rerun. The
 profile comparison also passed four execution fixtures and two seeded evolution
 fixtures with byte-identical evidence (excluding executable identity in evolution
 headers).
@@ -480,3 +482,138 @@ linked result IDs, execution validity and whether the current executable matches
 unwritable archive stops the operation before simulation; storage failure is not
 silently converted to an unrecorded run. Each working directory has its own
 default archive, so use a shared explicit archive for unified holdout auditing.
+
+### Explicit forex margin conversion
+
+Account configuration supports `margin_model: "forex_base"` for declared forex
+base-unit margin. It uses contract units × lots × base-to-account rate / leverage,
+separately from profit conversion. For a third-currency account, supply historical
+`margin_conversion_rates` entries with `time` (normalized epoch milliseconds),
+`from` (instrument base currency), `to` (account currency), `long_rate` and
+`short_rate` (account units per base unit). Missing, stale, duplicate or invalid
+observations fail validation. The existing `max_conversion_age_ms` also limits
+margin observations. Direct base-account conversion is one; a quote-account uses
+the contemporaneous traded price.
+
+The default `quote_notional` model preserves the prior price × profit-conversion
+margin assumption. It is not broker parity for every currency combination. The
+new policy is applied to entry admission, account samples and stop-out, and its
+actual margin conversion rate is recorded separately in execution evidence.
+It does not implement broker-specific tiered, hedged, exchange or CFD margin.
+For third-currency profit conversion, `profit_conversion_model: "directional"`
+uses `profit_conversion_rates` with the same time/from/to/long_rate/short_rate
+structure, but from the instrument's quote currency to the account currency.
+Both directions can coexist in one strategy/configuration. Missing or stale
+observations fail; there is no fallback to single-rate observations in directional
+mode. The default `single_rate` retains the prior convention. Direct quote-account
+conversion remains one; direct base-account conversion uses the current price.
+Rates are explicit assumptions, not an automatically inferred broker convention. MT5 snapshots currently
+cover one-lot EURUSD/EUR and USDJPY/EUR calculations, not actual fills.
+
+### MT5 broker-clock normalization
+
+New MT5 exports use `timestamp_broker` / `timestamp_broker_ms`; SqxLabs rejects
+these raw headers until normalized. MT5 timestamps must not be assumed UTC.
+Preserve the raw export and convert
+with an explicit policy before importing the normalized CSV:
+
+```bash
+python3 scripts/mt5_normalize.py --input data/mt5/EURUSD_M5.csv --server TickmillEU-Demo --policy examples/tickmill-clock-2026.json --bar-duration-ms 300000 --out data/mt5/normalized
+```
+
+For ticks, omit `--bar-duration-ms`. For older exports bearing ordinary
+`timestamp`/`timestamp_ms` headers, `--legacy-broker-clock` explicitly declares raw
+broker time; never use this switch on UTC data. Without this declaration, ordinary
+UTC headers are rejected by the normalizer to avoid double conversion.
+The command prints the immutable bundle and
+`utc.csv` paths. Bundles retain raw data, exact policy, normalized CSV and hashes.
+The example deliberately supports bounded periods and excludes uncertain clock
+transition days; unsupported rows fail rather than being dropped or guessed.
+Do not use this policy for another broker. Normalization alone does not prove
+price quality or tick completeness. Automatic provenance-aware app import remains
+unfinished; see MT5_VALIDATION.md.
+
+CLI research commands that expose `--normalization-bundle` can bind the original
+clock evidence to the supplied candles:
+
+```bash
+sqx-cli backtest --strategy /path/to/strategy.json --data /path/to/bundle/utc.csv --symbol EURUSD --timeframe M5 --normalization-bundle /path/to/bundle
+```
+
+Use your actual strategy path. The bundle verifier checks hashes, clock arithmetic,
+unchanged non-time fields, chronology, candle duration and exact supplied bars.
+When the research route archives its source context, the original raw CSV, policy,
+normalized CSV and manifest are embedded, not merely referenced by a local path.
+CLI backtest replay/resume rechecks embedded provenance without the original files.
+This is transformation evidence, not authenticated broker provenance. Dashboard imports still need integration.
+For tick backtests, also pass `--ticks /path/to/ticks/utc.csv` and
+`--tick-normalization-bundle /path/to/ticks/bundle`. This verifies and archives
+the exact tick sequence, including order within equal timestamps. It does not
+certify that the broker supplied every market tick.
+
+
+Cross-check manifests accept an optional `normalization_bundle` per market.
+Both data and bundle paths are resolved relative to the manifest. Every market
+is validated before execution; a mismatched bundle aborts the entire preflight.
+The report retains the verified bundle in each market's context. This does not authenticate the declared symbol.
+Dashboard data manifests do not yet support this field.
+
+Cross-checks now archive their complete input before execution and their full
+per-market execution results plus summary afterwards, including invalid runs.
+Use `--archive-dir` to override the default `data/research`. The result references
+its starting checkpoint. Storage failures are fatal. Use `replay-crosscheck --run-id ID --archive-dir DIR` to compare a result,
+or add `--resume` for a starting checkpoint. This requires the exact original
+executable, revalidates embedded provenance and compares the full result. Resume
+restarts all markets from frozen input. A checkpoint alone does not indicate
+whether a process is running or interrupted. Exact replay is not independent
+broker validation.
+
+
+For a read-only common historical window, run `scripts/mt5_capture_window.py`
+with the SiliconMT5 venv Python, `--symbols EURUSD,USDJPY,EURJPY`, explicit
+`--broker-start` / `--broker-end` epoch seconds and `--out DIR`. Bounds must be
+minute-aligned and at most one hour apart. The command uses only local read APIs
+and closes its own connection. It preserves full raw responses, numeric CSV,
+selected account/instrument metadata and host request times in a content-addressed
+capture.json. The requested window is half-open; the inclusive tick API response
+is retained separately from ticks inside the window. Missing candles or invalid
+prices fail the capture. Sequential reads are not an atomic snapshot; tick
+completeness, clock correctness and conversion freshness still require validation.
+This bounded capture is not yet a resumable live recorder.
+
+The window collector additionally retains a preceding tick interval, default
+60 seconds (`--warmup-seconds`, 0–3600), separately as raw_warmup_ticks and
+warmup_ticks_csv. This can supply already-known conversion quotes at the first
+trading timestamp. Consumers must still enforce their declared freshness limit
+and cross-symbol equal-timestamp ordering convention.
+
+
+Run `python3 scripts/mt5_reference_check.py --capture CAPTURE_DIRECTORY --policy
+CLOCK_POLICY_JSON` from the repository root for an independent Decimal check of
+eight USDJPY tick trials (constant-entry, close-versus-SMA(2), stop-loss and signal exit, each long/short) on a captured EUR account dataset. The script
+requires the built CLI, normalizes source bundles, freezes account conversion
+rates, archives and replays each trial, and writes reference/comparison.json.
+It independently calculates the first eligible signal and SMA(2) value, and checks
+entry/exit prices and times, commission, net profit, final equity and
+entry margin. Scope is fixed 0.1 lot, EUR 10,000, 1:30 leverage, 0.4-pip stops for stop cases (one entry per day),
+terminal liquidation otherwise, EUR 3.50 round-trip commission per lot and one broker-point
+slippage per fill. These are explicit test assumptions, not certified broker fees.
+SqxLabs FX points are pips: USDJPY point=0.01, whereas the captured MT5 broker
+point=0.001; the reference therefore passes --slippage 0.1. Equal-time conversion
+quotes use last-in-response at-or-before-event, with a 10-second age limit.
+
+Signal-exit reference cases close at the first tick after the exit-signal candle,
+with one entry per day. A new checker attempt replaces the previous summary with
+verification_not_completed before executing trials; success records the checker
+and executable SHA-256 hashes. Python -O is rejected so assertions remain active.
+A passed result certifies only the explicit fixture checks listed in the report.
+
+
+For a future-data invariance check, run `python3 scripts/mt5_prefix_check.py
+--capture CAPTURE_DIRECTORY --policy CLOCK_POLICY_JSON --out OUTPUT_DIRECTORY`.
+It creates an explicitly synthetic derivative with only the last USDJPY candle
+and its bid/ask ticks shifted by 0.050, reruns all eight reference cases and
+compares earlier entry evidence, settlements and tick-timed account snapshots.
+At least one terminal result must change, so an ineffective mutation cannot pass.
+The original capture is preserved. This is a bounded regression, not a general
+proof against every possible look-ahead mechanism.

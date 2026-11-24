@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Export MT5 historical bars to SqxLabs CSV via SiliconMetaTrader5.
+"""Export raw MT5 broker-clock CSV via SiliconMetaTrader5.
+
+Normalize with mt5_normalize.py and an explicit clock policy before SqxLabs import.
 
 Requires the SiliconMT5 runtime running and the client venv at
 ~/Library/Application Support/SiliconMT5/venv (has siliconmetatrader5 + numpy).
@@ -63,7 +65,7 @@ def bar_lines(rows):
     previous = None
     for row in rows:
         time = integer(row[0], "bar time")
-        prices = [float(p) for p in row[1:5]]
+        prices = [float(row[i]) for i in range(1, 5)]
         if len(prices) != 4:
             raise ValueError("incomplete OHLC row")
         opening, high, low, close = prices
@@ -93,10 +95,10 @@ def main() -> int:
         ap.error("count must be positive")
 
     mt5 = MetaTrader5(host=args.host, port=args.port)
-    if not mt5.initialize():
-        print("initialize failed:", mt5.last_error(), file=sys.stderr)
-        return 1
     try:
+        if not mt5.initialize():
+            print("initialize failed:", mt5.last_error(), file=sys.stderr)
+            return 1
         os.makedirs(args.out, exist_ok=True)
         tf = getattr(mt5, "TIMEFRAME_" + args.timeframe)
         total = 0
@@ -115,7 +117,7 @@ def main() -> int:
                     continue
                 path = os.path.join(args.out, f"{sym}_ticks.csv")
                 with atomic_csv(path) as f:
-                    f.write("timestamp_ms,bid,ask\n")
+                    f.write("timestamp_broker_ms,bid,ask\n")
                     f.writelines(tick_lines(tk))
                 print(f"{sym}: {len(tk)} ticks -> {path}")
                 total += len(tk)
@@ -133,14 +135,15 @@ def main() -> int:
                 continue
             path = os.path.join(args.out, f"{sym}_{args.timeframe}.csv")
             with atomic_csv(path) as f:
-                f.write("timestamp,open,high,low,close,volume\n")
+                f.write("timestamp_broker,open,high,low,close,volume\n")
                 f.writelines(bar_lines(rates))
             print(f"{sym}: {len(rates)} bars -> {path}")
             total += len(rates)
         print(f"{'partial export' if failed else 'done'}: {total} bars")
         return 1 if failed else 0
     finally:
-        mt5.shutdown()
+        # Only disconnect this client; shutdown() affects every bridge user.
+        mt5.close()
 
 
 if __name__ == "__main__":

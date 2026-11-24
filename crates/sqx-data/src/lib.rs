@@ -133,6 +133,9 @@ pub fn synthetic_bars(symbol: &str, n: usize) -> Vec<Bar> {
 fn csv_header(line:&str,expected:&[&str])->Result<bool,String>{
     let line=line.trim_start_matches('\u{feff}').trim();
     let fields:Vec<_>=line.split(',').map(str::trim).collect();
+    if fields.first().is_some_and(|field|matches!(*field,"timestamp_broker"|"timestamp_broker_ms")) {
+        return Err("raw broker-clock CSV cannot be imported as UTC; normalize with an explicit clock policy first".into());
+    }
     if fields.first().is_some_and(|field|field.starts_with("timestamp")) {
         if fields!=expected{return Err(format!("invalid CSV header at line 1: expected {} (Unix seconds)",expected.join(",")));}
         return Ok(true);
@@ -144,6 +147,11 @@ fn csv_header(line:&str,expected:&[&str])->Result<bool,String>{
 /// explicitly uses Unix milliseconds. Headerless input remains seconds.
 pub fn read_ticks_csv(path: &str) -> Result<Vec<Tick>, String> {
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    read_ticks_csv_str(&text)
+}
+
+/// Parse tick CSV text with explicit seconds/milliseconds headers.
+pub fn read_ticks_csv_str(text: &str) -> Result<Vec<Tick>, String> {
     let mut out = Vec::new();
     let mut milliseconds=false;
     for (idx, line) in text.lines().enumerate() {
@@ -166,7 +174,7 @@ pub fn read_ticks_csv(path: &str) -> Result<Vec<Tick>, String> {
         out.push(Tick { time, bid, ask });
     }
     if out.is_empty() {
-        return Err(format!("no ticks in {path}"));
+        return Err("no ticks in CSV".into());
     }
     Ok(out)
 }
@@ -247,3 +255,5 @@ mod tests {
         assert!(bars.windows(2).all(|w| w[0].time < w[1].time));
     }
 }
+
+pub mod normalization;

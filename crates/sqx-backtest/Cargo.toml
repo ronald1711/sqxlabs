@@ -12,5 +12,6 @@ sqx-strategy = { path = "../sqx-strategy" }
 sqx-indicators = { path = "../sqx-indicators" }
 
 [dev-dependencies]
+serde_json.workspace = true
 sqx-core = { path = "../sqx-core" }
 sqx-strategy = { path = "../sqx-strategy" }

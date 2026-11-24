@@ -4,7 +4,16 @@ Status: research tool under validation, not independently certified for trading.
 This checklist tracks remaining work; it does not replace the six completion
 requirements and evidence audit in [RELIABILITY.md](RELIABILITY.md).
 
+Local MT5 integration evidence and completion gates: [MT5_VALIDATION.md](MT5_VALIDATION.md).
+
 ## P0 — Independently validate execution
+
+- [ ] Resolve the observed USDJPY/EUR margin conversion-route discrepancy against
+  MT5 references; distinguish margin from profit conversion and bid/ask policies.
+  The opt-in forex-base margin policy now matches the frozen calculation samples;
+  directional profit conversion is also implemented. Broader coverage and
+  historical conversion-series validation remain open.
+  See MT5_VALIDATION.md. Do not relax tolerances to conceal the difference.
 
 - [ ] Obtain a reproducible independent fixture: market data, instrument/account
   settings, exact strategy and MT5/broker execution report with declared provenance.
@@ -47,13 +56,14 @@ remaining execution assumptions and unsupported cases are visible.
 
 ## P1 — Establish remote release gates
 
-- [ ] Activate [the workflow template](ci/reliability-workflow.yml) at
-  `.github/workflows/reliability.yml`. GitHub rejected workflow publication because
-  the current OAuth connection lacks `workflow` permission; the template is
-  versioned under `ci/` and does not run automatically.
+- [x] Activate `.github/workflows/reliability.yml`. Published through the connected
+  GitHub app in e832c2f; first run 45357592150 passed all four jobs. The older Git
+  OAuth workflow-scope limitation did not apply to this app connection.
 
-- [ ] Verify actual GitHub Actions runs for Linux/macOS and debug/release,
-  including profile parity; local success is not proof of remote success.
+- [x] Verify baseline GitHub Actions run 45357592150 for Linux/macOS and
+  debug/release, including profile parity. Commit: e832c2f.
+- [ ] Push and independently verify the expanded MT5/reference changes; baseline
+  CI success does not cover newer local work.
 - [ ] Fix any platform-specific failures exposed by those runs.
 - [ ] Configure successful checks as required branch protections/ruleset checks.
 - [ ] Establish a versioned release/artifact retention procedure: archive replay

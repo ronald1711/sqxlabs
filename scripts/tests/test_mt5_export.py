@@ -11,19 +11,44 @@ from unittest.mock import patch
 
 
 class ExportPrecision(unittest.TestCase):
+    def test_initialize_failure_closes_only_own_client(self):
+        closed = []
+        class Client:
+            def __init__(self, **kwargs): pass
+            def initialize(self): return False
+            def last_error(self): return (1, 'fixture initialization failure')
+            def shutdown(self): raise AssertionError("must not disconnect shared terminal")
+            def close(self): closed.append(True)
+        module = types.ModuleType('siliconmetatrader5')
+        module.MetaTrader5 = Client
+        path = Path(__file__).resolve().parents[1] / 'mt5_export.py'
+        spec = importlib.util.spec_from_file_location('export_init_failure', path)
+        exporter = importlib.util.module_from_spec(spec)
+        with patch.dict(sys.modules, {'siliconmetatrader5': module}):
+            spec.loader.exec_module(exporter)
+        with patch.object(sys, 'argv', ['mt5_export']), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(exporter.main(), 1)
+        self.assertEqual(closed, [True])
+
     def test_bar_and_tick_prices_round_trip_without_five_decimal_quantization(self):
         prices = [1.123456789012345, 1.123456789012349, 1.123456789012341,
                   1.123456789012347]
+        class StructuredRow(tuple):
+            def __getitem__(self, index):
+                if isinstance(index, slice):
+                    raise IndexError('structured MT5 rows do not support slices')
+                return super().__getitem__(index)
         class Client:
             TIMEFRAME_M5 = 5
             COPY_TICKS_ALL = 0
             def __init__(self, **kwargs): pass
             def initialize(self): return True
             def symbol_select(self, *args): return True
-            def shutdown(self): pass
+            def shutdown(self): raise AssertionError("must not disconnect shared terminal")
+            def close(self): pass
             def copy_rates_from_pos(self, *args):
                 assert args[2] == 1, "must exclude current candle"
-                return [(1700000000, *prices, 17, 0, 0)]
+                return [StructuredRow((1700000000, *prices, 17, 0, 0))]
             def copy_ticks_from(self, *args):
                 return [(1700000000, prices[0], prices[1], 0.0, 0, 1700000000123, 0, 0.0)]
         module = types.ModuleType('siliconmetatrader5')
@@ -45,7 +70,8 @@ class ExportPrecision(unittest.TestCase):
                 expected = prices[:2] if ticks else prices
                 self.assertEqual([float(v) for v in fields[1:1+len(expected)]], expected)
                 self.assertEqual(fields[0], '1700000000123' if ticks else '1700000000')
-                if ticks: self.assertEqual(lines[0], 'timestamp_ms,bid,ask')
+                if ticks: self.assertEqual(lines[0], 'timestamp_broker_ms,bid,ask')
+                else: self.assertEqual(lines[0], 'timestamp_broker,open,high,low,close,volume')
 
 
     def test_failed_tick_export_preserves_previous_file_and_closes_client(self):
@@ -56,7 +82,8 @@ class ExportPrecision(unittest.TestCase):
             def __init__(self, **kwargs): pass
             def initialize(self): return True
             def symbol_select(self, *args): return True
-            def shutdown(self): closed.append(True)
+            def shutdown(self): raise AssertionError("must not disconnect shared terminal")
+            def close(self): closed.append(True)
             def copy_ticks_from(self, *args):
                 # First row writes successfully; the second lacks time_msc.
                 return [(1700000000, 1.1, 1.2, 0, 0, 1700000000123),
@@ -92,7 +119,8 @@ class ExportPrecision(unittest.TestCase):
             COPY_TICKS_ALL = 0
             def __init__(self, **kwargs): pass
             def initialize(self): return True
-            def shutdown(self): pass
+            def shutdown(self): raise AssertionError("must not disconnect shared terminal")
+            def close(self): pass
             def last_error(self): return 'unavailable'
             def symbol_select(self, symbol, selected): return symbol != 'MISSING'
             def copy_rates_from_pos(self, symbol, *args):

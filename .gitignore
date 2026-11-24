@@ -5,6 +5,10 @@ algotrader/
 docs/
 scripts/*
 !scripts/mt5_export.py
+!scripts/mt5_normalize.py
+!scripts/mt5_capture_window.py
+!scripts/mt5_reference_check.py
+!scripts/mt5_prefix_check.py
 !scripts/tests/
 scripts/tests/*
 !scripts/tests/test_*.py

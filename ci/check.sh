@@ -38,3 +38,6 @@ node crates/sqx-web/tests/assistant_evidence.cjs
 node crates/sqx-web/tests/assistant_trial_recovery.cjs
 
 python3 -m unittest discover -s scripts/tests -v
+
+# Independent arithmetic and future-data mutation checks need no MT5 connection.
+python3 ci/check-reference-fixture.py --executable "target/$profile/sqx-cli"

@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "server": "TickmillEU-Demo",
+  "description": "Bounded 2026 broker-wall-clock policy. Entire transition dates excluded: exact switch hours are not asserted. Original timestamp values encode broker wall clock, not proven UTC.",
+  "intervals": [
+    {
+      "raw_start_ms": 1772323200000,
+      "raw_end_ms": 1772928000000,
+      "offset_seconds": 7200,
+      "source": "https://www.tickmill.com/eu/news/daylight-saving-time-in-the-us-trading-schedule-changes-2026"
+    },
+    {
+      "raw_start_ms": 1773014400000,
+      "raw_end_ms": 1793491200000,
+      "offset_seconds": 10800,
+      "source": "https://www.tickmill.com/eu/news/daylight-saving-time-in-the-us-trading-schedule-changes-2026"
+    },
+    {
+      "raw_start_ms": 1793577600000,
+      "raw_end_ms": 1796083200000,
+      "offset_seconds": 7200,
+      "source": "https://www.tickmill.com/eu/news/end-of-daylight-saving-time-in-new-york-trading-schedule-changes-2026"
+    }
+  ]
+}
