@@ -321,7 +321,7 @@ impl Experiments {
                 let config=if !bundle.run.request["config"].is_null(){&bundle.run.request["config"]}else{&bundle.run.request["_resolved_config"]};
                 let range=crate::observation::range(&bars,crate::observation::duration(config)?,&bundle.dataset["timeframe"])?;
                 if !range.extent_known{unknown_extents.push(json!({"source":"archived_research","id":run_id}));}
-                let pipeline=matches!(bundle.run.request["research_kind"].as_str(),Some("pipeline"|"cli_pipeline_started"|"cli_pipeline"));
+                let pipeline=matches!(bundle.run.request["research_kind"].as_str(),Some("pipeline"|"cli_pipeline_started"|"cli_pipeline_event"|"cli_pipeline"));
                 let robustness=bundle.run.request["research_kind"]=="robustness";
                 let assistant=matches!(bundle.run.request["research_kind"].as_str(),Some("assistant_candidates"|"assistant_trial"|"assistant_trial_started"));
                 let cli=matches!(bundle.run.request["research_kind"].as_str(),Some("cli_backtest"|"cli_backtest_started"));

@@ -52,11 +52,15 @@ remaining execution assumptions and unsupported cases are visible.
 
 - [ ] Provide durable trial accounting on every research entry point, including
   CLI, MCP, pipelines, optimization and robustness operations.
-  CLI pipelines now retain exact engine bytes, frozen inputs/configuration/seed,
-  a pre-execution start record and the full returned report before reporting
-  errors. Restored start/result records disclose holdout exposure. Individual
-  candidate checkpoints, mid-run recovery and replay remain open; a start record
-  without a linked result does not imply completion.
+  CLI pipelines retain exact engine bytes, frozen inputs/configuration/seed,
+  a pre-execution start record, ordered stage/family events, per-build/retest
+  starts and outcomes, and the full returned report before reporting errors.
+  Storage failures stop further evaluation. A process-kill/source-deletion
+  restore test preserves the frozen family and completed build outcomes without
+  fabricating completion. Restored event/start/result records disclose holdout
+  exposure; counts are records, not independent trials. Optimization checkpoints
+  are still per family, not per walk-forward trial. Automatic resume/replay,
+  concurrent-writer coordination and power-loss validation remain open.
 - [x] Preserve MCP generation execution failures in responses, exclude failed candidates from ranking and mark partial searches as errors. Durable generation accounting is implemented below; other MCP routes remain open.
 - [x] Stop MCP portfolio selection on failed or missing candidate evaluations and preserve error/selection context.
 - [x] Persist MCP generation inputs, per-candidate checkpoints and full results before ranking; inspect interrupted searches after restart without original CSV files. Replay and resume are tracked below; other MCP routes remain open.

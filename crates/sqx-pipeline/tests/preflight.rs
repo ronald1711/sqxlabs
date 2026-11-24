@@ -63,3 +63,23 @@ fn retest_records_preserve_inputs_and_match_independent_recalculation(){
   }
  }
 }
+
+#[test]
+fn observer_freezes_family_and_stops_immediately_on_storage_failure() {
+ use sqx_pipeline::{run_observed,PipelineEvent};
+ let bars=vec![Bar::new(0,1.0,1.1,0.9,1.0,1.0),Bar::new(60000,1.0,1.1,0.9,1.0,1.0)];
+ let pipeline=Pipeline{name:"journal".into(),tasks:vec![Task{kind:TaskKind::Build{count:3,keep:1}}]};
+ let mut events=Vec::new();
+ let result=run_observed(&pipeline,&bars,&Instrument::fx("EURUSD"),&BacktestConfig::default(),252.0,&GeneratorConfig::default(),42,&mut |event| {
+  match event {
+   PipelineEvent::StepStarted{..}=>events.push("step"),
+   PipelineEvent::BuildFamily{candidates,..}=>{assert_eq!(candidates.len(),3);events.push("family");},
+   PipelineEvent::BuildStarted{candidate_index,..}=>{assert_eq!(candidate_index,0);events.push("start");},
+   PipelineEvent::BuildOutcome{candidate_index,..}=>{assert_eq!(candidate_index,0);events.push("outcome");return Err("simulated disk failure".into());},
+   _=>panic!("selection or later execution after failed write"),
+  }
+  Ok(())
+ });
+ assert_eq!(result.unwrap_err(),"simulated disk failure");
+ assert_eq!(events,vec!["step","family","start","outcome"]);
+}

@@ -1202,10 +1202,18 @@ fn main() -> Result<()> {
             println!("Pipeline checkpoint: {}",serde_json::json!({"run_id":started,"root":archive_dir}));
             std::io::Write::flush(&mut std::io::stdout())?;
             println!("Pipeline: {}", pipeline.name);
-            let report = sqx_pipeline::run(&pipeline, &bars, &inst, &cfg, pyp, &gen, seed);
+            let mut event_ids=Vec::new();
+            let report = sqx_pipeline::run_observed(&pipeline, &bars, &inst, &cfg, pyp, &gen, seed,&mut |event| {
+                let event_request=serde_json::json!({"research_kind":"cli_pipeline_event","config":cfg,
+                    "started_run_id":started,"sequence":event_ids.len(),"previous_event_id":event_ids.last()});
+                let outcome=serde_json::to_value(event).map_err(|e|e.to_string())?;
+                let id=archive.save(engine.clone(),dataset.clone(),specification.clone(),event_request,outcome)?;
+                event_ids.push(id);
+                Ok(())
+            }).map_err(|e|anyhow!("Pipeline stopped; archived prefix remains incomplete: {e}"))?;
             request["research_kind"]=serde_json::json!("cli_pipeline");
             request["started_run_id"]=serde_json::json!(started);
-            let result=serde_json::json!({"report":report,"scope":"Full returned pipeline report, including rejected and failed evaluations. A start record without a result is incomplete; per-candidate crash recovery and replay are not yet provided. Full-data discovery is exploratory, not an untouched holdout."});
+            let result=serde_json::json!({"report":report,"event_ids":event_ids,"scope":"Ordered build/retest checkpoints and outcomes; optimization is recorded per family, not per walk-forward trial. A start record without a result is incomplete; automatic recovery and replay are not yet provided. Full-data discovery is exploratory, not an untouched holdout."});
             let id=archive.save(engine,dataset,specification,request,result).map_err(anyhow::Error::msg)?;
             println!("Pipeline archive: {}",serde_json::json!({"run_id":id,"root":archive_dir,"replay_available":false}));
             context["seed"]=serde_json::json!(seed);context["pipeline"]=serde_json::json!({"name":pipeline.name,"requested_candidates":count,"keep":keep,"build_evaluations":report.builds.len(),"retest_evaluations":report.retests.len(),"optimization_evaluations":report.optimizations.len(),"errors":report.errors});

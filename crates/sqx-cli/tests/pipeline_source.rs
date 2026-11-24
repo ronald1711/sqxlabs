@@ -23,6 +23,19 @@ fn pipeline_binds_seed_and_settings_and_assistant_checks_data_before_provider_ac
     assert_eq!(saved.strategy["pipeline"]["tasks"].as_array().unwrap().len(),3);
     let restored=sqx_project::archive::Archive::new(root.join("restored"));
     restored.restore(&started).unwrap();restored.restore(&saved).unwrap();
+    let events=saved.run.result["event_ids"].as_array().unwrap();
+    let mut previous=Value::Null;
+    let mut outcomes=0;
+    for (sequence,id) in events.iter().enumerate() {
+        let event=archive.load(id.as_str().unwrap()).unwrap();
+        assert_eq!(event.run.request["sequence"],sequence);
+        assert_eq!(event.run.request["previous_event_id"],previous);
+        assert_eq!(event.run.request["started_run_id"],started.run_id);
+        if event.run.result["kind"]=="build_outcome" {outcomes+=1;}
+        restored.restore(&event).unwrap();
+        previous=id.clone();
+    }
+    assert_eq!(outcomes,2);
     fs::remove_dir_all(root.join("archive")).unwrap();
     assert_eq!(restored.load(&saved.run_id).unwrap().run.result,saved.run.result);
     let experiments=sqx_project::experiment::Experiments::new(root.join("restored"));
@@ -33,7 +46,7 @@ fn pipeline_binds_seed_and_settings_and_assistant_checks_data_before_provider_ac
     let experiment=experiments.create(&input,plan).unwrap();
     let audit=experiments.status(&experiment).unwrap()["current_exposure_audit"].clone();
     assert_eq!(audit["classification"],"known_reuse_or_disclosed_exposure");
-    assert_eq!(audit["same_market_archived_pipeline_records"],2);
+    assert_eq!(audit["same_market_archived_pipeline_records"],events.len()+2);
     let failed=Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["pipeline","--data"]).arg(&data)
         .args(["--symbol","USDJPY","--timeframe","M1","--count","0","--keep","1","--archive-dir"]).arg(root.join("failed-archive")).output().unwrap();
     assert!(!failed.status.success());
@@ -48,5 +61,45 @@ fn pipeline_binds_seed_and_settings_and_assistant_checks_data_before_provider_ac
     let assistant=Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["assistant","--data"]).arg(&data).args(["--symbol","USDJPY","--timeframe","M1","--base-url",&endpoint,"--api-key","fixture-key","--ask","backtest this data"]).output().unwrap();
     assert!(!assistant.status.success());assert!(String::from_utf8_lossy(&assistant.stderr).contains("Unresolved data gaps"));
     assert_eq!(listener.accept().unwrap_err().kind(),std::io::ErrorKind::WouldBlock,"invalid research input must not contact the provider");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn interrupted_pipeline_retains_frozen_family_and_completed_candidate() {
+    use std::process::Stdio;
+    let root=std::env::temp_dir().join(format!("sqx-pipeline-kill-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    fs::create_dir_all(&root).unwrap();
+    let csv=root.join("bars.csv");
+    let mut data="timestamp,open,high,low,close,volume\n".to_string();
+    for i in 0..500 { data.push_str(&format!("{},1.1,1.101,1.099,1.1,1\n",1700000000+i*60)); }
+    fs::write(&csv,data).unwrap();
+    struct Child(std::process::Child);
+    impl Drop for Child {fn drop(&mut self){let _=self.0.kill();let _=self.0.wait();}}
+    let mut child=Child(Command::new(env!("CARGO_BIN_EXE_sqx-cli"))
+        .args(["pipeline","--data"]).arg(&csv)
+        .args(["--symbol","EURUSD","--timeframe","M1","--count","2000","--keep","1","--archive-dir"])
+        .arg(root.join("archive")).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
+    let archive=sqx_project::archive::Archive::new(root.join("archive"));
+    let deadline=std::time::Instant::now()+std::time::Duration::from_secs(60);
+    loop {
+        let found=archive.list().unwrap_or_default().into_iter().any(|id|archive.load(&id).map(|b|b.run.result["kind"]=="build_outcome").unwrap_or(false));
+        if found {break;}
+        assert!(child.0.try_wait().unwrap().is_none(),"pipeline ended before interruption point");
+        assert!(std::time::Instant::now()<deadline,"no durable candidate before deadline");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    child.0.kill().unwrap();child.0.wait().unwrap();
+    fs::remove_file(&csv).unwrap();
+    let records:Vec<_>=archive.list().unwrap().iter().map(|id|archive.load(id).unwrap()).collect();
+    assert!(records.iter().any(|r|r.run.request["research_kind"]=="cli_pipeline_started"));
+    assert!(!records.iter().any(|r|r.run.request["research_kind"]=="cli_pipeline"),"interrupted run must not claim completion");
+    assert!(records.iter().any(|r|r.run.result["kind"]=="build_family" && r.run.result["candidates"].as_array().unwrap().len()==2000));
+    let outcomes:Vec<_>=records.iter().filter(|r|r.run.result["kind"]=="build_outcome").collect();
+    assert!(!outcomes.is_empty());
+    assert_eq!(outcomes[0].dataset["bars"].as_array().unwrap().len(),500);
+    let restored=sqx_project::archive::Archive::new(root.join("restored"));
+    for record in &records {restored.restore(record).unwrap();}
+    fs::remove_dir_all(root.join("archive")).unwrap();
+    for record in &records {assert_eq!(restored.load(&record.run_id).unwrap().run.result,record.run.result);}
     fs::remove_dir_all(root).unwrap();
 }
