@@ -47,23 +47,30 @@ resolved by a later increment. The numbered requirements above remain unchanged.
 
 ### In-review recovery evidence (2026-11-24)
 
-The following increments are on feature branches and pull requests; they are not
-claims that `main` or a released binary contains them:
+The following increments are being consolidated into integration PR #1, retaining
+all commits originally reviewed separately in PRs #2–#5. The earlier draft PRs
+are superseded, not shipped. These are not claims that `main` or a released binary
+contains the changes:
 
 - PR #1 freezes complete CLI pipeline inputs and ordered events, supports exact-
   engine replay/resume and portable whole-search backup validation. Source-deletion
   and build-phase process-kill recovery match uninterrupted execution.
-- PR #2 adds a hand-calculated EURUSD/USD holdout fixture: SMA3 warmup, first
+- The original PR #2 adds a hand-calculated EURUSD/USD holdout fixture: SMA3 warmup, first
   holdout fill, long/short spread and commission, initial capital, future-data
   isolation and persistent commitment. Debug and release references pass locally.
-- PR #3 records every pipeline walk-forward training and OOS execution before
+- The original PR #3 records every pipeline walk-forward training and OOS execution before
   proceeding. A real process kill followed by export, source-archive deletion,
   import and resume matches all 48 candidate outcomes and complete event IDs.
-- PR #4 shares pipeline archive/recovery code between CLI and dashboard. Server
+- The original PR #4 shares pipeline archive/recovery code between CLI and dashboard. Server
   and browser tests cover grouping, inspection, raw backups, replay, execution
   errors and build mismatch. A desktop browser check on an isolated synthetic
   fixture visibly confirmed replay; broader responsive/accessibility coverage
   remains open.
+
+The original PR #5 avoids retaining all archived execution payloads during
+structural inspection and replay. A real filesystem permission-failure fixture
+checks that recovery publishes no further event and can resume after write
+access is restored. Full export and simulator memory remain unbounded.
 
 These strengthen requirements 4–6 but do not close them. Large-search memory,
 power loss/disk-full interruption, runtime packaging, all-route trial accounting,

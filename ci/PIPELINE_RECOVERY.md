@@ -96,3 +96,12 @@ JSON backup export still materialize their requested payloads; the final report,
 simulator state, input dataset and candidate family also remain in memory.
 This removes one archive-size-dependent retention path; it is not a general
 bounded-memory guarantee or a completed large-search performance validation.
+
+## Write-failure evidence
+
+On non-root Linux/macOS, the recovery test removes write permission from its own
+archive run directory while preserving read access. Resume returns the actual
+filesystem permission error, publishes no further event and remains incomplete.
+After permissions are restored, resume matches the uninterrupted reference. Root
+accounts bypass this permission fixture. This covers a real rejected write, not
+power-loss persistence or a disk-full filesystem.

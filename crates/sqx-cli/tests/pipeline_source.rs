@@ -112,6 +112,27 @@ fn interrupted_pipeline_retains_frozen_family_and_completed_candidate() {
     let lock=fs::OpenOptions::new().read(true).write(true).open(&lock_path).unwrap();lock.try_lock().unwrap();
     let busy=command("replay-pipeline",true);assert!(!busy.status.success());
     assert!(String::from_utf8_lossy(&busy.stderr).contains("process lock"));drop(lock);
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        let uid=Command::new("id").arg("-u").output().unwrap();assert!(uid.status.success());
+        // Root bypasses ordinary permission bits; this OS-level fault fixture
+        // applies to the non-root Linux/macOS accounts used in CI and locally.
+        if String::from_utf8_lossy(&uid.stdout).trim()!="0" {
+            let directory=root.join("restored/runs");
+            struct RestorePermissions(std::path::PathBuf,std::fs::Permissions);
+            impl Drop for RestorePermissions{fn drop(&mut self){let _=fs::set_permissions(&self.0,self.1.clone());}}
+            let permissions=RestorePermissions(directory.clone(),fs::metadata(&directory).unwrap().permissions());
+            let before=restored.list().unwrap();
+            fs::set_permissions(&directory,fs::Permissions::from_mode(0o500)).unwrap();
+            let denied=command("replay-pipeline",true);
+            assert!(!denied.status.success(),"unwritable archive must not report completion");
+            assert!(String::from_utf8_lossy(&denied.stderr).contains("os error 13"),"{}",String::from_utf8_lossy(&denied.stderr));
+            assert_eq!(restored.list().unwrap(),before,"no execution event may be published after the write failure");
+            drop(permissions);
+            let after=command("pipeline-history",false);assert!(after.status.success());
+            assert_eq!(serde_json::from_slice::<Value>(&after.stdout).unwrap()["status"],"incomplete");
+        }
+    }
     let resumed=command("replay-pipeline",true);assert!(resumed.status.success(),"{}",String::from_utf8_lossy(&resumed.stderr));
     let summary:Value=serde_json::from_slice(&resumed.stdout).unwrap();
     assert!(summary["replayed_events"].as_u64().unwrap()>0);assert!(summary["appended_events"].as_u64().unwrap()>0);
