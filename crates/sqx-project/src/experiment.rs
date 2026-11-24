@@ -268,7 +268,7 @@ impl Experiments {
         let (start,end)=(own_range.start,own_range.end);
         let mut unknown_extents=Vec::new();
         if !own_range.extent_known{unknown_extents.push(json!({"source":"current_holdout","id":id}));}
-        let mut overlaps=Vec::new();let mut attempts=own_attempts;let mut archived_runs=0usize;let mut archived_pipelines=0usize;let mut archived_robustness=0usize;let mut archived_assistant=0usize;let mut archived_cli=0usize;let mut archived_crosschecks=0usize;
+        let mut overlaps=Vec::new();let mut attempts=own_attempts;let mut archived_runs=0usize;let mut archived_pipelines=0usize;let mut archived_robustness=0usize;let mut archived_assistant=0usize;let mut archived_cli=0usize;let mut archived_crosschecks=0usize;let mut archived_mcp=0usize;
         for other_id in self.list()? {
             if other_id==id{continue;}
             let other_plan=self.plan(&other_id)?;let other_data=self.data(&other_plan)?;
@@ -325,10 +325,11 @@ impl Experiments {
                 let robustness=bundle.run.request["research_kind"]=="robustness";
                 let assistant=matches!(bundle.run.request["research_kind"].as_str(),Some("assistant_candidates"|"assistant_trial"|"assistant_trial_started"));
                 let cli=matches!(bundle.run.request["research_kind"].as_str(),Some("cli_backtest"|"cli_backtest_started"));
+                let mcp=matches!(bundle.run.request["research_kind"].as_str(),Some("mcp_generation_started"|"mcp_generation_trial_started"|"mcp_generation_trial"|"mcp_generation"));
                 if cli {archived_cli+=1;}
-                if assistant {archived_assistant+=1;}else if pipeline {archived_pipelines+=1;}else if robustness {archived_robustness+=1;}else{archived_runs+=1;}
+                if mcp {archived_mcp+=1;}else if assistant {archived_assistant+=1;}else if pipeline {archived_pipelines+=1;}else if robustness {archived_robustness+=1;}else{archived_runs+=1;}
                 if intersects(start,end,range.start,range.end) {
-                    overlaps.push(json!({"source":if cli {"archived_cli_backtest"}else if assistant {"archived_assistant_candidates"}else if pipeline {"archived_pipeline"}else if robustness {"archived_robustness"}else{"archived_backtest"},"id":run_id,"start":range.start,"end":range.end}));
+                    overlaps.push(json!({"source":if mcp {"archived_mcp_generation"}else if cli {"archived_cli_backtest"}else if assistant {"archived_assistant_candidates"}else if pipeline {"archived_pipeline"}else if robustness {"archived_robustness"}else{"archived_backtest"},"id":run_id,"start":range.start,"end":range.end}));
                 }
             }
         }
@@ -358,7 +359,7 @@ impl Experiments {
         }
         Ok(json!({"classification":if plan.prior_exposure_disclosed||!overlaps.is_empty(){"known_reuse_or_disclosed_exposure"}else{"no_known_registry_overlap"},
             "holdout_observation_range":{"start":start,"end":end,"extent_known":own_range.extent_known},"observation_extent_complete":unknown_extents.is_empty(),"unknown_interval_extents":unknown_extents,
-            "known_overlaps":overlaps,"same_market_experiment_attempts":attempts,"same_market_archived_backtest_records":archived_runs,"same_market_archived_cli_backtest_records":archived_cli,"same_market_archived_crosscheck_records":archived_crosschecks,"same_market_archived_assistant_records":archived_assistant,"same_market_archived_pipeline_records":archived_pipelines,"same_market_archived_robustness_records":archived_robustness,"same_market_archived_comparison_records":archived_comparisons,"same_market_evolution_generation_claims":evolution_claims,
+            "known_overlaps":overlaps,"same_market_experiment_attempts":attempts,"same_market_archived_backtest_records":archived_runs,"same_market_archived_cli_backtest_records":archived_cli,"same_market_archived_crosscheck_records":archived_crosschecks,"same_market_archived_assistant_records":archived_assistant,"same_market_archived_mcp_generation_records":archived_mcp,"same_market_archived_pipeline_records":archived_pipelines,"same_market_archived_robustness_records":archived_robustness,"same_market_archived_comparison_records":archived_comparisons,"same_market_evolution_generation_claims":evolution_claims,
             "scope":"Candle extents use declared timeframe/duration, including true UTC calendar months. Missing extents are explicitly unverified, not inferred from gaps. Overlap of recorded observation-time ranges on the same named market or FX pair. Includes other experiment trials/commitments and archived multi-market CLI crosscheck inputs (including checkpoints and failures) and dashboard and CLI backtests (including recorded failures) and completed pipeline/robustness reports and assistant session summaries and trial checkpoints/results (including pending work and reported failures), plus backtests embedded in saved paper comparisons and claimed durable evolution generations (including interrupted work). CLI backtest counts are a subset of backtest record counts. Record counts may reference the same run and are not independent trial counts. Only records in this archive are visible; unarchived searches, data viewing, other CLI/MCP and external work are not covered. No known overlap does not prove independence."}))
     }
     pub fn backup(&self,id:&str)->Result<ExperimentBackup,String>{

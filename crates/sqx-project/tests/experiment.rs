@@ -461,3 +461,26 @@ fn normalization_sources_survive_restore_and_rehashed_candle_edits_are_rejected(
     planned.config.bar_duration_ms=Some(120000);
     assert!(archive.create(&original,planned).unwrap_err().contains("timeframe"));
 }
+
+#[test]
+fn mcp_generation_phases_disclose_exposure_without_inventing_backtest_or_trial_counts(){
+    let temp=Temp::new();let store=Experiments::new(&temp.0);let mut contract=plan();contract.config.bar_duration_ms=Some(60000);
+    let id=store.create(&data(),contract.clone()).unwrap();let fixture=data();let archive=sqx_project::archive::Archive::new(&temp.0);
+    for kind in ["mcp_generation_started","mcp_generation_trial_started","mcp_generation_trial","mcp_generation"] {
+        archive.save("test-engine".into(),json!({"instrument":fixture.instrument,"bars":fixture.bars,"timeframe":"M1"}),json!({"name":"MCP fixture"}),json!({"research_kind":kind,"config":{"bar_duration_ms":60000}}),json!({"status":"fixture","errors":["incomplete or failed execution"]})).unwrap();
+    }
+    let audit=store.status(&id).unwrap()["current_exposure_audit"].clone();
+    assert_eq!(audit["classification"],"known_reuse_or_disclosed_exposure");
+    assert_eq!(audit["same_market_archived_mcp_generation_records"],4);
+    assert_eq!(audit["same_market_archived_backtest_records"],0);assert_eq!(audit["same_market_experiment_attempts"],0);
+    assert_eq!(audit["known_overlaps"].as_array().unwrap().len(),4);
+    for row in audit["known_overlaps"].as_array().unwrap(){assert_eq!(row["source"],"archived_mcp_generation");assert_eq!(row["end"],5999999,"inclusive end includes the final millisecond of the last candle");}
+    let mut other=data();other.instrument=Instrument::fx("GBPUSD");let other_id=store.create(&other,contract.clone()).unwrap();
+    assert_eq!(store.status(&other_id).unwrap()["current_exposure_audit"]["same_market_archived_mcp_generation_records"],0);
+    let mut later=data();for bar in &mut later.bars{bar.time+=200*60000;}
+    let later_id=store.create(&later,contract).unwrap();assert_eq!(store.status(&later_id).unwrap()["current_exposure_audit"]["classification"],"no_known_registry_overlap");
+    store.trial(&id,"test-engine",&strategy()).unwrap();store.reveal(&id,"test-engine",0).unwrap();
+    let restored_root=Temp::new();let restored=Experiments::new(&restored_root.0);restored.restore(&store.backup(&id).unwrap()).unwrap();
+    let audit=restored.status(&id).unwrap()["current_exposure_audit"].clone();assert_eq!(audit["classification"],"known_reuse_or_disclosed_exposure");
+    assert_eq!(audit["carried_commitment_evidence"]["same_market_archived_mcp_generation_records"],4);
+}
