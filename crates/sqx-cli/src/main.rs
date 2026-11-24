@@ -1015,7 +1015,7 @@ fn main() -> Result<()> {
                 }
             }
             if store.is_empty() && questdb_client.is_none() {
-                return Err(anyhow!("no data loaded"));
+                println!("No market data loaded. The dashboard is available for data import and archived research recovery.");
             }
             if open {
                 let url = format!("http://{addr}");
@@ -1326,7 +1326,7 @@ fn main() -> Result<()> {
             println!("MC retest coverage: requested {}, skipped {}, invalid {}; issues: {:?}",rt.requested_runs,rt.skipped_runs,rt.invalid_runs,rt.errors);
             println!("MC retest: runs {} net5% {:.2} net50% {:.2} net95% {:.2} losing {:.1}%", rt.runs, rt.net_profit_5pct, rt.net_profit_50pct, rt.net_profit_95pct, rt.losing_runs_pct);
             let wf=study.walk_forward.as_ref().ok_or_else(||anyhow!("Missing archived walk-forward report"))?;
-            println!("Walk-forward: {} windows, OOS net {:.2} PF {:.2}, evidence sufficient: {}, attempted candidates: {}, issues: {:?}", wf.windows, wf.oos_net_profit, wf.oos_profit_factor, wf.evidence_sufficient, wf.candidates_attempted, wf.errors);
+            println!("Walk-forward of the supplied strategy's fixed parameter/exit family: {} windows, OOS net {:.2} PF {:.2}, evidence sufficient: {}, attempted candidates: {}, issues: {:?}", wf.windows, wf.oos_net_profit, wf.oos_profit_factor, wf.evidence_sufficient, wf.candidates_attempted, wf.errors);
             context["monte_carlo"]=serde_json::json!({"seed":42,"requested_runs":mc_runs,"errors":mc.errors});
             context["mc_retest"]=serde_json::json!({"seed":7,"requested_runs":rt.requested_runs,"skipped_runs":rt.skipped_runs,"invalid_runs":rt.invalid_runs,"errors":rt.errors});
             context["walk_forward"]=serde_json::json!(wf);

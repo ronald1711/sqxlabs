@@ -69,6 +69,24 @@ remaining execution assumptions and unsupported cases are visible.
   Disk/power-loss, scale and other entry points remain open. Trade-manipulation checkpoints also
   expose selected ordered input indices and each outcome/overflow, preserving
   the previous seeded sampling sequence even with duplicate trade IDs.
+  The web stress-test route now uses the same journal for its existing cost and
+  resampling stages. A full 2,016-event backup restores and replays without the
+  original archive or live data. The UI identifies partial studies after lost
+  responses; legacy report replay is retained. A real HTTP process-kill test now
+  stops after a persisted Monte Carlo outcome, deletes the original archive and
+  CSV, restores through the web API into an empty server, and resumes all 2,016
+  events while preserving the saved prefix. Responsive progress/cancellation,
+  power loss and large-study limits still need verification.
+  The browser rejects additional starts while one request is pending and retains
+  a per-input request ID in tab session storage after an uncertain response.
+  Reusing that ID finds the original immutable study even after source deletion
+  and backup restore; conflicting input reuse is rejected. Request creation is
+  protected by a process lock. Distinct IDs still represent distinct research
+  attempts. Portable imports reject conflicting request IDs before record
+  publication, sharing the creation lock; concurrent import is tested. Existing
+  ambiguous archives are preserved but cannot silently select a study on retry.
+  Closing/clearing the browser session requires finding the study in
+  Saved research rather than relying on the browser's retry identity.
   CLI pipelines retain exact engine bytes, frozen inputs/configuration/seed,
   a pre-execution start record, ordered stage/family events, per-build/retest
   starts and outcomes, and the full returned report before reporting errors.
@@ -115,6 +133,10 @@ remaining execution assumptions and unsupported cases are visible.
   distinguish archive record counts from independent trial counts.
 - [ ] Independently review walk-forward boundaries, warmup, capital continuity,
   minimum evidence thresholds and untouched-holdout handling across all routes.
+  Standalone CLI robustness now links walk-forward to a frozen family of the
+  supplied strategy instead of generating unrelated rules; the original is
+  retained as the control. Candidate linkage and fail-fast journaling are tested,
+  but they do not establish that the OOS data were untouched during development.
   A separate integer-price SMA3 fixture now checks segmented selection, warmup,
   costs and carried capital. A hand-calculated EURUSD/USD holdout fixture checks
   SMA3 warmup, first-boundary fills, long/short spread and commission, fresh

@@ -272,9 +272,43 @@ failure stops the study. The shared recovery commands above verify the recorded
 prefix before appending missing events; recovery repeats computation and requires
 the original executable. Portable backup/restore and process interruption are
 tested; power-loss durability and large-study resource limits remain unverified.
-The walk-forward stage searches fresh generated candidates; it does not validate
-the supplied strategy out of sample. Standalone `montecarlo` and other entry
+The CLI walk-forward stage freezes the supplied strategy plus seeded SL/PT-distance
+variants (up to 20 candidates, distances varied within ±20%). The unchanged strategy
+is always the first control. Entry/exit rules, sizing, schedules, directions and
+confirmation remain intact; without SL/PT distances, the family contains only the
+original. Selection uses each training window before its OOS evaluation. This
+does not establish an untouched holdout if the strategy was developed using those
+data. Older archived versions generated unrelated candidates in this stage and
+must not be interpreted as walk-forward validation of the supplied strategy;
+their original executable is required for replay. Standalone `montecarlo` and other entry
 points do not inherit this archival coverage automatically.
+
+Web stress tests now use the same checkpoint/recovery protocol for their six
+cost scenarios and 1,000 trade-resampling paths. They save inputs before running,
+and preserve completed steps if execution stops. In **Saved research runs**,
+inspect the robustness study before retrying a request whose response was lost;
+it may still be running. The whole-study backup includes the ordered journal.
+Recovery requires the matching application build and repeats the recorded prefix
+before continuing. Earlier single-report backups retain their original replay
+route. This adds interruption evidence, not independent execution validation;
+power-loss and large-study performance remain open. A real server-kill test also
+checks partial-backup restoration and resume after removing the original CSV and
+archive. To open an empty recovery workspace, use `serve --data-dir <empty-directory>
+--data-timeframe M1`; an empty directory now permits dashboard startup for import
+and recovery. Missing or malformed source files still fail their source checks.
+
+The browser preserves a stress-test request ID in tab session storage until it
+receives a saved-study identity. Retrying the same inputs after a lost response
+or page reload reuses that ID. The server returns the existing study instead of
+starting another, including after backup restoration; changed inputs with the
+same ID are rejected. This lookup does not resume execution automatically: inspect
+the saved study and explicitly resume if needed. Closing or clearing the browser
+session loses this retry identity, so use Saved research to locate earlier work.
+Different request IDs remain separate research attempts.
+Portable restore rejects a request ID that already belongs to another study
+before publishing research records. Concurrent restore and request creation use
+the same process lock. If conflicting studies already exist in an older archive,
+retry refuses to choose one; both remain available as evidence for inspection.
 
 CLI `crosscheck` uses `--manifest` instead of inferring instruments from a folder.
 The schema-1 manifest contains a `markets` array with explicit `symbol`, `data`

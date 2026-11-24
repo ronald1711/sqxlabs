@@ -768,14 +768,70 @@ mod tests {
         assert!(response.get("error").is_none(),"{response}");
         assert_eq!(response["mc"]["samples"].as_array().unwrap().len(),1000);
         let id=response["archive"]["run_id"].as_str().unwrap();
-        let bundle=state.archive.load(id).unwrap();assert_eq!(bundle.run.request["research_kind"],"robustness");
-        let backup=serde_json::to_vec(&bundle).unwrap();
-        let restored=research_state();restored.archive.restore(&serde_json::from_slice(&backup).unwrap()).unwrap();
+        let bundle=state.archive.load(id).unwrap();assert_eq!(bundle.run.request["research_kind"],"cli_pipeline");
+        let started=response["archive"]["started_run_id"].as_str().unwrap();
+        let backup:serde_json::Value=serde_json::from_str(&pipeline_action_json("backup",&json!({"run_id":started}).to_string(),&state)).unwrap();
+        assert_eq!(backup["events"].as_array().unwrap().len(),2016); // step start, base pair, 6 cost pairs, 1000 MC pairs, selection.
+        let restored=research_state();
+        let imported:serde_json::Value=serde_json::from_str(&pipeline_action_json("restore",&backup.to_string(),&restored)).unwrap();assert!(imported.get("error").is_none(),"{imported}");
+        std::fs::remove_dir_all(state.archive.root()).unwrap();
         restored.store.write().unwrap().series.clear();
-        let replay:serde_json::Value=serde_json::from_str(&research_replay_json(&json!({"run_id":id}).to_string(),&restored)).unwrap();
-        assert_eq!(replay["matches"],true,"{replay}");assert_eq!(replay["replayed"],bundle.run.result);
+        let replay:serde_json::Value=serde_json::from_str(&pipeline_action_json("replay",&json!({"run_id":started}).to_string(),&restored)).unwrap();
+        assert_eq!(replay["matches"],true,"{replay}");assert_eq!(replay["completion_id"],id);
+        assert_eq!(restored.archive.load(id).unwrap().run.result,bundle.run.result);
+        let listing:serde_json::Value=serde_json::from_str(&research_list_json(&restored)).unwrap();
+        assert!(listing["runs"].as_array().unwrap().iter().all(|r|r["workflow_kind"]=="robustness"));
         assert!(restored.databank.read().unwrap().is_empty());
-        std::fs::remove_dir_all(restored.archive.root()).unwrap();std::fs::remove_dir_all(state.archive.root()).unwrap();
+        std::fs::remove_dir_all(restored.archive.root()).unwrap();
+    }
+
+    #[test]
+    fn stress_request_identity_survives_missing_sources_and_restore(){
+        let state=research_state();let mut request=json!(Strategy::new("deduplicated study"));
+        request["symbol"]=json!("EURUSD");request["allow_data_gaps"]=json!(true);request["request_key"]=json!("request-1");
+        let (guard,existing)=reserve_stress_request(&request,&state).unwrap();assert!(existing.is_none());
+        let busy:serde_json::Value=serde_json::from_str(&robustness_json(&request.to_string(),&state)).unwrap();assert!(busy["error"].as_str().unwrap().contains("busy"));
+        assert!(state.archive.list().unwrap().is_empty());drop(guard);
+        let first:serde_json::Value=serde_json::from_str(&robustness_json(&request.to_string(),&state)).unwrap();
+        let id=first["archive"]["started_run_id"].as_str().expect("study recorded");let count=state.archive.list().unwrap().len();
+        let start=state.archive.load(id).unwrap();state.store.write().unwrap().series.clear();
+        let repeated:serde_json::Value=serde_json::from_str(&robustness_json(&request.to_string(),&state)).unwrap();
+        assert_eq!(repeated["recovery_required"],true);assert_eq!(repeated["archive"]["started_run_id"],id);assert_eq!(state.archive.list().unwrap().len(),count);
+        let restored=research_state();restored.store.write().unwrap().series.clear();restored.archive.restore(&start).unwrap();
+        let repeated:serde_json::Value=serde_json::from_str(&robustness_json(&request.to_string(),&restored)).unwrap();assert_eq!(repeated["archive"]["started_run_id"],id);
+        request["name"]=json!("changed inputs");
+        let conflict:serde_json::Value=serde_json::from_str(&robustness_json(&request.to_string(),&restored)).unwrap();assert!(conflict["error"].as_str().unwrap().contains("different inputs"));assert_eq!(restored.archive.list().unwrap().len(),1);
+        request["request_key"]=json!("../invalid");assert!(reserve_stress_request(&request,&restored).is_err());
+        // Two valid content-addressed starts can arrive from separate backups.
+        // Keep both as evidence, but never pick one arbitrarily on a retry.
+        let original=start.run.request["web_request"].clone();
+        let mut conflicting_request=start.run.request.clone();conflicting_request["attempt_id"]=json!("another-archived-attempt");
+        let conflicting_id=state.archive.save(start.run.engine_id.clone(),start.dataset.clone(),start.strategy.clone(),conflicting_request,start.run.result.clone()).unwrap();
+        assert_ne!(conflicting_id,id);
+        let conflicting_bundle=state.archive.load(&conflicting_id).unwrap();
+        let rejected:serde_json::Value=serde_json::from_str(&research_restore_json(&serde_json::to_string(&conflicting_bundle).unwrap(),&restored)).unwrap();
+        assert!(rejected["error"].as_str().unwrap().contains("conflicts with an existing study"));assert_eq!(restored.archive.list().unwrap().len(),1);
+        // Simulate a pre-existing ambiguous archive through the low-level content store.
+        restored.archive.restore(&conflicting_bundle).unwrap();
+        let before=restored.archive.list().unwrap();
+        let ambiguous:serde_json::Value=serde_json::from_str(&robustness_json(&original.to_string(),&restored)).unwrap();
+        assert!(ambiguous["error"].as_str().unwrap().contains("Conflicting studies"));assert!(ambiguous.get("archive").is_none());
+        assert_eq!(restored.archive.list().unwrap(),before,"conflict must not execute, delete or replace either study");
+        std::fs::remove_dir_all(state.archive.root()).unwrap();std::fs::remove_dir_all(restored.archive.root()).unwrap();
+    }
+
+    #[test]
+    fn legacy_robustness_report_remains_replayable() {
+        let state=research_state();let series=state.store.read().unwrap().series[0].clone();
+        let instrument=instrument_for(&series.symbol);let strategy=Strategy::new("legacy stress report");
+        let spec=RobustnessSpec{config:BacktestConfig::default(),scenarios:vec![(0.0,0.0,0.0)],runs:2,skip_probability:0.1,seed:42,context:json!({})};
+        let result=compute_robustness_report(&strategy,&series,&instrument,&spec);
+        let dataset=json!(ArchivedDataset{symbol:series.symbol,timeframe:series.timeframe,instrument,calendar:series.calendar,normalization:series.normalization,bars:series.bars});
+        let id=state.archive.save(engine_identity().unwrap(),dataset,json!(strategy),json!({"research_kind":"robustness","spec":spec}),result.clone()).unwrap();
+        state.store.write().unwrap().series.clear();
+        let replay:serde_json::Value=serde_json::from_str(&research_replay_json(&json!({"run_id":id}).to_string(),&state)).unwrap();
+        assert_eq!(replay["matches"],true,"{replay}");assert_eq!(replay["replayed"],result);
+        std::fs::remove_dir_all(state.archive.root()).unwrap();
     }
 
     #[test]
@@ -981,7 +1037,7 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("GET", "/api/research/runs") => ("200 OK", "application/json", research_list_json(state)),
         ("GET", "/api/research/run") => ("200 OK", "application/json", match state.archive.load(&query_param(full_path,"id")) {Ok(bundle)=>json!(bundle).to_string(),Err(e)=>json!({"error":e}).to_string()}),
         ("POST", "/api/research/replay") => ("200 OK", "application/json", research_replay_json(body,state)),
-        ("POST", "/api/research/restore") => ("200 OK", "application/json", match serde_json::from_str::<sqx_project::archive::ResearchBundle>(body).map_err(|e|e.to_string()).and_then(|b|state.archive.restore(&b)){Ok(id)=>json!({"run_id":id}).to_string(),Err(e)=>json!({"error":e}).to_string()}),
+        ("POST", "/api/research/restore") => ("200 OK", "application/json", research_restore_json(body,state)),
         ("POST", "/api/generate") => ("200 OK", "application/json", generate_json(body, state)),
         ("POST", "/api/portfolio") => ("200 OK", "application/json", portfolio_json(body, state)),
         ("POST", "/api/pseudocode") => ("200 OK", "application/json", pseudocode_json(body)),
@@ -1764,11 +1820,45 @@ fn research_data_quality(series:&SymbolSeries, request:&serde_json::Value, as_of
     Ok(quality)
 }
 
+fn research_restore_json(body:&str,state:&State)->String {
+    let result=(||->Result<String,String>{
+        let bundle:sqx_project::archive::ResearchBundle=serde_json::from_str(body).map_err(|e|e.to_string())?;
+        let _request_guard=if bundle.run.request["research_kind"]=="cli_pipeline_started" && bundle.run.request["origin"]=="web_robustness" {
+            let (guard,existing)=reserve_stress_request(&bundle.run.request["web_request"],state)?;
+            if existing.is_some_and(|id|id!=bundle.run_id){return Err("Restored stress-test request key conflicts with an existing study".into());}
+            guard
+        }else{None};
+        state.archive.restore(&bundle)
+    })();
+    match result{Ok(id)=>json!({"run_id":id}).to_string(),Err(error)=>json!({"error":error}).to_string()}
+}
+
+// Serialize creation for a caller-supplied request identity. The identity is
+// carried inside the immutable start record, so backup/restore retains it.
+fn reserve_stress_request(value:&serde_json::Value,state:&State)->Result<(Option<std::fs::File>,Option<String>),String>{
+    let Some(key)=value.get("request_key") else{return Ok((None,None));};
+    let key=key.as_str().ok_or("Invalid stress-test request key")?;
+    let file=sqx_project::pipeline_archive::stress_request_lock(&state.archive,key)?;
+    let mut existing=None;
+    for id in state.archive.list()? {
+        let record=state.archive.load(&id)?;
+        if record.run.request["research_kind"]=="cli_pipeline_started" && record.run.request["origin"]=="web_robustness" && record.run.request["web_request"]["request_key"]==key {
+            if record.run.request["web_request"]!=*value{return Err("Stress-test request key already belongs to different inputs".into());}
+            if existing.replace(id).is_some(){return Err("Conflicting studies share this stress-test request key".into());}
+        }
+    }
+    Ok((Some(file),existing))
+}
+
 fn robustness_json(body: &str, state: &State) -> String {
     let val: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(e) => return json!({ "error": format!("{e}") }).to_string(),
     };
+    let (creation_guard,existing)=match reserve_stress_request(&val,state){Ok(result)=>result,Err(error)=>return json!({"error":error}).to_string()};
+    if let Some(id)=existing {
+        return json!({"recovery_required":true,"message":"This request already has a saved study. Inspect Saved research runs to check its status or resume; no additional study was started.","archive":{"started_run_id":id}}).to_string();
+    }
     let symbol = val.get("symbol").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let series = match find_series(state, &symbol) {
         Some(s) => s,
@@ -1782,13 +1872,29 @@ fn robustness_json(body: &str, state: &State) -> String {
     let inst = instrument_for(&series.symbol);
     let base = match config_for_series(&val,&series){Ok(config)=>config,Err(error)=>return json!({"error":error}).to_string()};
     let spec=RobustnessSpec{config:base,scenarios:vec![(0.0,0.0,0.0),(10.0,0.0,0.0),(0.0,5.0,0.0),(10.0,5.0,0.0),(10.0,5.0,7.0),(20.0,10.0,10.0)],runs:1000,skip_probability:0.1,seed:42,context:json!({"data_quality":quality,"data_gaps_acknowledged":val.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false)})};
-    let report=compute_robustness_report(&s,&series,&inst,&spec);
-    let request=json!({"research_kind":"robustness","spec":spec});
-    let dataset=json!(ArchivedDataset{symbol:series.symbol.clone(),timeframe:series.timeframe,instrument:inst,calendar:series.calendar.clone(),normalization:series.normalization.clone(),bars:series.bars});
-    let id=match retained_engine_identity(state).and_then(|engine|state.archive.save(engine,dataset,json!(s),request,report.clone())) {
-        Ok(id)=>id,Err(error)=>return json!({"error":format!("Robustness report could not be archived: {error}")}).to_string()
+    let pipeline=sqx_pipeline::Pipeline{name:format!("{} — stress test",s.name),tasks:vec![sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::Sensitivity{
+        strategy:s,scenarios:spec.scenarios.clone(),mc_runs:spec.runs,mc_seed:spec.seed,skip_probability:spec.skip_probability,
+    }}]};
+    let request=json!({"research_kind":"cli_pipeline_started","origin":"web_robustness","attempt_id":format!("{:032x}",rand::random::<u128>()),
+        "web_request":val,"config":spec.config,"seed":spec.seed,"periods_per_year":pyp_for(&series.bars)});
+    let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,
+        "normalization":series.normalization,"bars":series.bars,"source_context":spec.context});
+    let specification=json!({"pipeline":pipeline,"generator":GeneratorConfig::default()});
+    let started=match retained_engine_identity(state).and_then(|engine|state.archive.save(engine,dataset,specification,request,json!({"status":"execution_not_recorded"}))) {
+        Ok(id)=>id,Err(error)=>return json!({"error":format!("Stress test could not be started in the research archive: {error}")}).to_string()
     };
-    let mut response=report;response["archive"]=json!({"run_id":id});response.to_string()
+    drop(creation_guard);
+    let recovered=match sqx_project::pipeline_archive::recover(&state.archive,&started,true){
+        Ok(result)=>result,Err(error)=>return json!({"error":format!("Stress test stopped: {error}. Inspect Saved research before retrying."),"archive":{"started_run_id":started}}).to_string()
+    };
+    let mut response=match &recovered.report.robustness {
+        Some(study)=>match &study.monte_carlo {
+            Some(mc)=>render_robustness_report(&study.base,&study.what_if,mc,&spec),
+            None=>json!({"error":study.base.errors.join("; ")}),
+        },
+        None=>json!({"error":recovered.report.errors.join("; ")}),
+    };
+    response["archive"]=json!({"run_id":recovered.completion_id,"started_run_id":started});response.to_string()
 }
 
 #[derive(serde::Serialize,serde::Deserialize)]
@@ -1806,6 +1912,10 @@ fn compute_robustness_report(s:&Strategy,series:&SymbolSeries,inst:&Instrument,s
     if !r.errors.is_empty(){return json!({"error":r.errors.join("; ")});}
     let rows = what_if(s, &series.bars, inst, &spec.config, &spec.scenarios);
     let mc = monte_carlo_trade_manipulation(&r.trades, spec.runs, spec.skip_probability, spec.seed);
+    render_robustness_report(&r,&rows,&mc,spec)
+}
+
+fn render_robustness_report(r:&BacktestResult,rows:&[sqx_robustness::WhatIfRow],mc:&sqx_robustness::MonteCarloReport,spec:&RobustnessSpec)->serde_json::Value {
     json!({
         "data_quality":spec.context["data_quality"],
         "data_gaps_acknowledged":spec.context["data_gaps_acknowledged"],
@@ -2152,7 +2262,7 @@ fn research_list_json(state:&State)->String{
                 match tasks.filter(|tasks|tasks.len()==1).and_then(|tasks|tasks.first()).map(|task|&task["kind"]) {
                     Some(task) if task.get("Generate").is_some()=>"generation",
                     Some(task) if task.get("DiscoverWalkForward").is_some()=>"walk_forward",
-                    Some(task) if task.get("Robustness").is_some()=>"robustness",
+                    Some(task) if task.get("Robustness").is_some() || task.get("Sensitivity").is_some()=>"robustness",
                     _=>"pipeline",
                 }
             }else{""};

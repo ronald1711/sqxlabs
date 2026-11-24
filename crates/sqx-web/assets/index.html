@@ -1439,17 +1439,33 @@ function settings() {
 }
 
 function robustnessArchiveNotice(d) {
+  if(d.archive && d.archive.started_run_id)return '<p class="muted">Saved stress-test study: '+escapeHtml(d.archive.started_run_id)+'. Open Saved research runs to inspect progress, download the complete backup, or resume with the original application build. Replay verifies repeatability, not independent correctness.</p>';
   return d.archive && d.archive.run_id ? '<p class="muted">Saved research run: '+escapeHtml(d.archive.run_id)+'. Open Saved research runs to inspect, back up or replay this report.</p>' : '';
 }
+let robustnessRequestPending=false;
 async function requestRobustness(strategy) {
+  if(robustnessRequestPending)return {error:'A stress test is already awaiting a response in this page. Wait for its result or inspect Saved research runs; no additional study was started.'};
   var body;
   try { body=Object.assign({},strategy,{symbol:selectedSymbol()},settings()); }
   catch(e) { return {error:'Correct the simulation settings: '+e.message}; }
-  try { return await postJSON('/api/robustness',JSON.stringify(body)); }
-  catch(e) { return {error:'The response could not be received. The server may have completed and archived the stress test; refresh Saved research runs before retrying.'}; }
+  robustnessRequestPending=true;
+  try {
+    const storageKey='sqx-stress-request:'+JSON.stringify(body);
+    try {
+      let key=sessionStorage.getItem(storageKey);
+      if(!key){key=crypto.randomUUID();sessionStorage.setItem(storageKey,key);}
+      body.request_key=key;
+    }catch(e){return {error:'The browser could not preserve this request identity. No stress test was sent. Check browser storage before starting research.'};}
+    const result=await postJSON('/api/robustness',JSON.stringify(body));
+    if(result.archive?.started_run_id){try{sessionStorage.removeItem(storageKey);}catch(e){/* Keeping the key is safe: a retry finds the same study. */}}
+    return result;
+  }
+  catch(e) { return {error:'The response could not be received. The stress test may still be running or have saved partial progress; refresh Saved research runs and inspect its status before retrying.'}; }
+  finally { robustnessRequestPending=false; }
 }
 function robustnessQuickSummary(d,name) {
   var html=robustnessArchiveNotice(d);
+  if(d.recovery_required)return html+'<p class="muted">'+escapeHtml(d.message)+'</p>';
   if(d.error)return html+'<p class="neg">'+escapeHtml(d.error)+'</p>';
   html+='<p class="muted">'+escapeHtml(d.interpretation||'Exploratory stress test; not independent validation.')+'</p>';
   if(d.data_gaps_acknowledged)html+='<p class="neg">Data gaps were allowed for this exploratory run.</p>';
@@ -1470,6 +1486,7 @@ async function runRobustness() {
   catch (e) { st.textContent = "Invalid strategy: " + e.message; return; }
   var d = await requestRobustness(obj);
   st.textContent = "";
+  if(d.recovery_required){out.innerHTML=robustnessQuickSummary(d,obj.name||'');return;}
   if (d.error) { out.innerHTML = robustnessArchiveNotice(d)+"<p class=\"neg\">" + escapeHtml(d.error) + "</p>"; return; }
   var html = robustnessArchiveNotice(d)+"<p class=\"muted\">"+escapeHtml(d.interpretation||"")+"</p>";
   if(d.data_gaps_acknowledged)html+="<p class=\"neg\">Data gaps were explicitly allowed for this exploratory run. Review Data quality before interpreting these results.</p>";

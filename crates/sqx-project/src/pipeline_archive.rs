@@ -5,6 +5,16 @@ use std::collections::BTreeMap;
 
 const SCOPE:&str="Ordered build/retest and walk-forward trial checkpoints, with full walk-forward execution outcomes. Recovery replays the saved prefix before appending missing events. Full-data discovery is exploratory, not an untouched holdout.";
 
+/// Shared by web request creation and portable restore, including other processes.
+pub fn stress_request_lock(archive:&Archive,key:&str)->Result<std::fs::File,String>{
+    if key.is_empty() || key.len()>128 || !key.bytes().all(|b|b.is_ascii_alphanumeric() || b==b'-'){return Err("Invalid stress-test request key".into());}
+    let directory=archive.root().join("stress-request-locks");std::fs::create_dir_all(&directory).map_err(|e|e.to_string())?;
+    let file=std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true)
+        .open(directory.join(crate::archive::content_id(key.as_bytes()))).map_err(|e|e.to_string())?;
+    file.try_lock().map_err(|e|format!("Stress-test request creation or restore is busy or unavailable; retry the same request key: {e}"))?;
+    Ok(file)
+}
+
 fn lock(archive:&Archive,id:&str)->Result<std::fs::File,String>{
     archive.load(id)?;
     lock_validated(archive,id)
@@ -76,10 +86,19 @@ pub fn import(archive:&Archive,value:Value)->Result<Value,String>{
     if state.events.iter().ne(backup.events.iter().map(|e|&e.run_id)) {
         return Err("Backup events are not in recorded order".into());
     }
+    let request_key=if state.root.run.request["origin"]=="web_robustness" {
+        state.root.run.request["web_request"].get("request_key").map(|value|value.as_str().ok_or("Invalid stress-test request key")).transpose()?
+    }else{None};
+    let _request_guard=request_key.map(|key|stress_request_lock(archive,key)).transpose()?;
     let _guard=lock_validated(archive,id)?; // ID was verified by restore/load above.
     let existing=archive.list()?;
     for record_id in &existing {
         let record=archive.load(record_id)?;
+        if let Some(key)=request_key {
+            if record.run_id!=*id && record.run.request["research_kind"]=="cli_pipeline_started" && record.run.request["origin"]=="web_robustness" && record.run.request["web_request"]["request_key"]==key {
+                return Err("Restored stress-test request key conflicts with an existing study".into());
+            }
+        }
         if record.run_id==*id || record.run.request["started_run_id"]==*id {staging.restore(&record)?;}
     }
     let merged=load(&staging,id)?;
@@ -211,6 +230,34 @@ pub fn recover(archive:&Archive,id:&str,resume:bool)->Result<Recovery,String>{
 #[cfg(test)]
 mod backup_tests {
     use super::*;
+    #[test]
+    fn restored_stress_request_ids_are_unique_before_publication(){
+        let dir=std::env::temp_dir().join(format!("sqx-request-restore-{:032x}",rand::random::<u128>()));
+        let source=Archive::new(dir.join("source"));let target=Archive::new(dir.join("target"));
+        let make=|attempt:&str|{
+            let id=source.save("a".repeat(64),json!({"bars":[]}),json!({}),json!({
+                "research_kind":"cli_pipeline_started","origin":"web_robustness","attempt_id":attempt,
+                "web_request":{"request_key":"shared-request"},"config":{},"seed":42
+            }),json!({"status":"execution_not_recorded"})).unwrap();
+            export(&source,&id).unwrap()
+        };
+        let first=make("first");let second=make("second");
+        let guard=stress_request_lock(&target,"shared-request").unwrap();
+        assert!(import(&target,first.clone()).unwrap_err().contains("busy"));assert!(target.list().unwrap().is_empty());drop(guard);
+        assert_eq!(import(&target,first.clone()).unwrap()["published_records"],1);
+        assert_eq!(import(&target,first.clone()).unwrap()["published_records"],0);
+        let before=target.list().unwrap();
+        assert!(import(&target,second.clone()).unwrap_err().contains("conflicts with an existing study"));
+        assert_eq!(target.list().unwrap(),before);
+        let concurrent=Archive::new(dir.join("concurrent"));
+        let outcomes=std::thread::scope(|scope|{
+            let a=scope.spawn(||import(&concurrent,first));let b=scope.spawn(||import(&concurrent,second));
+            [a.join().unwrap(),b.join().unwrap()]
+        });
+        assert_eq!(outcomes.iter().filter(|result|result.is_ok()).count(),1);assert_eq!(concurrent.list().unwrap().len(),1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn portable_prefix_completion_and_conflict_validation() {
         let dir=std::env::temp_dir().join(format!("sqx-backup-test-{:032x}",rand::random::<u128>()));

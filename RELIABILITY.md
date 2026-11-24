@@ -77,8 +77,35 @@ indicator evidence-index check also passed. These are local checks, not a claim
 of remote release approval or independent trading correctness. The web robustness
 endpoint still archives after computation; standalone Monte Carlo and remaining
 entry points need durable trial accounting. Power-loss and large-study behavior
-remain unverified. The CLI's generated walk-forward stage is a separate candidate
-search, not an out-of-sample evaluation of the supplied strategy.
+remain unverified. At that revision, the CLI's generated walk-forward stage was a
+separate candidate search, not an out-of-sample evaluation of the supplied strategy.
+
+The candidate-linkage regression subsequently reproduced unrelated rule trees and
+direction flags in that stage. The corrected path freezes the supplied strategy
+as its first control and derives only declared parameter/SL/PT variants, recording
+the entire family before any walk-forward evaluation. Focused pipeline checks
+cover unchanged rules, the control in every window, family publication order,
+storage failure at every event boundary, and recorded family-configuration failure.
+This establishes candidate linkage, not untouched-data provenance or independent
+execution correctness. Earlier archives retain their original engine semantics.
+The regression failed before the change. After correction, both pipeline
+robustness tests, all six CLI pipeline/source/recovery tests, both CLI stress
+tests and the workspace build passed locally. The real interruption test still
+restores and resumes to the same completion identity as its uninterrupted control.
+
+### Web stress-test interruption evidence (2026-11-24)
+
+The web route now journals its existing six cost scenarios and 1,000 Monte Carlo
+paths through the shared recovery protocol. Focused tests passed for complete
+2,016-event backup/restore/replay without live data, legacy report compatibility,
+storage failure at each sensitivity-event boundary, and UI error/recovery notices.
+The real server-kill regression initially failed because the CLI refused to open
+an empty data directory. After allowing an empty import/recovery workspace, it
+passed: kill after a durable Monte Carlo outcome, export the partial study, delete
+the original CSV/archive, restore over HTTP into a new empty server, and resume
+without changing saved event identities. Both existing CSV/manifest startup tests
+also passed. This does not establish power-loss durability, large-study performance
+or responsive progress/cancellation; the wider reliability programme remains open.
 
 ### Recovery integration evidence (2026-11-24)
 
