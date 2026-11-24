@@ -1,5 +1,9 @@
 """Synthetic journal tests; these are not evidence of an actual MT5 run."""
 import sys
+import hashlib
+import json
+import subprocess
+import tempfile
 from pathlib import Path
 import unittest
 
@@ -29,6 +33,22 @@ class TesterLogCheck(unittest.TestCase):
         self.assertEqual(check(short, True)['side'], 'short')
         with self.assertRaises(ValueError):
             check(short)
+
+    def test_command_line_encoding_hash_and_failure_status(self):
+        script = Path(__file__).resolve().parents[1] / 'mt5_tester_log_check.py'
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / 'tester.log'
+            for encoding in ['utf-8', 'utf-8-sig', 'utf-16']:
+                data = LONG.encode(encoding)
+                log.write_bytes(data)
+                run = subprocess.run([sys.executable, str(script), str(log)], capture_output=True, text=True)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                self.assertEqual(json.loads(run.stdout)['log_sha256'], hashlib.sha256(data).hexdigest())
+            for data in [b'no reference run', bytes([255, 254, 0])]:
+                log.write_bytes(data)
+                run = subprocess.run([sys.executable, str(script), str(log)], capture_output=True, text=True)
+                self.assertEqual(run.returncode, 1, run.stderr)
+                self.assertEqual(json.loads(run.stdout)['status'], 'rejected')
 
     def test_reject_incomplete_duplicate_and_mixed_runs(self):
         for text in ['', LONG + LONG, '\n'.join(reversed(LONG.splitlines())), LONG.replace('SQX_REFERENCE_INIT', 'OTHER_INIT'),

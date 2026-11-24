@@ -15,6 +15,7 @@ scripts/*
 !scripts/mt5_recording_export.py
 !scripts/mt5_recording_status.py
 !scripts/mt5_reference_check.py
+!scripts/mt5_tester_log_check.py
 !scripts/mt5_prefix_check.py
 !scripts/retain_engine.py
 !scripts/tests/

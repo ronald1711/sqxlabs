@@ -87,6 +87,10 @@ four observations capture every possible real intrabar price path.
 The gate also requires Python 3 and runs `scripts/tests` offline. Its MT5 client
 stub verifies CSV price precision without requiring SiliconMT5 or a broker login.
 It is exporter regression coverage, not independent broker evidence.
+The same discovery runs the MT5 tester-journal checker tests: synthetic long/short
+journals, altered fills/costs/configuration, incomplete or mixed runs, and CLI
+UTF-8/UTF-16 decoding, input hashing and rejection exit codes. These tests do not
+run MT5 or establish market-mode execution parity.
 The supplied tick fixture uses explicit millisecond CSV and checks that its
 123ms component survives in both executed entry and account quote timestamps.
 
