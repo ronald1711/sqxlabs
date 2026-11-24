@@ -50,6 +50,30 @@ fn pine_stoch_d_preserves_fixed_k_period_and_variable_smoothing() {
 }
 
 #[test]
+fn stochastic_exports_preserve_fast_k_and_single_d_smoothing() {
+    for (params, k, d) in [
+        (vec![], 14, 3),
+        (vec![sqx_strategy::Param::new("period", 7.6)], 8, 8),
+    ] {
+        for (engine, k_expr, d_expr) in [
+            (Engine::Mql4, format!(",{k},3,1,MODE_SMA,STO_LOWHIGH,MODE_MAIN,"), format!(",14,{d},1,MODE_SMA,STO_LOWHIGH,MODE_SIGNAL,")),
+            (Engine::Mql5, format!(",{k},3,1,MODE_SMA,STO_LOWHIGH,MODE_MAIN,"), format!(",14,{d},1,MODE_SMA,STO_LOWHIGH,MODE_SIGNAL,")),
+            (Engine::NinjaTrader, format!("Stochastics(3, {k}, 1).K"), format!("Stochastics({d}, 14, 1).D")),
+            (Engine::EasyLanguage, format!("FastK({k})"), format!("Average(FastK(14), {d})")),
+            (Engine::PineScript, format!("ta.stoch(close, high, low, {k})"), format!("ta.sma(ta.stoch(close, high, low, 14), {d})")),
+        ] {
+            for (name, expected) in [("StochK", k_expr), ("StochD", d_expr)] {
+                let mut strategy = rsi_strategy();
+                strategy.signals[0].conditions[0].left = Operand::Indicator(name.into(), params.clone());
+                let report = sqx_export::export_report(&strategy, engine);
+                assert_eq!(report.status, "reference_draft");
+                assert!(report.code.unwrap().contains(&expected), "{engine:?} {name}: missing {expected}");
+            }
+        }
+    }
+}
+
+#[test]
 fn mql4_exports_order_send() {
     let code = export(&rsi_strategy(), Engine::Mql4);
     assert!(code.contains("OrderSend"), "MQL4 should emit OrderSend");

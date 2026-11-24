@@ -124,8 +124,17 @@ followed by SMA3. Pine now preserves K14 and uses the rounded/defaulted smoothin
 period from the engine contract. A regression failed on the old mapping and all
 nine exporter tests passed after repair (default, 3, 7 and fractional 7.6 -> 8).
 This is source-translation evidence, not TradingView compilation/execution parity.
-The MQL, NinjaScript and EasyLanguage StochD mappings still require equivalent
-correction and platform verification; the exporter remains explicitly a draft.
+The follow-up corrects stochastic K/D parameter roles across MQL, NinjaScript and
+EasyLanguage too: raw K has no extra slowing, D averages fixed K14 for the declared
+period. A separate fixed-extrema arithmetic test checks registry K warmup and D
+default/custom smoothing. Ten exporter tests pass for default and rounded custom
+parameters, preserving draft status. Source references:
+[MQL4 iStochastic](https://docs.mql4.com/indicators/istochastic),
+[NinjaTrader Stochastics](https://static.ninjatrader.com/support/helpGuides/nt8/stochastics.htm),
+[TradeStation FastK](https://help.tradestation.com/10_00/eng/tsdevhelp/elword/function/fastk_function_.htm).
+Platform compilation/execution, flat-range conventions and platform warmup remain
+unverified. In particular MQL5 still requires handle/buffer-based code generation;
+correcting parameter roles does not repair that separate exporter limitation.
 
 The legacy `intrabar_up_first` flag describes an assumed OHLC path, not a
 side-independent pessimistic fill policy. A replacement ambiguity model is pending.

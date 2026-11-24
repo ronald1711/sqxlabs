@@ -17,6 +17,12 @@ use pine::render_pine;
 
 use sqx_strategy::Strategy;
 
+// Keep stochastic parameter rounding/defaults aligned with backtest registry.
+fn stochastic_period(params: &[sqx_strategy::Param], default: usize) -> usize {
+    params.iter().find(|p| p.name == "period")
+        .map(|p| p.value.round() as usize).filter(|&n| n > 0).unwrap_or(default)
+}
+
 /// Target export engine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Engine {

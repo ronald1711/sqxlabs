@@ -47,8 +47,8 @@ fn indicator(name: &str, params: &[Param], shift: i32, d: Dialect) -> Option<Str
         "DIMinus" => format!("iADX({s},{per},{},PRICE_CLOSE,MODE_MINUSDI,{shift})", prd(params, "period", 14)),
         "Momentum" => format!("iMomentum({s},{per},{},PRICE_CLOSE,{shift})", prd(params, "period", 10)),
         "WilliamsR" => format!("iWPR({s},{per},{},{shift})", prd(params, "period", 14)),
-        "StochK" => format!("iStochastic({s},{per},{},3,3,MODE_SMA,STO_LOWHIGH,MODE_MAIN,{shift})", prd(params, "period", 14)),
-        "StochD" => format!("iStochastic({s},{per},{},3,3,MODE_SMA,STO_LOWHIGH,MODE_SIGNAL,{shift})", prd(params, "period", 14)),
+        "StochK" => format!("iStochastic({s},{per},{},3,1,MODE_SMA,STO_LOWHIGH,MODE_MAIN,{shift})", crate::stochastic_period(params, 14)),
+        "StochD" => format!("iStochastic({s},{per},14,{},1,MODE_SMA,STO_LOWHIGH,MODE_SIGNAL,{shift})", crate::stochastic_period(params, 3)),
         "MACD" => {
             let fast = prd(params, "fast", 12);
             let slow = prd(params, "slow", 26);

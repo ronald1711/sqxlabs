@@ -29,12 +29,11 @@ fn indicator(name: &str, params: &[Param]) -> Option<String> {
         "Momentum" => format!("ta.mom(close, {})", prd(params, "period", 10)),
         "ROC" => format!("ta.roc(close, {})", prd(params, "period", 10)),
         "WilliamsR" => format!("ta.wr({})", prd(params, "period", 14)),
-        "StochK" => format!("ta.stoch(close, high, low, {})", prd(params, "period", 14)),
+        "StochK" => format!("ta.stoch(close, high, low, {})", crate::stochastic_period(params, 14)),
         "StochD" => {
             // Registry contract: K always uses 14; period controls D smoothing.
             // Match registry rounding/defaults rather than truncating periods.
-            let smoothing = params.iter().find(|p| p.name == "period")
-                .map(|p| p.value.round() as usize).filter(|&n| n > 0).unwrap_or(3);
+            let smoothing = crate::stochastic_period(params, 3);
             format!("ta.sma(ta.stoch(close, high, low, 14), {smoothing})")
         },
         "MACD" => format!("ta.macd(close, {}, {}, {})[0]", prd(params, "fast", 12), prd(params, "slow", 26), prd(params, "signal", 9)),
