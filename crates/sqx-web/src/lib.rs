@@ -181,6 +181,20 @@ mod tests {
     }
 
     #[test]
+    fn cli_pipeline_records_are_labeled_and_cannot_replay_as_single_backtests(){
+        let state=research_state();
+        for kind in ["cli_pipeline_started","cli_pipeline_event","cli_pipeline"] {
+            let id=state.archive.save(engine_identity().unwrap(),json!({"instrument":{"name":"EURUSD"}}),json!({"pipeline":{}}),json!({"research_kind":kind}),json!({})).unwrap();
+            let response:serde_json::Value=serde_json::from_str(&research_replay_json(&json!({"run_id":id}).to_string(),&state)).unwrap();
+            assert!(response["error"].as_str().unwrap().contains("complete ordered archive"),"{response}");
+        }
+        let listed:serde_json::Value=serde_json::from_str(&research_list_json(&state)).unwrap();
+        assert_eq!(listed["runs"].as_array().unwrap().len(),3);
+        for run in listed["runs"].as_array().unwrap(){assert_eq!(run["name"],"CLI pipeline");assert_eq!(run["symbol"],"EURUSD");}
+        std::fs::remove_dir_all(state.archive.root()).unwrap();
+    }
+
+    #[test]
     fn assistant_candidate_archive_survives_restore_without_live_data(){
         let state=research_state();
         let series=state.store.read().unwrap().series[0].clone();
@@ -2075,7 +2089,12 @@ fn research_list_json(state:&State)->String{
     let list=||->Result<Vec<serde_json::Value>,String>{
         state.archive.list()?.iter().map(|id|{
             let bundle=state.archive.load(id)?;
-            Ok(json!({"run_id":id,"name":bundle.strategy["name"],"symbol":bundle.dataset["symbol"],"dataset_id":bundle.run.dataset_id,"engine_id":bundle.run.engine_id,"metrics":bundle.run.result["metrics"],"kind":bundle.run.request.get("research_kind").and_then(|v|v.as_str()).unwrap_or("backtest")}))
+            let kind=bundle.run.request.get("research_kind").and_then(|v|v.as_str()).unwrap_or("backtest");
+            let pipeline=matches!(kind,"cli_pipeline_started"|"cli_pipeline_event"|"cli_pipeline");
+            let name=if pipeline{json!("CLI pipeline")}else{bundle.strategy["name"].clone()};
+            let symbol=bundle.dataset.get("symbol").filter(|v|v.is_string()).cloned()
+                .unwrap_or_else(||bundle.dataset["instrument"]["name"].clone());
+            Ok(json!({"run_id":id,"name":name,"symbol":symbol,"dataset_id":bundle.run.dataset_id,"engine_id":bundle.run.engine_id,"metrics":bundle.run.result["metrics"],"kind":bundle.run.request.get("research_kind").and_then(|v|v.as_str()).unwrap_or("backtest")}))
         }).collect()
     };
     match list(){Ok(runs)=>json!({"runs":runs}).to_string(),Err(e)=>json!({"error":e}).to_string()}
@@ -2179,6 +2198,9 @@ fn research_replay_json(body:&str,state:&State)->String{
         if bundle.run.engine_id!=engine_identity()?{return Err("The engine executable differs from the recorded run. Use the matching build; the original report remains available.".into());}
         if matches!(bundle.run.request["research_kind"].as_str(),Some("mcp_generation"|"mcp_generation_started"|"mcp_generation_trial"|"mcp_generation_trial_started")) {
             return Err("MCP generation records are available for inspection; dashboard replay and restart are not implemented for these records.".into());
+        }
+        if matches!(bundle.run.request["research_kind"].as_str(),Some("cli_pipeline_started"|"cli_pipeline_event"|"cli_pipeline")) {
+            return Err("Pipeline recovery requires the complete ordered archive and the original CLI executable. Use pipeline-history or replay-pipeline with the start record ID; this dashboard action cannot replay a single pipeline record.".into());
         }
         if matches!(bundle.run.request["research_kind"].as_str(),Some("cli_backtest"|"cli_backtest_started")) {return Err("CLI backtest records contain full inputs and execution evidence; dashboard replay is not implemented for this record type.".into());}
         if matches!(bundle.run.request["research_kind"].as_str(),Some("assistant_trial"|"assistant_trial_started")) {

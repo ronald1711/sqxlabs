@@ -5,7 +5,7 @@ assert(start>=0&&end>start);
 const node=()=>({children:[],append(...children){this.children.push(...children)},replaceChildren(){this.children=[]}});
 const nodes={'research-status':node(),'research-runs':node()};
 let result,posted,fail=false;
-const kinds=['assistant_trial_started','assistant_trial','assistant_candidates','mcp_generation','mcp_generation_started','mcp_generation_trial','mcp_generation_trial_started'];
+const kinds=['assistant_trial_started','assistant_trial','assistant_candidates','mcp_generation','mcp_generation_started','mcp_generation_trial','mcp_generation_trial_started','cli_pipeline_started','cli_pipeline_event','cli_pipeline'];
 const ctx=vm.createContext({
  $:id=>nodes[id],document:{createElement:node,createTextNode:text=>({textContent:text})},
  getJSON:async()=>({runs:kinds.map((kind,i)=>({kind,run_id:String(i).repeat(64),dataset_id:'d'.repeat(64),name:'Fixture',symbol:'EURUSD'}))}),
@@ -17,7 +17,15 @@ const button=i=>nodes['research-runs'].children[i].children.at(-1);
  await ctx.refreshResearchRuns();
  assert.equal(button(0).textContent,'Restart frozen trial');assert.match(button(0).title,/Does not resume/);
  assert.equal(button(1).textContent,'Verify replay');assert.equal(button(2).disabled,true);
- for(let i=3;i<kinds.length;i++){assert.equal(button(i).disabled,true);assert.match(button(i).textContent,/unavailable for MCP/);assert(nodes['research-runs'].children[i].children.some(child=>child.textContent==='Download this record (not whole search)'));}
+ for(let i=3;i<7;i++){assert.equal(button(i).disabled,true);assert.match(button(i).textContent,/unavailable for MCP/);assert(nodes['research-runs'].children[i].children.some(child=>child.textContent==='Download this record (not whole search)'));}
+ for(let i=7;i<kinds.length;i++){
+  assert.equal(button(i).disabled,true);assert.equal(button(i).textContent,'Use CLI for pipeline recovery');
+  assert.match(button(i).title,/single record is not a complete pipeline backup/);
+  const card=nodes['research-runs'].children[i];
+  assert(card.children.some(child=>child.textContent==='Download this record (not whole search)'));
+  assert.match(card.children[1].textContent,/Pipeline (input checkpoint|step record|completion record)/);
+  assert(!card.children[1].textContent.includes('Net '));
+ }
  result={resumed:true,run_id:'r'.repeat(64),execution_valid:true};await button(0).onclick();
  assert.equal(posted.body.resume,true);assert.match(nodes['research-status'].textContent,/restarted and saved/);
  result={matches:true,execution_valid:false};await button(1).onclick();
