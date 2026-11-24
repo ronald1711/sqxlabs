@@ -44,8 +44,10 @@ fn search_using(strategies:&[Strategy],bars:&[Bar],instrument:&Instrument,config
  }
  if !report.errors.is_empty(){return Ok(report);}
  let mut order:Vec<usize>=(0..report.candidates.len()).collect();
- order.sort_by(|&a,&b|report.candidates[b].metrics.profit_factor.partial_cmp(&report.candidates[a].metrics.profit_factor).unwrap_or(std::cmp::Ordering::Equal));
  order.retain(|&i|report.candidates[i].metrics.number_of_trades>=selection.min_trades as f64 && report.candidates[i].metrics.profit_factor.is_finite());
+ // Undefined scores cannot participate in a comparator: treating NaN as equal
+ // breaks transitivity and may panic in Rust's sort. Retain their executions above.
+ order.sort_by(|&a,&b|report.candidates[b].metrics.profit_factor.partial_cmp(&report.candidates[a].metrics.profit_factor).expect("eligible scores are finite"));
  report.eligible=order.len();order.truncate(selection.shortlist_limit);report.shortlist=order;
  observer(SearchEvent::Shortlist{eligible:report.eligible,indices:&report.shortlist})?;
  if report.shortlist.len()<selection.min_subset{report.errors.push("Not enough qualifying strategies to form a portfolio".into());return Ok(report);}

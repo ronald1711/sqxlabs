@@ -236,7 +236,7 @@ fn killed_pipeline_stage_recovery(retest:bool){
     let bars:Vec<_>=(0..1500).map(|i|{let p=1.1+(i as f64*0.3).sin()*0.01;sqx_core::Bar::new(i*60000,p,p+0.003,p-0.003,p+0.0002,10.0)}).collect();
     let pipeline=sqx_pipeline::Pipeline{name:"walk-forward recovery".into(),tasks:vec![
         sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::Build{count:100,keep:1}},
-        sqx_pipeline::Task{kind:if retest{sqx_pipeline::TaskKind::Retest{mc_runs:64,min_positive_pct:0.0}}else{sqx_pipeline::TaskKind::Optimize{windows:3,candidates:16}}}]};
+        sqx_pipeline::Task{kind:if retest{sqx_pipeline::TaskKind::Retest{mc_runs:256,min_positive_pct:0.0}}else{sqx_pipeline::TaskKind::Optimize{windows:3,candidates:16}}}]};
     let executable=env!("CARGO_BIN_EXE_sqx-cli");
     let engine=content_id(&fs::read(executable).unwrap());
     let id=archive.save(engine,json!({"bars":bars,"instrument":sqx_core::Instrument::fx("EURUSD"),"timeframe":"M1"}),
@@ -250,14 +250,19 @@ fn killed_pipeline_stage_recovery(retest:bool){
     let mut child=Child(command("archive").stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap());
     let deadline=std::time::Instant::now()+std::time::Duration::from_secs(120);
     let mut seen=std::collections::BTreeSet::new();
-    let retained=loop {
+    let retained_id=loop {
         let mut found=None;
         for entry in fs::read_dir(archive.root().join("runs")).unwrap(){
             let path=entry.unwrap().path();if path.extension().and_then(|v|v.to_str())!=Some("json"){continue;}
             let key=path.file_stem().unwrap().to_str().unwrap().to_string();
             if !seen.insert(key.clone()){continue;}
-            let record=archive.load(&key).unwrap();
-            if is_outcome(&record.run.result) {found=Some(record);break;}
+            // Watch only newly published run bytes. Loading every shared dataset
+            // here lets fast calculations finish before the observer can kill them.
+            let bytes=fs::read(&path).unwrap();
+            let marker=if retest{b"\"kind\":\"retest_trial\"".as_slice()}else{b"\"kind\":\"walk_forward\"".as_slice()};
+            if !bytes.windows(marker.len()).any(|window|window==marker){continue;}
+            let record:sqx_project::archive::RunRecord=serde_json::from_slice(&bytes).unwrap();
+            if is_outcome(&record.result) {found=Some(key);break;}
         }
         if let Some(record)=found{break record;}
         assert!(child.0.try_wait().unwrap().is_none(),"pipeline ended before a walk-forward outcome was persisted");
@@ -265,6 +270,7 @@ fn killed_pipeline_stage_recovery(retest:bool){
         std::thread::sleep(std::time::Duration::from_millis(10));
     };
     child.0.kill().unwrap();child.0.wait().unwrap();
+    let retained=archive.load(&retained_id).unwrap();
     if retest{assert!(retained.run.result["event"]["TradeManipulationOutcome"]["sample"].is_object());}
     else{assert!(!retained.run.result["event"]["execution"]["trades"].as_array().unwrap().is_empty());}
     assert!(!archive.list().unwrap().iter().any(|key|archive.load(key).unwrap().run.request["research_kind"]=="cli_pipeline"));
@@ -288,7 +294,7 @@ fn killed_pipeline_stage_recovery(retest:bool){
         let event=restored.load(key.as_str().unwrap()).unwrap();
         is_outcome(&event.run.result)
     }).count();
-    assert_eq!(outcomes,if retest{64}else{48});
+    assert_eq!(outcomes,if retest{256}else{48});
 }
 
 #[test]

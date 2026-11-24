@@ -185,3 +185,18 @@ fn portfolio_rejections_remain_evidence_and_mixed_tasks_never_start(){
  let mixed=Pipeline{name:"mixed".into(),tasks:vec![task,Task{kind:TaskKind::Build{count:1,keep:1}}]};
  let result=sqx_pipeline::run_observed(&mixed,&bars,&instrument,&config,252.0,&generator,42,&mut |_|panic!("invalid workflow must not start")).unwrap();assert!(!result.errors.is_empty());assert!(result.portfolio.is_none());
 }
+
+#[test]
+fn mixed_defined_and_undefined_portfolio_scores_have_a_valid_ranking_order(){
+ use rand::SeedableRng;
+ let bars:Vec<_>=(0..1500).map(|i|{let p=1.1+(i as f64*0.07).sin()*0.01;Bar::new((1700000000+i*60)*1000,p,p+0.001,p-0.001,p,1.0)}).collect();
+ let generator=GeneratorConfig::default();let mut rng=rand::rngs::StdRng::seed_from_u64(123);
+ let strategies=(0..40).map(|i|sqx_optimizer::random_strategy(&mut rng,&format!("p{i:04}"),&generator)).collect();
+ let pipeline=Pipeline{name:"mixed ranking scores".into(),tasks:vec![Task{kind:TaskKind::Portfolio{strategies,selection:sqx_portfolio::SearchConfig{min_trades:5,shortlist_limit:4,min_subset:2,max_subset:3}}}]};
+ let report=run(&pipeline,&bars,&Instrument::fx("EURUSD"),&BacktestConfig::default(),525600.0,&generator,123);
+ assert!(report.errors.is_empty(),"{:?}",report.errors);let study=report.portfolio.unwrap();assert_eq!(study.candidates.len(),40);
+ assert!(study.candidates.iter().any(|row|!row.metrics.profit_factor.is_finite()),"fixture must exercise undefined scores");
+ assert_eq!(study.shortlist.len(),4);assert_eq!(study.subset.unwrap().attempted,10);
+ for &i in &study.shortlist{assert!(study.candidates[i].metrics.profit_factor.is_finite());assert!(study.candidates[i].metrics.number_of_trades>=5.0);}
+ for pair in study.shortlist.windows(2){assert!(study.candidates[pair[0]].metrics.profit_factor>=study.candidates[pair[1]].metrics.profit_factor);}
+}
