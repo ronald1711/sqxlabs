@@ -246,3 +246,9 @@ See [README.md](README.md) for operation and [ci/README.md](ci/README.md) for ch
   paths, including ordered trade selections and failures, before survivor selection.
   Failure injection covers retest start, base outcome, each trial and final outcome.
   This closes a partial-result retention gap, not independent execution validation.
+
+- [x] Validate shared immutable dataset/strategy objects once per archive listing,
+  with a fresh validation set on every call and separate object namespaces.
+  Missing, corrupted and correctly hashed but invalid JSON inputs still fail.
+  This removes repeated input parsing within a listing; full recovery, payload
+  loading, large-backup memory and power-loss limits remain open.

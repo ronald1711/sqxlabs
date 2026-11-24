@@ -68,9 +68,13 @@ impl Archive {
         let run=RunRecord{schema:1,engine_id,dataset_id,strategy_id,request,result};
         self.write_blob("runs",&encode(&run)?)
     }
-    pub fn load(&self,id:&str)->Result<ResearchBundle,String>{
+    fn read_run(&self,id:&str)->Result<RunRecord,String>{
         let run:RunRecord=serde_json::from_slice(&self.read_blob("runs",id)?).map_err(|e|e.to_string())?;
         if run.schema!=1{return Err("unsupported research archive schema".into());}
+        Ok(run)
+    }
+    pub fn load(&self,id:&str)->Result<ResearchBundle,String>{
+        let run=self.read_run(id)?;
         let dataset=serde_json::from_slice(&self.read_blob("datasets",&run.dataset_id)?).map_err(|e|e.to_string())?;
         let strategy=serde_json::from_slice(&self.read_blob("strategies",&run.strategy_id)?).map_err(|e|e.to_string())?;
         Ok(ResearchBundle{run_id:id.into(),run,dataset,strategy})
@@ -78,10 +82,21 @@ impl Archive {
     pub fn list(&self)->Result<Vec<String>,String>{
         let dir=self.root.join("runs");if !dir.exists(){return Ok(Vec::new());}
         let mut ids=Vec::new();
+        // Immutable inputs are shared by many trial records. Revalidate each
+        // referenced object once per listing, never cache across calls or kinds.
+        let mut validated=std::collections::BTreeSet::new();
         for entry in fs::read_dir(dir).map_err(|e|e.to_string())? {
             let path=entry.map_err(|e|e.to_string())?.path();
             if path.extension().and_then(|v|v.to_str())!=Some("json"){continue;}
-            if let Some(id)=path.file_stem().and_then(|v|v.to_str()).filter(|id|valid_id(id)) {self.load(id)?;ids.push(id.into());}
+            if let Some(id)=path.file_stem().and_then(|v|v.to_str()).filter(|id|valid_id(id)) {
+                let run=self.read_run(id)?;
+                for (kind,input_id) in [("datasets",run.dataset_id),("strategies",run.strategy_id)]{
+                    if validated.insert((kind,input_id.clone())){
+                        let _:Value=serde_json::from_slice(&self.read_blob(kind,&input_id)?).map_err(|e|e.to_string())?;
+                    }
+                }
+                ids.push(id.into());
+            }
         }
         ids.sort();Ok(ids)
     }

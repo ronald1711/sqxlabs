@@ -69,3 +69,39 @@ fn retained_engine_rejects_symlink(){
     assert!(a.retain_engine(b"engine",&id).unwrap_err().contains("regular file"));
     assert_eq!(a.engine_retention(&id)["status"],"unverified");
 }
+
+#[test]
+fn listing_shared_inputs_revalidates_each_call_and_rejects_missing_or_invalid_blobs(){
+    let temp=Temp::new();let archive=Archive::new(&temp.0);
+    let dataset=json!({"bars":(0..5000).map(|i|json!([i,1.1,1.101,1.099,1.1,10])).collect::<Vec<_>>()});
+    let mut expected=Vec::new();
+    for trial in 0..128{expected.push(archive.save("engine-test".into(),dataset.clone(),json!({"name":"shared control"}),json!({"trial":trial}),json!({"net":trial})).unwrap());}
+    expected.sort();
+    let started=std::time::Instant::now();assert_eq!(archive.list().unwrap(),expected);
+    eprintln!("128-record shared-input inspection: {:?}",started.elapsed());
+    let record=archive.load(&expected[0]).unwrap();
+    for (kind,id) in [("datasets",&record.run.dataset_id),("strategies",&record.run.strategy_id)]{
+        let path=temp.0.join(kind).join(format!("{id}.json"));let original=std::fs::read(&path).unwrap();
+        std::fs::write(&path,b"{}").unwrap();assert!(archive.list().unwrap_err().contains("integrity"));
+        std::fs::write(&path,&original).unwrap();assert_eq!(archive.list().unwrap(),expected);
+        std::fs::remove_file(&path).unwrap();assert!(archive.list().is_err());
+        std::fs::write(&path,&original).unwrap();assert_eq!(archive.list().unwrap(),expected);
+    }
+    // A matching content hash alone must not make invalid JSON acceptable.
+    let invalid=b"not JSON";let invalid_id=content_id(invalid);
+    std::fs::write(temp.0.join("datasets").join(format!("{invalid_id}.json")),invalid).unwrap();
+    let mut bad=record.run;bad.dataset_id=invalid_id;
+    let bytes=serde_json::to_vec(&bad).unwrap();
+    std::fs::write(temp.0.join("runs").join(format!("{}.json",content_id(&bytes))),bytes).unwrap();
+    assert!(archive.list().is_err());
+}
+
+#[test]
+fn identical_dataset_and_strategy_hashes_still_require_both_objects(){
+    let temp=Temp::new();let archive=Archive::new(&temp.0);
+    let id=archive.save("engine-test".into(),json!({"same":true}),json!({"same":true}),json!({}),json!({})).unwrap();
+    let record=archive.load(&id).unwrap();assert_eq!(record.run.dataset_id,record.run.strategy_id);
+    assert_eq!(archive.list().unwrap(),vec![id]);
+    std::fs::remove_file(temp.0.join("strategies").join(format!("{}.json",record.run.strategy_id))).unwrap();
+    assert!(archive.list().is_err(),"dataset validation must not hide a missing strategy with the same hash");
+}
