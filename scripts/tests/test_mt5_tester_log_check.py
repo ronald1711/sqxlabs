@@ -8,7 +8,16 @@ from pathlib import Path
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mt5_tester_log_check import check
+from mt5_tester_log_check import check, check_report_settings
+
+
+def report(currency='USD', short=False):
+    rows = [('Expert:', 'constant_signal_exit'), ('Symbol:', 'SQX_EURUSD_V2'),
+            ('Period:', 'M1 (2026.01.05 - 2026.01.06)'),
+            ('Currency:', currency), ('Initial Deposit:', '10 000.00'),
+            ('Leverage:', '1:30'), ('Inputs:', 'ShortSide=' + str(short).lower()),
+            ('', 'SignalBar=1767571200'), ('', 'Lots=0.1')]
+    return '<table>' + ''.join('<tr><td>' + a + '</td><td><b>' + b + '</b></td></tr>' for a, b in rows) + '</table>'
 
 LONG = '''SQX_REFERENCE_INIT symbol=SQX_EURUSD short=0 signal_bar=1767571200 lots=0.10
 SQX_REFERENCE_ACCOUNT currency=USD balance=10000.00000000 leverage=30 margin_mode=2
@@ -24,6 +33,34 @@ SQX_REFERENCE_COMPLETE ok=1 balance=9999 equity=9999
 
 
 class TesterLogCheck(unittest.TestCase):
+    def test_html_account_settings_fail_closed(self):
+        for short in (False, True):
+            self.assertTrue(check_report_settings(report(short=short), short, 'SQX_EURUSD_V2')['report_settings_match'])
+        for html in [report('profit in pips'), report('EUR'), '', report() + report(),
+                     report().replace('Currency:', 'Valuta:'),
+                     report().replace('Lots=0.1', 'Lots=1'), report(short=True),
+                     report().replace('1:30', '1:500')]:
+            with self.subTest(html=html[:80]), self.assertRaises(ValueError):
+                check_report_settings(html, symbol='SQX_EURUSD_V2')
+
+    def test_html_cli_rejects_pips_even_when_log_matches(self):
+        script = Path(__file__).resolve().parents[1] / 'mt5_tester_log_check.py'
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / 'tester.log'
+            html = Path(directory) / 'report.html'
+            log.write_text(LONG.replace('SQX_EURUSD', 'SQX_EURUSD_V2'))
+            for currency, code in [('USD', 0), ('profit in pips', 1)]:
+                html.write_text(report(currency), encoding='utf-16')
+                run = subprocess.run([sys.executable, str(script), str(log), '--symbol', 'SQX_EURUSD_V2', '--report', str(html)], capture_output=True, text=True)
+                self.assertEqual(run.returncode, code, run.stderr)
+                result = json.loads(run.stdout)
+                if code:
+                    self.assertEqual(result['status'], 'rejected')
+                else:
+                    self.assertTrue(result['report_settings_match'])
+                    self.assertFalse(result['report_deals_checked'])
+                    self.assertFalse(result['sqxlabs_parity_verified'])
+
     def test_reported_long_and_short_arithmetic(self):
         result = check(LONG)
         self.assertEqual(result['status'], 'reported_baseline_values_match')

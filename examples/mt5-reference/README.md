@@ -112,4 +112,28 @@ volume_step=0.01 had applied. V2 sets maximum, step and minimum in that order,
 checks volume readback and reports each failing property/session immediately.
 It creates a fresh `SQX_EURUSD_V2`, leaving the partial original untouched.
 Use that symbol in the tester and `--symbol SQX_EURUSD_V2` in the log checker.
-V2 compilation and runtime success still require the user's terminal check.
+The user's subsequent setup screenshot reports 240 bars, 960 ticks and matched
+tick/bar readback for V2. This supports successful setup execution, but does not
+establish source/binary provenance or execution parity.
+
+### HTML account-setting gate (2026-11-24)
+
+The first two user-supplied single-test HTML reports match the expected long and
+short entry/exit prices and times. Both explicitly report **Currency: profit in
+pips**, however. They are rejected for USD account validation: matching -1/-3
+numbers in that mode do not establish dollar PnL, commission or swap handling.
+Repeat the two tests with profit-in-pips disabled and USD selected; retain the
+original reports separately. Raw reports remain private in `work/`.
+
+Supply the English HTML report alongside each single-run journal:
+
+```sh
+python3 scripts/mt5_tester_log_check.py long.log --symbol SQX_EURUSD_V2 --report long.html
+python3 scripts/mt5_tester_log_check.py short.log --symbol SQX_EURUSD_V2 --short --report short.html
+```
+
+The added gate checks explicit report account/input settings and rejects pips
+mode, missing/duplicate settings and unsupported layouts. It does not inspect
+HTML deals or prove that the report and journal came from the same execution.
+Those limitations remain explicit; `report_settings_match` is false when no
+report is supplied, and SqxLabs parity and tick provenance remain unverified.

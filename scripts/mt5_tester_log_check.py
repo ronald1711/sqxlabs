@@ -11,6 +11,60 @@ import hashlib
 import json
 from pathlib import Path
 import re
+from html.parser import HTMLParser
+
+
+def check_report_settings(text, short=False, symbol="SQX_EURUSD"):
+    """Check the English HTML report's explicit settings, not its provenance.
+
+    A matching journal alone cannot establish that profit-in-pips was disabled.
+    Unknown/localized layouts fail closed; HTML is parsed as data, never rendered.
+    """
+    class Rows(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.rows = []
+            self.row = None
+            self.cell = None
+
+        def handle_starttag(self, tag, attrs):
+            if tag == 'tr':
+                self.row = []
+            elif tag in ('td', 'th'):
+                self.cell = []
+
+        def handle_data(self, data):
+            if self.cell is not None:
+                self.cell.append(data)
+
+        def handle_endtag(self, tag):
+            if tag in ('td', 'th') and self.cell is not None:
+                if self.row is not None:
+                    self.row.append(' '.join(''.join(self.cell).split()))
+                self.cell = None
+            elif tag == 'tr' and self.row is not None:
+                self.rows.append(self.row)
+                self.row = None
+
+    if symbol not in {'SQX_EURUSD', 'SQX_EURUSD_V2'}:
+        raise ValueError('Unsupported reference symbol')
+    parser = Rows()
+    parser.feed(text)
+    parser.close()
+    expected = {
+        'Expert:': 'constant_signal_exit', 'Symbol:': symbol,
+        'Period:': 'M1 (2026.01.05 - 2026.01.06)',
+        'Currency:': 'USD', 'Initial Deposit:': '10 000.00', 'Leverage:': '1:30',
+        'Inputs:': 'ShortSide=' + str(short).lower(),
+    }
+    for key, value in expected.items():
+        matches = [r for r in parser.rows if r and r[0] == key]
+        if matches != [[key, value]]:
+            raise ValueError('Report setting missing, duplicated or different: ' + key + ' expected ' + value)
+    inputs = [r[1] for r in parser.rows if len(r) == 2 and r[0] == '' and '=' in r[1]]
+    if inputs != ['SignalBar=1767571200', 'Lots=0.1']:
+        raise ValueError('Report input settings differ from baseline')
+    return {'report_settings_match': True, 'report_deals_checked': False}
 
 
 def check(text, short=False, symbol="SQX_EURUSD"):
@@ -94,13 +148,20 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('log', type=Path)
     parser.add_argument('--short', action='store_true')
+    parser.add_argument('--report', type=Path, help='English HTML report from the same run; checks explicit account/input settings')
     parser.add_argument('--symbol', choices=['SQX_EURUSD', 'SQX_EURUSD_V2'], default='SQX_EURUSD')
     args = parser.parse_args()
     data = args.log.read_bytes()
     try:
         text = data.decode('utf-16' if data.startswith((b'\xff\xfe', b'\xfe\xff')) else 'utf-8-sig')
         result = check(text, args.short, args.symbol)
-    except (ValueError, UnicodeError) as error:
+        result['report_settings_match'] = False
+        if args.report:
+            report = args.report.read_bytes()
+            report_text = report.decode('utf-16' if report.startswith((b'\xff\xfe', b'\xfe\xff')) else 'utf-8-sig')
+            result.update(check_report_settings(report_text, args.short, args.symbol))
+            result['report_sha256'] = hashlib.sha256(report).hexdigest()
+    except (ValueError, UnicodeError, OSError) as error:
         result = {'status': 'rejected', 'reason': str(error)}
     result['log_sha256'] = hashlib.sha256(data).hexdigest()
     print(json.dumps(result, indent=2))
