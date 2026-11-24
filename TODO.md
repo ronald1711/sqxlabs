@@ -62,8 +62,8 @@ remaining execution assumptions and unsupported cases are visible.
 
 - [x] Verify baseline GitHub Actions run 45357592150 for Linux/macOS and
   debug/release, including profile parity. Commit: e832c2f.
-- [ ] Push and independently verify the expanded MT5/reference changes; baseline
-  CI success does not cover newer local work.
+- [x] Push and independently verify the expanded MT5/reference changes. Commit
+  156c0d7 passed all four jobs and both profile comparisons in run 45358671142.
 - [ ] Fix any platform-specific failures exposed by those runs.
 - [ ] Configure successful checks as required branch protections/ruleset checks.
 - [ ] Establish a versioned release/artifact retention procedure: archive replay
@@ -93,8 +93,9 @@ remaining execution assumptions and unsupported cases are visible.
 
 ## Current verified baseline
 
-- Local debug and release workspace gates: 368 Rust tests, 16 frontend scripts,
-  four Python exporter tests and successful workspace builds.
+- Local debug and release workspace gates: 379 Rust tests, 16 frontend scripts,
+  twelve Python tests, independent eight-case arithmetic/future-mutation checks
+  and successful workspace builds. Remote Linux/macOS gates passed for 156c0d7.
 - Additional recovery tests passed after the final memory/test-isolation changes.
 - Earlier debug/release parity fixtures cover four execution scenarios and two
   seeded evolution runs; this is internal determinism evidence, not broker parity.

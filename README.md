@@ -617,3 +617,44 @@ compares earlier entry evidence, settlements and tick-timed account snapshots.
 At least one terminal result must change, so an ineffective mutation cannot pass.
 The original capture is preserved. This is a bounded regression, not a general
 proof against every possible look-ahead mechanism.
+
+### Restartable MT5 window recording
+
+Use the SiliconMT5 venv Python to run `scripts/mt5_record.py --symbols
+EURUSD,USDJPY,EURJPY --server TickmillEU-Demo --broker-start BROKER_EPOCH_SECONDS
+--windows 10 --out RECORDING_DIRECTORY`. Windows default to one minute, with
+60 seconds of preceding conversion ticks. Restart with the exact same start,
+symbols, server, window and warmup settings; the immutable registry derives the
+next window from committed records. `--follow` waits for newly closed windows,
+bounded by `--windows` for each invocation. Without it, an unavailable next window
+returns an explicit waiting status. The bridge is local and read-only.
+
+Each capture is stored by SHA-256 before its commit record is published. A process
+failure between these writes leaves an orphan capture but does not advance the
+cursor. Startup verifies committed hashes, continuity and account context. One
+writer holds an OS lock; missing candles, corrupt records or changed configuration
+stop recording. ConnectionError, TimeoutError and EOFError trigger bounded reconnect attempts
+(default 3, configurable with --reconnect-attempts 0–10), with backoff up to
+30 seconds. The same uncommitted window is retried. Other validation/storage
+errors stop recording. Exhausted retries require restarting the command.
+Trading-calendar gaps and long-duration live validation remain unfinished. This is closed-window polling, not a certified lossless tick
+stream. Power-loss durability and deletion of a final record are not certified.
+
+Export a committed recording range offline with `python3
+scripts/mt5_recording_export.py --journal RECORDING_DIRECTORY --broker-start START
+--broker-end END --out EXPORT_DIRECTORY`. The writer may remain active: export snapshots atomic committed records and
+ignores uncommitted capture blobs. Select complete contiguous windows, at most
+one hour. The export verifies the journal, preserves each original capture and commit record, retains
+all main ticks in order, and uses only the first selected window's warmup to avoid
+duplicating overlapping warmup observations. The output is a content-addressed
+capture directory accepted by mt5_reference_check.py. It does not certify complete
+broker ticks or historical instrument settings; exact original responses are in
+recording_provenance, while the top-level response is explicitly reconstructed.
+
+Inspect an existing recording without connecting to MT5 or modifying its files:
+`python3 scripts/mt5_recording_status.py --journal RECORDING_DIRECTORY`.
+The JSON report verifies committed captures and shows window count, broker-clock
+range, next cursor, account context and instrument specifications. It can run while
+the recorder is active. It deliberately reports writer_status=not_observed: a
+recording directory or lock file alone does not prove a recorder is running.
+Corrupt or missing input produces integrity=not_verified and a nonzero exit code.

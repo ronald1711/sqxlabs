@@ -3510,3 +3510,16 @@ debug attempt caught an outdated UI-test expectation for points versus FX pips;
 the test now checks both spread and slippage units, and the full gates were rerun.
 Required branch-protection checks and remote verification of the expanded local
 changes remain open. Green CI is regression evidence, not broker certification.
+
+
+## Expanded code verified remotely
+
+Commit 156c0d7e620710586dca7cad8dfc5036c061d9bc publishes the MT5 account,
+clock-provenance, capture/reference, cross-check recovery and cost-unit changes.
+GitHub run https://github.com/ronald1711/sqxlabs/actions/runs/45358671142 completed
+successfully on that exact SHA: Linux/macOS debug/release, including independent
+synthetic reference checks and both profile comparisons. Local user databanks,
+projects, research archives, raw captures and work files were excluded from the
+commit. All explicit programme requirements remain subject to their separate
+evidence gates; remote CI success does not prove broker fill parity or live
+recording/papertrading readiness. Required branch checks are not yet configured.

@@ -395,3 +395,190 @@ terminal result must differ so the mutation cannot be vacuous. The run passed:
 work/mt5-validation/prefix-reference.log and prefix-derived/prefix-comparison.json.
 This covers one late price mutation and the eight declared strategies, not the
 whole indicator catalog, higher-timeframe logic or every look-ahead pathway.
+
+## Restartable recording journal
+
+A local append-only journal now binds recording configuration, window continuity,
+capture hashes and account context. Capture files are published before commit
+records; the cursor is derived from committed records rather than a separately
+mutable offset. OS locking allows one writer and releases after process exit.
+Tests cover corruption, conflicting configuration/account, missing middle windows,
+write failure and actual child-process exit after blob publication before commit.
+All 15 Python tests passed (capture-journal-tests.log).
+
+The read-only recording CLI captured two one-minute windows from the existing
+historical sample for EURUSD/USDJPY/EURJPY. A separate invocation resumed at the
+third window: [1795515300,1795515360), without repeating the first two. Logs:
+recording-first.log and recording-resume.log; journal: recording-journal/.
+--follow supports bounded waiting for closed windows, but this real-MT5 evidence
+is historical catch-up/restart, not a long-running live-stream validation.
+Automatic reconnect, calendar-aware gaps, final-record deletion detection, power
+loss, live interruption and downstream papertrading comparison remain open.
+
+
+## Bounded reconnect and first live closed-window capture
+
+The recorder reconnects only for ConnectionError/TimeoutError/EOFError raised by
+bridge reads/initialization. Default three retries with capped backoff; success
+resets the retry counter. Data validation and journal/storage errors escape the
+retry loop. Tests prove same-window retry, one commit, preserved cursor on failure,
+closed own clients, retry exhaustion and waiting until a window closes. All 18
+Python tests pass (recorder-reconnect-tests.log). These transport failures are
+injected tests, not deliberate disruption of the shared user's MT5 bridge.
+
+A real --follow invocation observed an open minute, reported waiting without
+advancing, then captured [1795517760,1795517820) broker seconds for EURUSD/USDJPY/
+EURJPY after closure. Committed capture:
+2767f12d05306d02eaccd437e257d774f353368e3ed7c7b2bc02d3bda2adac85.
+Evidence: live-recording-first.log and live-recording-journal/.
+This establishes one live window, not long-duration completeness, actual network
+outage recovery, power-loss durability or papertrading reconciliation.
+
+## Account context across reconnects
+
+The recorder now reads server, account currency, leverage and trade mode before
+reading each window (including after reconnect), comparing them with the committed
+journal context or the initial context of the current invocation. A changed
+context stops recording before fetching history; the acquired payload must also
+match that context before publication. This compares economic context, not account
+login identity. Nineteen Python tests pass, including a transport failure followed
+by a changed account currency: no second history request and no cursor advance.
+The real local journal resumed successfully at [1795515360,1795515420) with the
+unchanged context (recording-account-resume.log). The user's account was not changed
+to exercise the negative case; that transition is covered by an injected test.
+
+## Frozen recording configuration
+
+The journal now snapshots configuration bytes at construction and returns copies
+of its configuration. Caller mutations, including nested symbol-list changes,
+cannot silently alter an active writer. Every verification also checks the stored
+configuration bytes; a changed file stops publication before a new record is
+committed. The regression mutates both caller data and the on-disk configuration
+and confirms the original window contract and record count remain intact.
+All 20 Python tests pass (recorder-config-tests.log). This detects configuration
+changes; it does not add authentication or detect deletion of a final record.
+
+## Missing recording configuration
+
+Opening a nonempty recording directory without config.json now fails instead of
+recreating configuration from current command-line arguments. This prevents a
+missing context file from silently becoming a new recording, including when the
+caller proposes a different start time. The test confirms no replacement file is
+created and that restoring the exact original configuration permits continuation.
+All 21 Python tests pass (recorder-missing-config-tests.log). A genuinely new empty
+directory, or only a stale temporary initialization file, can still initialize.
+
+## Real live-recorder interruption and restart
+
+A controlled probe started the recorder against the local MT5 bridge and observed
+waiting_for_closed_window. It verified that the recorder process was still alive,
+terminated only that process, checked that no window record existed, and launched
+a new recorder with the identical configuration. After the minute closed, exactly
+one record for the original pending window was committed. The shared MT5 bridge
+still answered another client's quote request without reinitialization afterward.
+Evidence: work/mt5-validation/live-restart-probe.log and
+live-restart-probe/result.json. This verifies one real recorder-process interruption
+while awaiting live data, complementing the injected between-write failure test.
+It does not establish broker outage recovery, long-duration tick completeness,
+power-loss durability, or papertrading parity. No orders or terminal shutdown were
+used by the probe.
+
+## Instrument-context continuity
+
+The journal now requires captured instrument specifications and compares them
+across all committed windows and each new append. A changed contract/tick/volume
+or currency specification rejects the next window, including after restart.
+The collector additionally freezes each symbol's specification before history
+reads and compares it after reading, rejecting changes during acquisition.
+Tests cover both within-read drift and a changed contract size after reopening.
+All 23 Python tests pass (recorder-spec-tests.log). The real existing journal
+also resumed with unchanged specifications (recording-spec-resume.log).
+This compares the captured metadata fields; it does not certify historical
+instrument settings for dates before those metadata observations.
+
+## Recording-to-research export
+
+The offline exporter verifies the locked journal and exports a specified range of
+whole committed windows (maximum one hour). It embeds original captures and
+commit records, concatenates main ticks without timestamp deduplication and keeps
+only the initial selected warmup. Corrupt input fails before output publication.
+Tests cover subset boundaries, missing/uncommitted ranges, same-millisecond tick
+order, original endpoint responses, idempotency and corrupt source rejection.
+All 25 Python tests pass (recording-export-tests.log).
+
+The five recorded historical windows [1795515180,1795515480) exported as capture
+f98bcd58bb601a265af2471f5028dc7dec8ba3bb63a4a84ca22bc4cb7ebfbc24 under
+work/mt5-validation/recording-exports. All eight independent reference cases and
+archive replays passed on that export (recording-reference.log). This connects
+recorded chunks to reproducible research, but the full conversion/source recording
+provenance is not yet automatically embedded in every engine archive or dashboard
+route. Export currently requires stopping the writer; online snapshots remain open.
+
+
+## Export snapshots while recording continues
+
+The exporter now reads a finite snapshot of atomic commit-record filenames,
+verifies their capture hashes/continuity/account/specifications, and retains the
+verified payloads rather than rereading them for assembly. Configuration is
+checked before and after scanning. It does not take the writer lock or publish
+configuration. The single-writer rule remains unchanged. Newly published records
+outside the snapshot are considered only by a subsequent export; orphan capture
+blobs never advance the snapshot horizon. A concurrent or external inconsistency
+fails validation rather than producing a partial dataset.
+The active-writer regression publishes an orphan blob, rejects its uncommitted
+range, exports the committed prefix, commits the next window and confirms the
+first immutable export remains unchanged. All 26 Python tests pass
+(recording-snapshot-tests.log). This supersedes the earlier stop-writer restriction;
+long-duration/concurrent load and power-loss validation remain open.
+
+## Separate-process recording/export validation
+
+A regression now holds the writer lock in a separate live child process. The
+reader exports the first committed window while that writer remains alive,
+rejects the still-uncommitted second window, then requests its publication and
+exports both without stopping the writer. The earlier export remains a one-window
+snapshot. Handshake reads have explicit timeouts and the test cleans up its child.
+All 27 Python tests pass (recording-process-snapshot-tests.log). This tests
+cross-process publication boundaries, not sustained throughput or power failure.
+
+## Recorder failure reporting
+
+Expected data, transport and filesystem failures now produce a structured
+recording_failed diagnostic and nonzero CLI exit instead of a raw traceback.
+An end-to-end subprocess test provides an initialized read-only bridge stub that
+returns no history. It verifies explicit failure, no reconnect loop, no success
+receipt, no committed window and an unchanged journal cursor after reopening.
+All 28 Python tests pass (recorder-empty-history-tests.log). A failed response is
+not interpreted as an empty-but-complete market interval or silently skipped.
+
+## Instrument metadata observation times
+
+New captures explicitly timestamp both symbol-info reads around history acquisition
+in host UTC milliseconds. The metadata scope states that these are current terminal
+observations, not proof of historical specification applicability. Recording exports
+retain one observation record per selected window; older captures without these
+fields produce null entries instead of inferred dates. Observation timestamps are
+outside the economic specification object, so successive observations do not trigger
+false instrument-change rejections. All 28 Python regressions pass
+(spec-observation-tests.log). Historical contract-specification validation remains open.
+
+## Read-only recording status
+
+The status command uses the verified committed snapshot path without opening a
+writer lock or MT5 connection. It reports committed coverage in broker time and
+next cursor, with explicit non-certification of liveness/tick completeness. A
+subprocess regression checks the report while a writer holds its lock, compares
+all file contents before/after, then corrupts a capture and requires nonzero exit,
+no success output and integrity=not_verified. All 29 Python tests pass
+(recording-status-tests.log). The actual historical journal reports five committed
+windows [1795515180,1795515480) (recording-status.json). Dashboard display and
+active-process monitoring remain separate unfinished work.
+
+## Export-range validation
+
+Snapshot range validation now lives in the journal API, so callers cannot bypass
+whole-window, integer, start-boundary and one-hour limits. The exporter validates
+stored configuration before range arithmetic; a zero window width now fails with
+a configuration error rather than division by zero. Tests confirm rejection
+without output publication or cursor changes. All 31 Python tests pass
+(recording-range-tests.log). This is validation coverage, not a scale guarantee.

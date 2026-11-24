@@ -83,3 +83,13 @@ class CaptureTests(unittest.TestCase):
             return value
         client.account_info=account
         with self.assertRaisesRegex(ValueError,'account context changed'):module.capture(client,['EURUSD'],120,180)
+
+    def test_instrument_change_during_read_rejects_capture(self):
+        module=self.module();client=self.client();original=client.symbol_info;calls=[]
+        def info(symbol):
+            value=original(symbol);calls.append(symbol)
+            if len(calls)>1:value.trade_contract_size=1000
+            return value
+        client.symbol_info=info
+        with self.assertRaisesRegex(ValueError,'specifications changed during capture'):
+            module.capture(client,['EURUSD'],120,180)

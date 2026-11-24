@@ -30,10 +30,13 @@ def capture(client, symbols, start, end, warmup_seconds=60):
     identity = {k: getattr(account, k) for k in ('server', 'currency', 'leverage', 'trade_mode')}
     markets = []
     for symbol in symbols:
+        spec_before_start=time.time_ns() // 1_000_000
         info = client.symbol_info(symbol)
+        spec_before_end=time.time_ns() // 1_000_000
         latest = client.symbol_info_tick(symbol)
         if info is None or latest is None:
             raise ValueError(f'{symbol}: symbol metadata or latest tick unavailable')
+        specification={k:getattr(info,k) for k in ('name','digits','point','trade_contract_size','trade_tick_size','volume_min','volume_max','volume_step','currency_base','currency_profit','currency_margin','trade_calc_mode')}
         if end > int(latest.time) // 60 * 60:
             raise ValueError(f'{symbol}: requested window is not closed according to latest broker tick')
         started = time.time_ns() // 1_000_000
@@ -59,8 +62,15 @@ def capture(client, symbols, start, end, warmup_seconds=60):
             raise ValueError(f'{symbol}: ticks outside requested window')
         bar_csv = 'timestamp_broker,open,high,low,close,volume\n' + ''.join(bar_lines(bars))
         tick_csv = 'timestamp_broker_ms,bid,ask\n' + ''.join(tick_lines(ticks))
-        markets.append({'symbol': symbol, 'spec': {k: getattr(info, k) for k in
-            ('name','digits','point','trade_contract_size','trade_tick_size','volume_min','volume_max','volume_step','currency_base','currency_profit','currency_margin','trade_calc_mode')},
+        spec_after_start=time.time_ns() // 1_000_000
+        after_info=client.symbol_info(symbol)
+        spec_after_end=time.time_ns() // 1_000_000
+        if after_info is None or specification!={k:getattr(after_info,k) for k in specification}:
+            raise ValueError(f'{symbol}: instrument specifications changed during capture')
+        markets.append({'symbol': symbol, 'spec': specification,
+            'spec_observation':{'before_history_host_utc_ms':[spec_before_start,spec_before_end],
+                'after_history_host_utc_ms':[spec_after_start,spec_after_end],
+                'scope':'Current terminal metadata observed around acquisition; historical applicability to the requested market window is not certified.'},
             'request_host_utc_ms': [started, time.time_ns() // 1_000_000],
             'raw_bars': raw_bars, 'raw_ticks': raw_ticks, 'raw_tick_response': response_ticks, 'raw_warmup_ticks': rows(warmup),
             'warmup_ticks_csv':'timestamp_broker_ms,bid,ask\n'+''.join(tick_lines(warmup)), 'bars_csv': bar_csv, 'ticks_csv': tick_csv})
