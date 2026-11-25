@@ -18,26 +18,33 @@ use sqx_metrics::{compute as compute_metrics, Metrics};
 use sqx_optimizer::{rank, random_strategy, Fitness, GeneratorConfig};
 use sqx_strategy::Strategy;
 
+mod diagnostics;
 mod generation_archive;
 mod research_archive;
 
 const PROTOCOL: &str = "2024-11-05";
 
 fn main() {
+    let log_config=match diagnostics::Config::from_env(){Ok(c)=>c,Err(error)=>{eprintln!("{error}");std::process::exit(2);}};
+    let mut diagnostic=diagnostics::Log::new(log_config);
+    diagnostic.event(0,"process",None,"started",0);
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
     for line in stdin.lock().lines() {
         let line = match line {
             Ok(l) => l,
-            Err(_) => break,
+            Err(_) => {diagnostic.event(0,"process",None,"stdin_error",0);break;},
         };
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
+        let request_sequence=diagnostic.request();
+        let started=std::time::Instant::now();
         let req: Value = match serde_json::from_str(line) {
             Ok(v) => v,
             Err(_) => {
+                diagnostic.event(request_sequence,"parse",None,"parse_error",started.elapsed().as_millis());
                 writeln!(stdout, "{}", error_json(Value::Null, -32700, "parse error")).ok();
                 stdout.flush().ok();
                 continue;
@@ -46,6 +53,9 @@ fn main() {
         let id = req.get("id").cloned().unwrap_or(Value::Null);
         let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("");
         let has_id = req.get("id").is_some();
+        let tool=req["params"]["name"].as_str();
+        diagnostic.event(request_sequence,method,tool,"started",0);
+        let mut status="completed";
         match method {
             "initialize" => send(&mut stdout, id, json!({
                 "protocolVersion": PROTOCOL,
@@ -57,15 +67,19 @@ fn main() {
             "tools/call" => {
                 let params = req.get("params").cloned().unwrap_or(json!({}));
                 let result = call_tool(&params);
+                if result["isError"].as_bool()==Some(true){status="tool_error";}
                 send(&mut stdout, id, result);
             }
             _ => {
+                status="unsupported_method";
                 if has_id {
                     send_error(&mut stdout, id, -32601, "method not found");
                 }
             }
         }
+        diagnostic.event(request_sequence,method,tool,status,started.elapsed().as_millis());
     }
+    diagnostic.event(0,"process",None,"stopped",0);
 }
 
 fn send(out: &mut std::io::Stdout, id: Value, result: Value) {
