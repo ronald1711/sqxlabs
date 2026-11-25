@@ -26,7 +26,7 @@
     "status": "Explicit synthetic research assumptions, not verified Tickmill fees"
   },
   "requirements": [
-    "Use time-aligned USD-to-EUR conversion quotes; never reuse a snapshot conversion rate across history.",
+    "For EURUSD/EUR, use the available execution or valuation price for direct-pair conversion. Other currency paths require time-aligned observations; never reuse a snapshot rate across history.",
     "Persist effective costs and account settings with every run.",
     "After changing settings, start a new study; retain original archived inputs."
   ],
@@ -52,5 +52,5 @@
     "Historical spreads and slippage",
     "Long/short swap schedule and rollover conventions"
   ],
-  "activation": "Specification only; not automatically applied to running dashboard settings"
+  "activation": "Development dashboard Settings offers explicit Apply; no automatic activation, market selection or validation claim."
 }
