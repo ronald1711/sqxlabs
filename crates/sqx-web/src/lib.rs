@@ -730,6 +730,22 @@ mod tests {
     }
 
     #[test]
+    fn quick_search_retains_rejected_executions_and_recovers_without_data(){
+        let state=research_state();state.store.write().unwrap().series[0].bars=(0..40).map(|i|Bar::new(i*60000,1.1,1.1,1.1,1.1,1.0)).collect();
+        let request=json!({"symbol":"EURUSD","count":4,"seed":123,"allow_data_gaps":true,"request_key":"quick-search-recovery"});
+        let response:serde_json::Value=serde_json::from_str(&generate_json(&request.to_string(),&state)).unwrap();assert!(response.get("error").is_none(),"{response}");assert!(response["results"].as_array().unwrap().is_empty());
+        let id=response["archive"]["started_run_id"].as_str().unwrap();let completion=response["archive"]["run_id"].as_str().unwrap();let done=state.archive.load(completion).unwrap();let start=state.archive.load(id).unwrap();
+        let builds=done.run.result["report"]["builds"].as_array().unwrap();assert_eq!(builds.len(),4);
+        let mut rng=rand::rngs::StdRng::seed_from_u64(123);let generator:GeneratorConfig=serde_json::from_value(start.strategy["generator"].clone()).unwrap();
+        for (i,row) in builds.iter().enumerate(){assert_eq!(row["evaluation"]["strategy"],json!(random_strategy(&mut rng,&format!("s{i:04}"),&generator)));assert_eq!(row["selected"],false);assert_eq!(row["execution"]["equity"].as_array().unwrap().len(),40);}
+        let backup=sqx_project::pipeline_archive::export(&state.archive,id).unwrap();let restored=research_state();restored.store.write().unwrap().series.clear();sqx_project::pipeline_archive::import(&restored.archive,backup).unwrap();std::fs::remove_dir_all(state.archive.root()).unwrap();
+        let repeated:serde_json::Value=serde_json::from_str(&generate_json(&request.to_string(),&restored)).unwrap();assert_eq!(repeated["recovery_required"],true);assert_eq!(repeated["archive"]["started_run_id"],id);
+        let replay=sqx_project::pipeline_archive::recover(&restored.archive,id,true).unwrap();assert_eq!(replay.completion_id,completion);assert_eq!(json!(replay.report),done.run.result["report"]);assert_eq!(replay.appended,0);
+        assert!(reserve_web_research_request("web_optimization",&request,&restored).unwrap_err().contains("different inputs"));
+        std::fs::remove_dir_all(restored.archive.root()).unwrap();
+    }
+
+    #[test]
     fn dashboard_pipeline_no_survivors_remains_a_complete_saved_search(){
         let state=research_state();state.store.write().unwrap().series[0].bars=(0..20).map(|i|Bar::new(i*60000,1.1,1.1,1.1,1.1,1.0)).collect();
         let request=json!({"symbol":"EURUSD","count":2,"keep":1,"seed":123,"allow_data_gaps":true,"request_key":"pipeline-no-survivors"});
@@ -1955,7 +1971,7 @@ fn research_data_quality(series:&SymbolSeries, request:&serde_json::Value, as_of
 fn research_restore_json(body:&str,state:&State)->String {
     let result=(||->Result<String,String>{
         let bundle:sqx_project::archive::ResearchBundle=serde_json::from_str(body).map_err(|e|e.to_string())?;
-        let _request_guard=if bundle.run.request["research_kind"]=="cli_pipeline_started" && matches!(bundle.run.request["origin"].as_str(),Some("web_robustness"|"web_portfolio"|"web_portfolio_combination"|"web_optimization"|"web_pipeline")) {
+        let _request_guard=if bundle.run.request["research_kind"]=="cli_pipeline_started" && matches!(bundle.run.request["origin"].as_str(),Some("web_robustness"|"web_portfolio"|"web_portfolio_combination"|"web_optimization"|"web_pipeline"|"web_generation")) {
             let (guard,existing)=reserve_web_research_request(bundle.run.request["origin"].as_str().unwrap(),&bundle.run.request["web_request"],state)?;
             if existing.is_some_and(|id|id!=bundle.run_id){return Err("Restored stress-test request key conflicts with an existing study".into());}
             guard
@@ -1977,7 +1993,7 @@ fn reserve_web_research_request(origin:&str,value:&serde_json::Value,state:&Stat
     let mut existing=None;
     for id in state.archive.list()? {
         let record=state.archive.load(&id)?;
-        if record.run.request["research_kind"]=="cli_pipeline_started" && matches!(record.run.request["origin"].as_str(),Some("web_robustness"|"web_portfolio"|"web_portfolio_combination"|"web_optimization"|"web_pipeline")) && record.run.request["web_request"]["request_key"]==key {
+        if record.run.request["research_kind"]=="cli_pipeline_started" && matches!(record.run.request["origin"].as_str(),Some("web_robustness"|"web_portfolio"|"web_portfolio_combination"|"web_optimization"|"web_pipeline"|"web_generation")) && record.run.request["web_request"]["request_key"]==key {
             if record.run.request["origin"]!=origin || record.run.request["web_request"]!=*value{return Err("Research request key already belongs to different inputs or workflow".into());}
             if existing.replace(id).is_some(){return Err("Conflicting studies share this stress-test request key".into());}
         }
@@ -2663,11 +2679,15 @@ fn generate_json(body: &str, state: &State) -> String {
         Ok(r) => r,
         Err(e) => return json!({ "error": format!("{e}") }).to_string(),
     };
+    let val:serde_json::Value=serde_json::from_str(body).expect("request already parsed");
+    if !(1..=2000).contains(&req.count){return json!({"error":"count must be between 1 and 2000"}).to_string();}
+    let (creation_guard,existing)=match reserve_web_research_request("web_generation",&val,state){Ok(result)=>result,Err(error)=>return json!({"error":error}).to_string()};
+    if let Some(id)=existing{return json!({"recovery_required":true,"message":"This request already has a saved generation study. Inspect Saved research before retrying.","archive":{"started_run_id":id}}).to_string();}
     let series = match find_series(state, &req.symbol) {
         Some(s) => s,
         None => return json!({ "error": "no data" }).to_string(),
     };
-    let val:serde_json::Value=serde_json::from_str(body).expect("request already parsed");
+
     let quality=match research_data_quality(&series,&val,sqx_data::quality::now_ms()) {Ok(quality)=>quality,Err(error)=>return error.to_string()};
     let research_context=json!({"data_quality":quality,"data_gaps_acknowledged":val.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false),"scope":"Exploratory research; candidate selection and data reuse require separate final-test validation."});
     let inst = instrument_for(&series.symbol);
@@ -2687,29 +2707,19 @@ fn generate_json(body: &str, state: &State) -> String {
         param_ranges: req.param_ranges.into_iter().map(|r| (r.indicator, r.param, r.min, r.max)).collect(),
     };
     if let Err(error)=gen.validate(){return json!({"error":error}).to_string();}
-    let mut rng = rand::rngs::StdRng::seed_from_u64(req.seed);
-    let strategies: Vec<Strategy> = (0..count)
-        .map(|i| random_strategy(&mut rng, &format!("s{i:04}"), &gen))
-        .collect();
-
-    let scored = backtest_batch(&strategies, &series.bars, &inst, &cfg, pyp);
-    let ranked = rank(scored, Fitness::ProfitFactor, 5);
-    let rows: Vec<_> = ranked
-        .iter()
-        .take(20)
-        .map(|(s, m)| {
-            json!({
-                "name": s.name,"research_context":research_context,
-                "profit_factor": m.profit_factor,
-                "net_profit": m.net_profit,
-                "trades": m.number_of_trades,
-                "dd_pct": m.max_drawdown_pct,
-                "strategy": s
-            })
-        })
-        .collect();
-    databank_push(state, &rows);
-    json!({"research_context":research_context, "results": rows, "symbol": series.symbol }).to_string()
+    let pipeline=sqx_pipeline::Pipeline{name:"Dashboard quick search".into(),tasks:vec![sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::Generate{count,min_trades:5}}]};
+    let request=json!({"research_kind":"cli_pipeline_started","origin":"web_generation","attempt_id":format!("{:032x}",rand::random::<u128>()),"web_request":val,"config":cfg,"seed":req.seed,"periods_per_year":pyp});
+    let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,"normalization":series.normalization,"bars":series.bars,"source_context":research_context});
+    let started=match retained_engine_identity(state).and_then(|engine|state.archive.save(engine,dataset,json!({"pipeline":pipeline,"generator":gen}),request,json!({"status":"execution_not_recorded"}))){Ok(id)=>id,Err(error)=>return json!({"error":format!("Generation could not be archived: {error}")}).to_string()};
+    drop(creation_guard);
+    let recovered=match sqx_project::pipeline_archive::recover(&state.archive,&started,true){Ok(result)=>result,Err(error)=>return json!({"error":format!("Generation stopped: {error}. Inspect Saved research before retrying."),"archive":{"started_run_id":started}}).to_string()};
+    let receipt=json!({"started_run_id":started,"run_id":recovered.completion_id});
+    if !recovered.report.errors.is_empty(){return json!({"error":recovered.report.errors.join("; "),"research_context":research_context,"archive":receipt}).to_string();}
+    let rows:Vec<_>=recovered.report.databank.iter().take(20).filter_map(|strategy|recovered.report.builds.iter().find(|r|r.evaluation.strategy==*strategy).map(|row|{
+        let m=&row.evaluation.metrics;json!({"name":strategy.name,"research_context":research_context,"profit_factor":m.profit_factor,"net_profit":m.net_profit,"trades":m.number_of_trades,"dd_pct":m.max_drawdown_pct,"strategy":strategy,"source_run_id":receipt["run_id"],"source_started_run_id":started,"source_candidate_index":row.candidate_index})
+    })).collect();
+    databank_push(state,&rows);
+    json!({"research_context":research_context,"results":rows,"symbol":series.symbol,"archive":receipt}).to_string()
 }
 
 fn portfolio_json(body: &str, state: &State) -> String {

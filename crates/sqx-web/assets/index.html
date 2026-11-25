@@ -328,6 +328,7 @@
           <label class="muted">Seed</label>
           <input type="number" id="seed" value="42">
           <button id="btn-generate">Generate</button>
+          <button id="gen-new-request" hidden>Start a new search</button>
         </div>
         <div id="gen-results" class="muted">Click generate to backtest random strategies and rank them.</div>
       </div>
@@ -874,21 +875,40 @@ function researchNotice(context) {
   if(!context)return "";
   return (context.data_gaps_acknowledged ? "Data gaps explicitly allowed. " : "") + context.scope;
 }
-document.getElementById("btn-generate").onclick = async function() {
-  const count = Number(document.getElementById("count").value);
-  const seed = Number(document.getElementById("seed").value);
-  const box = document.getElementById("gen-results");
-  box.textContent = "Generating...";
-  const inputs=generatorInputs(box);if(!inputs)return;
-  const body = Object.assign({ count: count, seed: seed, symbol: selectedSymbol() }, inputs);
-  const d = await postJSON("/api/generate", JSON.stringify(body));
-  if (d.error) { box.innerHTML = "<span class=\"neg\">" + escapeHtml(d.error) + "</span>"; return; }
+let generationRequestPending=false;
+const generationPendingKey='sqx.pendingGeneration.v1';
+document.getElementById('gen-new-request').onclick=function(){
+  if(generationRequestPending)return;
+  localStorage.removeItem(generationPendingKey);this.hidden=true;
+  document.getElementById('gen-results').textContent='The next search uses current settings. This does not cancel an earlier search; inspect Builder → Saved research.';
+};
+async function runGeneration() {
+  const box=document.getElementById('gen-results'),button=document.getElementById('btn-generate'),fresh=document.getElementById('gen-new-request');
+  if(generationRequestPending)return;
+  generationRequestPending=true;button.disabled=true;
+  try{
+    let body;const pending=localStorage.getItem(generationPendingKey);
+    if(pending){body=JSON.parse(pending);if(!body||typeof body.request_key!=='string')throw Error('Stored request is invalid. Inspect Saved research before starting a new search.');}
+    else{
+      const inputs=generatorInputs(box);if(!inputs)return;
+      body=Object.assign({count:Number(document.getElementById('count').value),seed:Number(document.getElementById('seed').value),symbol:selectedSymbol()},inputs);
+      if(!body.symbol)throw Error('Load and select market data before generating strategies.');
+      body.request_key=crypto.randomUUID();localStorage.setItem(generationPendingKey,JSON.stringify(body));
+    }
+    fresh.hidden=false;box.textContent=pending?'Locating the saved search…':'Generating and saving candidates…';
+    let d;try{d=await postJSON('/api/generate',JSON.stringify(body));}
+    catch(error){box.textContent='The response could not be received. Retry to locate the same request, or inspect Builder → Saved research before starting a new search.';return;}
+    const id=d.archive&&d.archive.started_run_id;
+    const saved=id?' Saved search: '+id+'. Open Builder → Saved research to inspect, back up or resume. Replay checks repeatability, not independent correctness.':'';
+    if(id){localStorage.removeItem(generationPendingKey);fresh.hidden=true;refreshResearchRuns();}
+    if(d.recovery_required){box.textContent=(d.message||'This search already exists; inspect its saved status.')+saved;return;}
+    if(d.error){box.textContent=d.error+saved;return;}
   let rows = "<table><tr><th>Name</th><th>Profit factor</th><th>Net profit</th><th>Trades</th><th>DD %</th></tr>";
   d.results.forEach(function(r) {
     rows += "<tr><td>" + escapeHtml(r.name) + "</td><td class=\"" + cls(r.profit_factor - 1) + "\">" + fmt(r.profit_factor, 2) + "</td><td class=\"" + cls(r.net_profit) + "\">" + fmt(r.net_profit, 2) + "</td><td>" + fmt(r.trades, 0) + "</td><td>" + fmt(r.dd_pct, 2) + "</td></tr>";
   });
   rows += "</table>";
-  box.innerHTML = "<p>"+escapeHtml(researchNotice(d.research_context))+"</p>"+rows;
+  box.innerHTML = "<p>"+escapeHtml(researchNotice(d.research_context)+saved)+"</p>"+rows;
   refreshDatabank();
   box.querySelectorAll("tr").forEach(function(tr, i) {
     if (i === 0) return;
@@ -906,7 +926,10 @@ document.getElementById("btn-generate").onclick = async function() {
     td.appendChild(btn);
     tr.appendChild(td);
   });
-};
+  }catch(error){box.textContent=error.message||String(error);fresh.hidden=false;}
+  finally{generationRequestPending=false;button.disabled=false;}
+}
+document.getElementById('btn-generate').onclick=runGeneration;
 
 document.getElementById("btn-backtest").onclick = runBacktest;
 
