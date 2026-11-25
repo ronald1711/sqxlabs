@@ -328,6 +328,7 @@
           <label class="muted">Seed</label>
           <input type="number" id="seed" value="42">
           <button id="btn-generate">Generate</button>
+          <button id="gen-new-request" hidden>Start a new search</button>
         </div>
         <div id="gen-results" class="muted">Click generate to backtest random strategies and rank them.</div>
       </div>
@@ -449,7 +450,7 @@
           <input type="number" id="proj-count" value="300" min="1" max="2000">
           <label class="muted">Keep</label>
           <input type="number" id="proj-keep" value="20" min="1" max="200">
-          <button id="proj-run">Run pipeline</button>
+          <button id="proj-run">Run pipeline</button><button id="proj-new-request" class="secondary" hidden>Use current settings for a new study</button>
         </div>
         <pre id="proj-log" class="muted" style="white-space:pre-wrap; margin-top:12px;"></pre>
       </div>
@@ -474,6 +475,12 @@
         <select id="set-intrabar"><option value="adverse_first">Adverse extreme first (side-aware)</option><option value="favorable_first">Favorable extreme first (side-aware)</option><option value="high_first">Open → high → low → close</option><option value="low_first">Open → low → high → close</option></select>
         <p class="muted">Candles do not reveal the actual price sequence. Reports flag candles where the two OHLC paths differ. These scenarios are not mathematical worst/best bounds.</p>
         <label><input type="checkbox" id="set-compare-paths"> Compare all four complete backtest scenarios (additional computation)</label>
+        <h3>Provisional research profile</h3>
+        <p>EURUSD / EUR · €10,000 · maximum leverage 1:30. Costs below are research assumptions, not verified broker fees. Zero commission and financing mean those costs are excluded.</p>
+        <label for="eur-profile-scenario">Cost scenario</label>
+        <select id="eur-profile-scenario"><option value="baseline">Baseline: 2 pips spread, no extra slippage</option><option value="spread">Higher spread: 3 pips</option><option value="stress">Stress: 4 pips spread + 1 pip slippage per fill</option></select>
+        <button id="eur-profile-apply" type="button">Apply provisional EUR profile</button>
+        <p id="eur-profile-status" role="status">Apply this profile to the current settings, then adjust any value manually. Existing saved studies retain their original settings. This does not validate execution or change the selected market.</p>
         <h3>Account and broker assumptions</h3>
         <div class="row">
           <label for="set-currency">Account currency</label><input id="set-currency" value="USD" maxlength="3" size="4">
@@ -874,21 +881,40 @@ function researchNotice(context) {
   if(!context)return "";
   return (context.data_gaps_acknowledged ? "Data gaps explicitly allowed. " : "") + context.scope;
 }
-document.getElementById("btn-generate").onclick = async function() {
-  const count = Number(document.getElementById("count").value);
-  const seed = Number(document.getElementById("seed").value);
-  const box = document.getElementById("gen-results");
-  box.textContent = "Generating...";
-  const inputs=generatorInputs(box);if(!inputs)return;
-  const body = Object.assign({ count: count, seed: seed, symbol: selectedSymbol() }, inputs);
-  const d = await postJSON("/api/generate", JSON.stringify(body));
-  if (d.error) { box.innerHTML = "<span class=\"neg\">" + escapeHtml(d.error) + "</span>"; return; }
+let generationRequestPending=false;
+const generationPendingKey='sqx.pendingGeneration.v1';
+document.getElementById('gen-new-request').onclick=function(){
+  if(generationRequestPending)return;
+  localStorage.removeItem(generationPendingKey);this.hidden=true;
+  document.getElementById('gen-results').textContent='The next search uses current settings. This does not cancel an earlier search; inspect Builder → Saved research.';
+};
+async function runGeneration() {
+  const box=document.getElementById('gen-results'),button=document.getElementById('btn-generate'),fresh=document.getElementById('gen-new-request');
+  if(generationRequestPending)return;
+  generationRequestPending=true;button.disabled=true;
+  try{
+    let body;const pending=localStorage.getItem(generationPendingKey);
+    if(pending){body=JSON.parse(pending);if(!body||typeof body.request_key!=='string')throw Error('Stored request is invalid. Inspect Saved research before starting a new search.');}
+    else{
+      const inputs=generatorInputs(box);if(!inputs)return;
+      body=Object.assign({count:Number(document.getElementById('count').value),seed:Number(document.getElementById('seed').value),symbol:selectedSymbol()},inputs);
+      if(!body.symbol)throw Error('Load and select market data before generating strategies.');
+      body.request_key=crypto.randomUUID();localStorage.setItem(generationPendingKey,JSON.stringify(body));
+    }
+    fresh.hidden=false;box.textContent=pending?'Locating the saved search…':'Generating and saving candidates…';
+    let d;try{d=await postJSON('/api/generate',JSON.stringify(body));}
+    catch(error){box.textContent='The response could not be received. Retry to locate the same request, or inspect Builder → Saved research before starting a new search.';return;}
+    const id=d.archive&&d.archive.started_run_id;
+    const saved=id?' Saved search: '+id+'. Open Builder → Saved research to inspect, back up or resume. Replay checks repeatability, not independent correctness.':'';
+    if(id){localStorage.removeItem(generationPendingKey);fresh.hidden=true;refreshResearchRuns();}
+    if(d.recovery_required){box.textContent=(d.message||'This search already exists; inspect its saved status.')+saved;return;}
+    if(d.error){box.textContent=d.error+saved;return;}
   let rows = "<table><tr><th>Name</th><th>Profit factor</th><th>Net profit</th><th>Trades</th><th>DD %</th></tr>";
   d.results.forEach(function(r) {
     rows += "<tr><td>" + escapeHtml(r.name) + "</td><td class=\"" + cls(r.profit_factor - 1) + "\">" + fmt(r.profit_factor, 2) + "</td><td class=\"" + cls(r.net_profit) + "\">" + fmt(r.net_profit, 2) + "</td><td>" + fmt(r.trades, 0) + "</td><td>" + fmt(r.dd_pct, 2) + "</td></tr>";
   });
   rows += "</table>";
-  box.innerHTML = "<p>"+escapeHtml(researchNotice(d.research_context))+"</p>"+rows;
+  box.innerHTML = "<p>"+escapeHtml(researchNotice(d.research_context)+saved)+"</p>"+rows;
   refreshDatabank();
   box.querySelectorAll("tr").forEach(function(tr, i) {
     if (i === 0) return;
@@ -906,7 +932,10 @@ document.getElementById("btn-generate").onclick = async function() {
     td.appendChild(btn);
     tr.appendChild(td);
   });
-};
+  }catch(error){box.textContent=error.message||String(error);fresh.hidden=false;}
+  finally{generationRequestPending=false;button.disabled=false;}
+}
+document.getElementById('btn-generate').onclick=runGeneration;
 
 document.getElementById("btn-backtest").onclick = runBacktest;
 
@@ -1247,21 +1276,39 @@ async function loadCatalog() {
   initializeWorkspace();
 }
 
-document.getElementById("proj-run").onclick = async function() {
-  const box = document.getElementById("proj-log");
-  box.textContent = "Running pipeline (build → retest → optimize)...";
-  const inputs=generatorInputs(box);if(!inputs)return;
-  const body = Object.assign({
-    count: Number(document.getElementById("proj-count").value),
-    keep: Number(document.getElementById("proj-keep").value),
-    symbol: selectedSymbol()
-  }, inputs);
-  const d = await postJSON("/api/pipeline", JSON.stringify(body));
-  const archiveNote=d.archive ? "\nReport archived: "+d.archive.run_id : "";
-  if(d.archive)refreshResearchRuns();
-  if (d.error) { box.textContent = d.error+archiveNote; return; }
-  box.textContent = researchNotice(d.research_context)+"\nDatabank: " + (d.databank || 0) + " strategies\n\n" + (d.log || []).join("\n")+archiveNote;
+let pipelineRequestPending=false;
+const pipelinePendingKey='sqx.pendingPipeline.v1';
+document.getElementById('proj-new-request').onclick=function(){
+  if(pipelineRequestPending)return;
+  localStorage.removeItem(pipelinePendingKey);this.hidden=true;
+  document.getElementById('proj-log').textContent='The next run will use current settings. This does not cancel an earlier pipeline; inspect Builder → Saved research for its status.';
 };
+async function runPipeline(){
+  const box=document.getElementById('proj-log'),button=document.getElementById('proj-run'),fresh=document.getElementById('proj-new-request');
+  if(pipelineRequestPending)return;
+  pipelineRequestPending=true;button.disabled=true;
+  try{
+    let body;const pending=localStorage.getItem(pipelinePendingKey);
+    if(pending){body=JSON.parse(pending);if(!body||typeof body.request_key!=='string')throw Error('Stored request is invalid. Inspect Saved research before choosing a new study.');}
+    else{
+      const inputs=generatorInputs(box);if(!inputs)return;
+      body=Object.assign({count:Number(document.getElementById('proj-count').value),keep:Number(document.getElementById('proj-keep').value),symbol:selectedSymbol()},inputs);
+      if(!body.symbol)throw Error('Load and select market data before running a pipeline.');
+      body.request_key=crypto.randomUUID();localStorage.setItem(pipelinePendingKey,JSON.stringify(body));
+    }
+    fresh.hidden=false;box.textContent=pending?'Retrying the saved pipeline settings…':'Running and saving pipeline research…';
+    let d;try{d=await postJSON('/api/pipeline',JSON.stringify(body));}
+    catch(error){box.textContent='The response could not be received. The pipeline may still be running. Retry to locate the same request, or inspect Builder → Saved research before starting a new study.';return;}
+    const id=d.archive&&d.archive.started_run_id;
+    const saved=id?'\nSaved pipeline: '+id+'. Open Builder → Saved research to inspect, back up or resume. Replay checks repeatability, not independent correctness.':'';
+    if(id){localStorage.removeItem(pipelinePendingKey);fresh.hidden=true;refreshResearchRuns();}
+    if(d.recovery_required){box.textContent=(d.message||'This pipeline already exists; inspect its saved status.')+saved;return;}
+    if(d.error){box.textContent=d.error+saved;return;}
+    box.textContent=researchNotice(d.research_context)+'\nDatabank: '+(d.databank||0)+' strategies\n\n'+(d.log||[]).join('\n')+saved;
+  }catch(error){box.textContent=error.message||String(error);fresh.hidden=false;}
+  finally{pipelineRequestPending=false;button.disabled=false;}
+}
+document.getElementById('proj-run').onclick=runPipeline;
 
 let optimizationRequestPending=false;
 const optimizationPendingKey='sqx.pendingOptimization.v1';
@@ -1476,9 +1523,21 @@ if (resPortfolio) resPortfolio.onclick = async function() {
   if (typeof drawChart === "function") drawChart(d.equity, "res-portfolio-chart");
 };
 
+let eurProfileApplied=null;
+function applyEurResearchProfile(){
+  const scenario=document.getElementById('eur-profile-scenario').value;
+  const costs={baseline:[2,0],spread:[3,0],stress:[4,1]}[scenario];
+  if(!costs)throw Error('Unknown EUR research scenario');
+  const values={'set-deposit':'10000','set-currency':'EUR','set-leverage':'30','set-spread':String(costs[0]),'set-slippage':String(costs[1]),'set-commission':'0','set-long-financing':'0','set-short-financing':'0'};
+  for(const [id,value] of Object.entries(values)){const field=document.getElementById(id);field.value=value;field.dispatchEvent(new Event('input',{bubbles:true}));field.dispatchEvent(new Event('change',{bubbles:true}));}
+  eurProfileApplied={id:'eurusd-eur-provisional-v1',scenario,status:'research_assumptions_not_execution_validated',applied_values:values};
+  document.getElementById('eur-profile-status').textContent='Provisional EUR profile applied. Select EURUSD for this reference scope. The preset starts with zero commission and financing; your current editable settings determine the costs. Other execution, volume and stop-out settings remain as shown. For EURUSD/EUR, conversion uses the available execution or valuation price. Historical conversion data may be needed for other markets.';
+}
+document.getElementById('eur-profile-apply').onclick=applyEurResearchProfile;
+
 function settings() {
   const g=function(id,defaultValue){const el=document.getElementById(id);if(!el)return defaultValue;const text=el.value.trim(),value=Number(text);if(!text||!Number.isFinite(value))throw new Error('Enter a finite number for '+(el.labels?.[0]?.textContent.trim()||id)+'.');return value;};
-  return { deposit: g("set-deposit", 10000), spread: g("set-spread", 0), slippage: g("set-slippage", 0), commission: g("set-commission", 0), intrabar_policy: document.getElementById("set-intrabar").value, compare_paths: document.getElementById("set-compare-paths").checked, allow_data_gaps: document.getElementById("set-allow-gaps").checked, account: {
+  return { research_profile: typeof eurProfileApplied!=="undefined" && eurProfileApplied ? {id:eurProfileApplied.id,scenario:eurProfileApplied.scenario,status:eurProfileApplied.status,modified:Object.entries( eurProfileApplied.applied_values).some(([id,value])=>document.getElementById(id).value!==value)} : null, deposit: g("set-deposit", 10000), spread: g("set-spread", 0), slippage: g("set-slippage", 0), commission: g("set-commission", 0), intrabar_policy: document.getElementById("set-intrabar").value, compare_paths: document.getElementById("set-compare-paths").checked, allow_data_gaps: document.getElementById("set-allow-gaps").checked, account: {
     currency: document.getElementById("set-currency").value.trim().toUpperCase(),
     max_leverage: g("set-leverage", NaN), stop_out_ratio: g("set-stopout", NaN),
     min_lots: g("set-min-lots", NaN), lot_step: g("set-lot-step", NaN), max_lots: g("set-max-lots", NaN),

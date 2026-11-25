@@ -19,6 +19,7 @@ rustup run 1.100.0 cargo test "${cargo_args[@]}"
 rustup run 1.100.0 cargo build "${cargo_args[@]}"
 node --check crates/sqx-web/assets/workspace.js
 node ci/check-inline-js.cjs
+node crates/sqx-web/tests/eur_profile.cjs
 node crates/sqx-web/tests/exposure_extent.cjs
 node crates/sqx-web/tests/normalization_import.cjs
 node crates/sqx-web/tests/backup_wire.cjs
@@ -31,6 +32,8 @@ node crates/sqx-web/tests/backtest_errors.cjs
 node crates/sqx-web/tests/robustness_errors.cjs
 node crates/sqx-web/tests/portfolio_request.cjs
 node crates/sqx-web/tests/optimization_request.cjs
+node crates/sqx-web/tests/pipeline_request.cjs
+node crates/sqx-web/tests/generation_request.cjs
 node crates/sqx-web/tests/selected_portfolio_request.cjs
 node crates/sqx-web/tests/dataset_context.cjs
 

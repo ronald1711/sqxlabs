@@ -4,6 +4,35 @@ Status: in progress. Passing existing tests does not certify trading correctness
 Existing databanks were produced by an execution model with known material defects;
 they must be rerun after the execution model is validated.
 
+## Pending quick-search evidence
+
+The development branch now routes dashboard quick searches through the shared
+pipeline journal. It freezes data, engine, parameters and seed before execution;
+retains full results for rejected as well as selected candidates; and links
+promoted rows to their saved candidate identity. A retry uses the original request
+even if the current dataset or settings have changed. The browser retains that
+request after a lost response and offers an explicit new-search action.
+
+The targeted four-candidate no-survivor fixture passes archive export, removal of
+original inputs, restore and repeat recovery without duplicate outcomes. Browser
+checks cover lost responses, changed settings, overlapping clicks, saved failures,
+empty successes and selected-result rendering. A real HTTP process-kill test also passes: it kills the server after a durable
+candidate, removes the source and archive, restores the backup, recovers all 40
+full executions, preserves the prior event prefix and matches the completion
+identity of an uninterrupted replay. Repeated recovery appends no events.
+Full integration checks remain pending. Shared
+pipeline recovery evidence does not by itself prove every entry point correct.
+
+## Catalog causality regression (development)
+
+`crates/sqx-backtest/tests/catalog_causality.rs` exercises all 179 current catalog
+entries through the strategy indicator dispatcher at their default parameters.
+For a 320-bar oscillating OHLCV fixture, all 319 nonempty truncated histories must preserve every
+historical value bit-for-bit, including NaN warmup positions. The test also requires
+aligned output lengths and at least one defined value for each entry. It passes.
+This tests future-prefix invariance throughout this fixture, not formula correctness,
+all parameter choices, every input shape or the entire execution engine.
+
 ## Completion requirements
 
 1. Accounting and execution: applied spread/commission/slippage; account-currency
@@ -32,18 +61,19 @@ verification evidence. Scope must not be reduced to the currently passing tests.
 
 ## Current completion audit (supersedes historical pending notes below)
 
-Latest integration status (2026-11-24): [PR #20](https://github.com/ronald1711/sqxlabs/pull/20)
-merged as `f07fd64f` after all four required Linux/macOS debug/release checks passed
-on `162aad88` ([run 45481746750](https://github.com/ronald1711/sqxlabs/actions/runs/45481746750)).
-The same head passed 472 local workspace tests with zero failed or ignored, and
-the workspace build passed. Main includes MCP single-backtest and portfolio
-study recovery, operation-local shared-input validation and finite-only portfolio
-ranking. Earlier integration statements below are historical.
+Latest verified integration (2026-11-25): [PR #22](https://github.com/ronald1711/sqxlabs/pull/22)
+merged as `d0467fe0` after all four Linux/macOS debug/release checks passed on
+`fc77910b` ([run 45490340714](https://github.com/ronald1711/sqxlabs/actions/runs/45490340714)).
+This includes CLI/dashboard portfolio journal entry points and standalone dashboard
+optimization and walk-forward study recovery. PR #21 was superseded by that merge.
 
-The `codex/portfolio-entrypoints` follow-up extends the journal to CLI and
-both dashboard portfolio routes. Its targeted process-kill, portable recovery,
-request-identity and rendered-interface checks do not replace its own full
-workspace and four-check integration gate. That follow-up is not yet merged.
+[PR #23](https://github.com/ronald1711/sqxlabs/pull/23) extends full candidate and
+final-evaluation records to dashboard pipelines. [PR #24](https://github.com/ronald1711/sqxlabs/pull/24)
+adds the editable provisional EUR profile and limited synthetic arithmetic checks.
+Both remain pending their own integration gates as of this audit. Quick-search
+recovery on this development branch also remains pending full integration checks.
+Earlier integration statements below are historical.
+
 No completion requirement or independent platform-execution gap is closed by
 these test counts. MT5 terminal work is deferred at the user's request.
 
@@ -4400,3 +4430,53 @@ summary label: that counter counts only OOS executions, not all examined windows
 The label now says “Windows with OOS execution”. Inline syntax and request tests
 pass; the final label-only revision has not been recaptured in the browser.
 This was a local fixture; no MT5 or broker connection was used.
+
+### Dashboard pipeline pre-execution journal (unmerged, 2026-11-24)
+
+The dashboard build/retest/optimize route now stores its frozen request before
+execution and uses the shared ordered journal/recovery protocol. A final
+EvaluateDatabank stage retains complete selected-strategy executions and metrics;
+rendering no longer performs an unrecorded extra backtest. Returned databank rows
+carry the completion/start identities and final candidate index. Legacy report
+replay keeps its prior calculation path and remains tested.
+
+Five targeted web pipeline tests pass, including a two-candidate search with no
+survivors restored after deleting its original archive and removing live data.
+The zero-survivor result is a completed exploratory search, not sufficient trading
+evidence. The new final-evaluation test compares both full executions with direct
+backtests and verifies immediate abort at failed start/outcome writes. Browser
+request tests cover lost replies, frozen-input retry and duplicate-start prevention.
+Full workspace/platform checks, rendered pipeline review and actual HTTP process
+kill for this route remain pending.
+
+Coverage caveat: generic Build/Generate events currently retain BatchEvaluation
+(strategy, metrics and errors), not full per-candidate BacktestResult values.
+Final selected executions, walk-forward trial executions and portfolio executions
+have fuller evidence. Complete execution-level accounting for all rejected generic
+build/generation candidates therefore remains open; a saved trial count alone
+must not be described as full fill/account evidence for every candidate.
+
+
+Full build-execution follow-up: new generic pipeline Build/Generate records now
+include each complete BacktestResult alongside the existing metrics/errors, both
+in the pre-selection outcome event and final build report. The unchanged ranking
+uses the same seed, candidate names and fitness rules. The pipeline test suite
+passes, including direct full-execution comparison for all 100 generated
+candidates (selected and rejected), and existing seed/ranking and write-failure
+checks. Legacy records are not backfilled; replay still requires their exact
+recorded engine. The real HTTP pipeline crash/portable-restore check passed: all 40 build
+candidates retain full executions after source/archive deletion and restore;
+the stored event prefix is unchanged and the completion identity equals an
+uninterrupted frozen-input replay. A repeat recovery appends nothing. The five
+web pipeline tests, all 24 frontend scripts and cross-workflow request-import
+conflict checks also pass. Full workspace and platform integration remain open.
+Retaining full results increases archive and memory requirements; scale limits
+remain an explicit unresolved requirement.
+
+Rendered pipeline review (2026-11-24): an isolated dashboard with forty flat
+EURUSD/M1 bars ran two generated candidates and retained none. The page showed
+two attempts, zero survivors, four completed tasks, no final executions and the
+saved pipeline identity with backup/recovery instructions. Exploratory and
+untouched-holdout limitations remained visible; the run button re-enabled after
+completion. This is no-survivor UI evidence, not broad visual or accessibility
+coverage. The disposable server was stopped; no terminal/broker was contacted.

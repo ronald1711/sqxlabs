@@ -30,8 +30,9 @@ let posts=0;
 fields.set('gen-results',out);fields.set('count',{value:'20'});fields.set('seed',{value:'42'});fields.set('btn-generate',{});
 fields.get('gen-ranges').value='invalid';
 context.selectedSymbol=()=> 'EURUSD';context.postJSON=async()=>{posts++;throw Error('must not send');};
-const handlerStart=source.indexOf('document.getElementById("btn-generate").onclick = async function() {');
-const handlerEnd=source.indexOf('\n};',handlerStart)+3;
+fields.set('gen-new-request',{});context.localStorage={getItem:()=>null};
+const handlerStart=source.indexOf('let generationRequestPending=');
+const handlerEnd=source.indexOf('document.getElementById("btn-backtest").onclick',handlerStart);
 vm.runInContext(source.slice(handlerStart,handlerEnd),context);
 (async()=>{await fields.get('btn-generate').onclick();assert.equal(posts,0);assert.match(out.textContent,/Invalid research settings/);console.log('Generator input regression passed: malformed lines are reported before requests.');})().catch(e=>{console.error(e);process.exitCode=1;});
 

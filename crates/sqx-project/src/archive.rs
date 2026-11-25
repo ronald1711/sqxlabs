@@ -109,14 +109,20 @@ impl Archive {
         Ok(ResearchBundle{run_id:id.into(),run,dataset,strategy})
     }
     pub fn list(&self)->Result<Vec<String>,String>{
+        let ids=self.unvalidated_run_ids()?;
+        let mut reader=self.record_session();
+        for id in &ids {reader.load_run(id)?;}
+        Ok(ids)
+    }
+    /// Enumerate names only. Callers must validate every record with a fresh
+    /// RecordSession before treating the scan as evidence or publishing changes.
+    pub(crate) fn unvalidated_run_ids(&self)->Result<Vec<String>,String>{
         let dir=self.root.join("runs");if !dir.exists(){return Ok(Vec::new());}
         let mut ids=Vec::new();
-        let mut reader=self.record_session();
         for entry in fs::read_dir(dir).map_err(|e|e.to_string())? {
             let path=entry.map_err(|e|e.to_string())?.path();
             if path.extension().and_then(|v|v.to_str())!=Some("json"){continue;}
             if let Some(id)=path.file_stem().and_then(|v|v.to_str()).filter(|id|valid_id(id)) {
-                reader.load_run(id)?;
                 ids.push(id.into());
             }
         }

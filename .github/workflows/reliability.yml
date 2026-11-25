@@ -18,7 +18,9 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         profile: [debug, release]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # Full crash/replay evidence exceeds 30 minutes on macOS debug runners.
+    # Preserve the complete suite; only extend this runner/profile time budget.
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && matrix.profile == 'debug' && 60 || 30 }}
     env:
       RUSTUP_TOOLCHAIN: 1.100.0
       CARGO_TERM_COLOR: always
