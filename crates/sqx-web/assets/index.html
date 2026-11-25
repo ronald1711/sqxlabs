@@ -472,7 +472,27 @@
         <p>Manage data and AI connections here. Configuration does not prove that a service is reachable.</p>
         <div class="row"><button class="secondary" data-go="data">Market data / QuestDB</button><button class="secondary" data-go="settings" data-focus="ai-provider-controls">AI provider settings</button><button id="connections-check" class="secondary">Check local configuration</button></div>
         <p id="connections-status" role="status">Not checked. This check contacts only your local SqxLabs server; it does not send a prompt or place orders.</p>
-        <details><summary>MCP connections</summary>
+        <details id="mcp-settings-panel"><summary>MCP connections</summary>
+          <p>These settings apply to a separately launched MCP process, not to the current dashboard's data or account settings. Save a profile, test it, then copy its configuration into your client. The client profile is stored under .sqxlabs-mcp/profiles in the working directory; choose paths accessible to your client. After changing a profile, copy the new configuration and restart the client server.</p>
+          <div class="search-fields">
+            <label>Executable (absolute path)<input id="mcp-executable" type="text"></label>
+            <label>Working directory<input id="mcp-working" type="text"></label>
+            <label>Research archive directory<input id="mcp-research" type="text"></label>
+            <label>Log directory<input id="mcp-logs" type="text"></label>
+            <label>Maximum bytes per log file<input id="mcp-log-bytes" type="number" min="4096" max="10485760" value="1048576"></label>
+            <label>Maximum log files<input id="mcp-log-files" type="number" min="2" max="100" value="5"></label>
+            <label>Log retention (days)<input id="mcp-log-days" type="number" min="1" max="90" value="14"></label>
+            <label>Default research source<select id="mcp-source"><option value="request">Specify in each tool request</option><option value="csv">CSV file</option><option value="questdb">QuestDB</option></select></label>
+            <label>CSV file (absolute path)<input id="mcp-csv" type="text"></label>
+            <label>Source symbol<input id="mcp-symbol" type="text"></label>
+            <label>Source timeframe<input id="mcp-timeframe" type="text" placeholder="M1 / M5 / H1"></label>
+            <label>QuestDB host<input id="mcp-questdb-host" type="text" placeholder="Hostname or IPv4 address"></label>
+            <label>QuestDB port<input id="mcp-questdb-port" type="number" min="1" max="65535" value="9000"></label>
+          </div>
+          <p>Research-source defaults apply to backtest, generate, portfolio and robustness. An explicit source field in a tool request replaces all source defaults. QuestDB uses the saved host and port. Credentials come from the MCP process environment only when its endpoint matches this profile; otherwise no credentials are sent. Dashboard data and credentials are not copied automatically.</p>
+          <div class="row"><button id="mcp-reload" class="secondary">Load saved profile</button><button id="mcp-save">Save MCP profile</button><button id="mcp-probe" class="secondary" disabled>Test saved profile</button><button id="mcp-copy" class="secondary" disabled>Copy client configuration</button></div>
+          <p id="mcp-status" role="status">Not loaded. No MCP process has been started by this page.</p>
+          <pre id="mcp-client-config" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
           <p><b>SqxLabs as an MCP server:</b> another AI application can start the sqx-mcp executable and communicate over standard input/output. Configure it in that AI application's MCP settings, using an absolute executable path and a persistent working directory.</p>
           <p>For a source checkout, the documented launch command is <code>cargo run -q -p sqx-mcp</code>, from the repository directory. <code>SQX_MCP_RESEARCH_DIR</code> sets the research archive location. Starting it can expose research tools to that client; it is not started by this page.</p>
           <p><b>External MCP servers inside SqxLabs:</b> not supported yet. The AI provider URL is a model API endpoint, not an MCP server address.</p>
@@ -483,6 +503,16 @@
         <p>Recent browser error categories, retained on this browser (up to 100). Raw messages, keys, prompts, strategies and account values are excluded. Detailed errors remain beside the operation that failed. This is not the complete server log.</p>
         <div class="row"><button id="diagnostics-refresh" class="secondary">Refresh errors</button><button id="diagnostics-download" class="secondary">Download diagnostic report</button><button id="diagnostics-clear" class="secondary">Clear browser error history</button></div>
         <p id="diagnostics-storage" role="status"></p><pre id="diagnostics-events" style="max-height:240px;overflow:auto;white-space:pre-wrap"></pre>
+        <h3>MCP server logs</h3>
+        <p>Requires a saved MCP profile. Reports contain event metadata only; missing records and running/client status remain explicitly qualified.</p>
+        <div class="search-fields">
+          <label>Since (UTC)<input id="mcp-log-since" type="datetime-local"></label>
+          <label>Tool name (optional)<input id="mcp-log-tool" type="text" placeholder="backtest"></label>
+          <label>Session ID (optional)<input id="mcp-log-session" type="text"></label>
+          <label>Result<select id="mcp-log-status"><option value="">All</option value="completed">Completed</option><option value="tool_error">Tool error</option><option value="parse_error">Protocol parse error</option><option value="started">Started</option><option value="stopped">Stopped</option></select></label>
+        </div>
+        <div class="row"><button id="mcp-log-refresh" class="secondary">Read MCP logs</button><button id="mcp-log-download" class="secondary" disabled>Download displayed MCP report</button></div>
+        <p id="mcp-log-notice" role="status">No MCP logs loaded.</p><pre id="mcp-log-events" style="max-height:260px;overflow:auto;white-space:pre-wrap"></pre>
         <p>The command-line <code>doctor</code> provides basic installation checks. Saved research contains execution evidence and recovery actions; passing these checks is not proof of strategy correctness.</p>
       </div>
 
@@ -1856,5 +1886,6 @@ if (themeBtn) themeBtn.onclick = function() {
 <script src="/diagnostics.js"></script>
 <script src="/operation-status.js"></script>
 <script src="/workspace.js"></script>
+<script src="/mcp-settings.js"></script>
 </body>
 </html>

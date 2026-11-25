@@ -18,6 +18,8 @@ use sqx_optimizer::{random_strategy, GeneratorConfig};
 use sqx_robustness::{monte_carlo_trade_manipulation, what_if};
 use sqx_strategy::{render as render_pseudocode, Strategy};
 
+mod mcp_settings;
+
 const INDEX: &str = include_str!("../assets/index.html");
 
 struct State {
@@ -1151,9 +1153,14 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
     }
     match (method, path) {
         ("GET", "/") | ("GET", "/index.html") => ("200 OK", "text/html; charset=utf-8", INDEX.to_string()),
+        ("GET", "/mcp-settings.js") => ("200 OK", "text/javascript; charset=utf-8", include_str!("../assets/mcp-settings.js").to_string()),
         ("GET", "/diagnostics.js") => ("200 OK", "text/javascript; charset=utf-8", include_str!("../assets/diagnostics.js").to_string()),
         ("GET", "/operation-status.js") => ("200 OK", "text/javascript; charset=utf-8", include_str!("../assets/operation-status.js").to_string()),
         ("GET", "/workspace.js") => ("200 OK", "text/javascript; charset=utf-8", include_str!("../assets/workspace.js").to_string()),
+        ("GET", "/api/mcp/config") => ("200 OK", "application/json", mcp_settings::route("read","{}")),
+        ("POST", "/api/mcp/config") => ("200 OK", "application/json", mcp_settings::route("save",body)),
+        ("POST", "/api/mcp/logs") => ("200 OK", "application/json", mcp_settings::route("logs",body)),
+        ("POST", "/api/mcp/probe") => ("200 OK", "application/json", mcp_settings::route("probe",body)),
         ("GET", "/api/indicators") => ("200 OK", "application/json", indicators_json()),
         ("GET", "/api/catalog") => ("200 OK", "application/json", catalog_json()),
         ("GET", "/api/datasources") => ("200 OK", "application/json", datasources_json(state)),

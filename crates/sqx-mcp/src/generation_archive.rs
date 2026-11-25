@@ -7,6 +7,7 @@ use sqx_backtest::{backtest,BacktestConfig};
 use sqx_optimizer::{BatchEvaluation,Fitness};
 
 pub fn configured_archive()->Archive {
+    if let Some(config)=super::PROCESS_CONFIG.get(){return Archive::new(&config.research_directory);}
     Archive::new(std::env::var_os("SQX_MCP_RESEARCH_DIR").map(std::path::PathBuf::from)
         .unwrap_or_else(||std::path::PathBuf::from("data/research")))
 }

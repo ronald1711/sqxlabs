@@ -27,3 +27,7 @@ data/engines/
 data/*.csv
 data/assistant.json
 *.rs.bk
+
+# Local MCP profiles and runtime diagnostics are not source artifacts.
+/data/mcp/
+**/data/mcp-logs/

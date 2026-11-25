@@ -106,3 +106,11 @@ pub mod assistant_trials;
 mod observation;
 
 pub mod pipeline_archive;
+
+pub mod mcp_config;
+
+pub mod mcp_probe;
+
+pub mod mcp_logs;
+
+pub mod mcp_runtime;

@@ -18,6 +18,7 @@ python3 scripts/indicator_evidence_index.py --check
 rustup run 1.100.0 cargo test "${cargo_args[@]}"
 rustup run 1.100.0 cargo build "${cargo_args[@]}"
 node --check crates/sqx-web/assets/workspace.js
+node --check crates/sqx-web/assets/mcp-settings.js
 node ci/check-inline-js.cjs
 node crates/sqx-web/tests/eur_profile.cjs
 node crates/sqx-web/tests/exposure_extent.cjs
@@ -35,6 +36,7 @@ node crates/sqx-web/tests/optimization_request.cjs
 node crates/sqx-web/tests/pipeline_request.cjs
 node crates/sqx-web/tests/generation_request.cjs
 node crates/sqx-web/tests/selected_portfolio_request.cjs
+node crates/sqx-web/tests/mcp_settings.cjs
 node crates/sqx-web/tests/diagnostics.cjs
 node crates/sqx-web/tests/operation_status.cjs
 node crates/sqx-web/tests/candidate_selection.cjs

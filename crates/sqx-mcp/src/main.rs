@@ -18,26 +18,53 @@ use sqx_metrics::{compute as compute_metrics, Metrics};
 use sqx_optimizer::{rank, random_strategy, Fitness, GeneratorConfig};
 use sqx_strategy::Strategy;
 
+mod diagnostics;
 mod generation_archive;
 mod research_archive;
 
+static PROCESS_CONFIG: std::sync::OnceLock<sqx_project::mcp_config::Config> = std::sync::OnceLock::new();
+
 const PROTOCOL: &str = "2024-11-05";
 
+fn effective_questdb_config()->QuestdbConfig {
+    bound_questdb_config(QuestdbConfig::from_env(),PROCESS_CONFIG.get().map(|c|&c.source))
+}
+fn bound_questdb_config(mut config:QuestdbConfig,source:Option<&sqx_project::mcp_config::Source>)->QuestdbConfig{
+    if let Some(sqx_project::mcp_config::Source::Questdb{host,port,..})=source{
+        // Environment credentials stay bound to the endpoint they were configured for.
+        if config.host!=*host||config.port!=*port{config.user=None;config.password=None;}
+        config.host=host.clone();config.port=*port;
+    }config
+}
+
 fn main() {
+    if let Some(path)=std::env::var_os("SQX_MCP_CONFIG") {
+        let path=std::path::PathBuf::from(path);
+        if !path.is_absolute(){eprintln!("SQX_MCP_CONFIG must be an absolute path");std::process::exit(2);}
+        let config=match sqx_project::mcp_config::Config::load(&path){Ok(c)=>c,Err(e)=>{eprintln!("MCP configuration: {e}");std::process::exit(2);}};
+        if std::env::set_current_dir(&config.working_directory).is_err(){eprintln!("Cannot enter configured MCP working directory");std::process::exit(2);}
+        let _=PROCESS_CONFIG.set(config);
+    }
+    let log_config=match PROCESS_CONFIG.get().map(|c|Ok(diagnostics::Config{directory:c.log_directory.clone(),max_bytes:c.log_max_bytes,max_files:c.log_max_files,retention_days:c.log_retention_days})).unwrap_or_else(diagnostics::Config::from_env){Ok(c)=>c,Err(error)=>{eprintln!("{error}");std::process::exit(2);}};
+    let mut diagnostic=diagnostics::Log::new(log_config);
+    diagnostic.event(0,"process",None,"started",0);
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
     for line in stdin.lock().lines() {
         let line = match line {
             Ok(l) => l,
-            Err(_) => break,
+            Err(_) => {diagnostic.event(0,"process",None,"stdin_error",0);break;},
         };
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
+        let request_sequence=diagnostic.request();
+        let started=std::time::Instant::now();
         let req: Value = match serde_json::from_str(line) {
             Ok(v) => v,
             Err(_) => {
+                diagnostic.event(request_sequence,"parse",None,"parse_error",started.elapsed().as_millis());
                 writeln!(stdout, "{}", error_json(Value::Null, -32700, "parse error")).ok();
                 stdout.flush().ok();
                 continue;
@@ -46,6 +73,10 @@ fn main() {
         let id = req.get("id").cloned().unwrap_or(Value::Null);
         let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("");
         let has_id = req.get("id").is_some();
+        let tool=req["params"]["name"].as_str();
+        if method=="initialize"{diagnostic.observe_client(req["params"]["clientInfo"]["name"].as_str());}
+        diagnostic.event(request_sequence,method,tool,"started",0);
+        let mut status="completed";
         match method {
             "initialize" => send(&mut stdout, id, json!({
                 "protocolVersion": PROTOCOL,
@@ -57,15 +88,19 @@ fn main() {
             "tools/call" => {
                 let params = req.get("params").cloned().unwrap_or(json!({}));
                 let result = call_tool(&params);
+                if result["isError"].as_bool()==Some(true){status="tool_error";}
                 send(&mut stdout, id, result);
             }
             _ => {
+                status="unsupported_method";
                 if has_id {
                     send_error(&mut stdout, id, -32601, "method not found");
                 }
             }
         }
+        diagnostic.event(request_sequence,method,tool,status,started.elapsed().as_millis());
     }
+    diagnostic.event(0,"process",None,"stopped",0);
 }
 
 fn send(out: &mut std::io::Stdout, id: Value, result: Value) {
@@ -156,7 +191,10 @@ fn err_result(s: String) -> Value {
 
 fn call_tool(params: &Value) -> Value {
     let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
-    let args = params.get("arguments").cloned().unwrap_or(json!({}));
+    let mut args = params.get("arguments").cloned().unwrap_or(json!({}));
+    if matches!(name,"backtest"|"generate"|"portfolio"|"robustness") {
+        if let Some(config)=PROCESS_CONFIG.get(){args=config.apply_source(&args);}
+    }
     match name {
         "research_history"|"research_resume"|"research_export"|"research_import"=>match research_archive::call(name,&args,&generation_archive::configured_archive()){
             Ok(value)=>{let mut response=text_result(value.to_string());if value["report"]["errors"].as_array().is_some_and(|errors|!errors.is_empty()){response["isError"]=json!(true);}response},
@@ -231,7 +269,7 @@ fn tool_list_symbols(args: &Value) -> Value {
 }
 
 fn tool_questdb_symbols() -> Value {
-    let client = QuestdbClient::new(&QuestdbConfig::from_env());
+    let client = QuestdbClient::new(&effective_questdb_config());
     match client.list_symbols() {
         Ok(syms) => text_result(syms.join("
 ")),
@@ -249,7 +287,7 @@ fn tool_questdb_bars(args: &Value) -> Value {
         Err(e) => return err_result(format!("bad timeframe: {e}")),
     };
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(5000).clamp(1, 200_000) as usize;
-    let client = QuestdbClient::new(&QuestdbConfig::from_env());
+    let client = QuestdbClient::new(&effective_questdb_config());
     let bars = match client.fetch_bars(&symbol, tf, None, None, Some(limit)) {
         Ok(b) => b,
         Err(e) => return err_result(e),
@@ -298,7 +336,7 @@ fn resolve_bars(args:&Value)->Result<(Vec<Bar>,String,Timeframe,Value),String>{
         read_csv_bars(data)?
     }else{
         let limit=args.get("limit").and_then(|v|v.as_u64()).unwrap_or(5000).clamp(1,200000) as usize;
-        QuestdbClient::new(&QuestdbConfig::from_env()).fetch_bars(&request.symbol,request.timeframe,None,None,Some(limit))?
+        QuestdbClient::new(&effective_questdb_config()).fetch_bars(&request.symbol,request.timeframe,None,None,Some(limit))?
     };
     let quality=research_quality(args,&bars,request.timeframe,sqx_data::quality::now_ms())?;
     Ok((bars,request.symbol,request.timeframe,quality))
@@ -719,4 +757,15 @@ mod tests {
         }
     }
 
+}
+
+#[cfg(test)]mod mcp_endpoint_tests {
+ use super::*;
+ #[test]fn changed_profile_endpoint_does_not_carry_environment_credentials(){
+  let original=QuestdbConfig{host:"data.example".into(),port:9000,user:Some("user".into()),password:Some("secret".into())};
+  let mut source=sqx_project::mcp_config::Source::Questdb{host:"other.example".into(),port:9000,symbol:"EURUSD".into(),timeframe:"M5".into()};
+  let changed=bound_questdb_config(original.clone(),Some(&source));assert!(changed.user.is_none());assert!(changed.password.is_none());assert_eq!(changed.host,"other.example");
+  if let sqx_project::mcp_config::Source::Questdb{host,..}=&mut source{*host="data.example".into();}
+  assert_eq!(bound_questdb_config(original,Some(&source)).password.as_deref(),Some("secret"));
+ }
 }
