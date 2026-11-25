@@ -19,6 +19,7 @@ use sqx_robustness::{monte_carlo_trade_manipulation, what_if};
 use sqx_strategy::{render as render_pseudocode, Strategy};
 
 mod mcp_settings;
+mod calendar_settings;
 
 const INDEX: &str = include_str!("../assets/index.html");
 
@@ -1166,6 +1167,11 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("GET", "/api/datasources") => ("200 OK", "application/json", datasources_json(state)),
         ("GET", "/api/questdb/symbols") => ("200 OK", "application/json", questdb_symbols_json(state)),
         ("POST", "/api/questdb/load") => ("200 OK", "application/json", questdb_load_json(body, state)),
+        ("POST", "/api/data/review") => ("200 OK", "application/json", calendar_settings::route("inspect",body,state)),
+        ("POST", "/api/calendar/refetch") => ("200 OK", "application/json", calendar_settings::route("refetch",body,state)),
+        ("POST", "/api/calendar/preview") => ("200 OK", "application/json", calendar_settings::route("preview",body,state)),
+        ("POST", "/api/calendar/save") => ("200 OK", "application/json", calendar_settings::route("save",body,state)),
+        ("GET", "/calendar-settings.js") => ("200 OK", "text/javascript; charset=utf-8", include_str!("../assets/calendar-settings.js").to_string()),
         ("GET", "/api/data") => ("200 OK", "application/json", data_json(state, &qsym)),
         ("POST", "/api/backtest") => ("200 OK", "application/json", archived_backtest_json(body, state)),
         ("GET", "/api/experiments/backup") => ("200 OK", "application/json", experiment_json("backup",&json!({"experiment_id":query_param(full_path,"id")}).to_string(),state)),
@@ -1338,16 +1344,18 @@ fn questdb_load_json(body: &str, state: &State) -> String {
     match client.fetch_bars(&symbol, timeframe, None, None, Some(limit)) {
         Ok(bars) => {
             let n = bars.len();
+            let mut series=SymbolSeries{symbol:symbol.clone(),timeframe,calendar:None,source:None,normalization:None,bars};
+            let selection=match calendar_settings::for_import(state,&symbol){Ok(s)=>s,Err(error)=>return json!({"error":error}).to_string()};
+            if let Err(error)=selection.apply(&mut series){return json!({"error":error}).to_string();}
+            let review=calendar_settings::report(&series,sqx_data::quality::now_ms());
+            let saved=sqx_project::datasets::Datasets::new(state.archive.root());
+            let snapshot=match saved.save(&series){Ok(id)=>id,Err(error)=>return json!({"error":error,"review":review}).to_string()};
             let mut store=state.store.write().unwrap();
-            store.add(&symbol, timeframe, bars);
-            // QuestDB stores candles, but does not establish their original feed
-            // or demonstrate that the upstream clock was normalized correctly.
-            let series=store.series.iter_mut().find(|s|s.symbol==symbol && s.timeframe==timeframe).unwrap();
-            series.source=Some(sqx_data::calendar::CalendarBinding{
-                source:"unknown".into(),instrument:symbol.clone(),
-                source_confirmed:false,utc_timestamps_confirmed:false,
-            });
-            json!({ "ok": true, "symbol": symbol, "timeframe": timeframe.label(), "bars": n }).to_string()
+            if let Some(old)=store.series.iter().find(|s|s.symbol==symbol&&s.timeframe==timeframe){
+                if let Err(error)=saved.save(old){return json!({"error":format!("Previous dataset could not be preserved: {error}")}).to_string();}
+            }
+            store.series.retain(|s|!(s.symbol==symbol&&s.timeframe==timeframe));store.series.push(series);
+            json!({ "ok": true, "symbol": symbol, "timeframe": timeframe.label(), "bars": n,"snapshot_id":snapshot,"review":review }).to_string()
         }
         Err(e) => json!({ "error": e }).to_string(),
     }
@@ -2009,10 +2017,11 @@ fn normalization_status(series:&SymbolSeries)->serde_json::Value {
 }
 
 fn research_data_quality(series:&SymbolSeries, request:&serde_json::Value, as_of_ms:i64) -> Result<sqx_data::quality::QualityReport,serde_json::Value> {
+    if let Err(error)=series.validate_calendar_context(){return Err(json!({"error":error}));}
     let normalization=normalization_status(series);
     if normalization["status"]=="invalid" {return Err(json!({"error":normalization["error"],"normalization":normalization}));}
 
-    let quality=sqx_data::quality::audit(&series.bars,series.timeframe,as_of_ms,series.calendar.as_ref());
+    let quality=match calendar_settings::reviewed_quality(series,request){Ok(Some(q))=>q,Ok(None)=>sqx_data::quality::audit(&series.bars,series.timeframe,as_of_ms,series.calendar.as_ref()),Err(error)=>return Err(json!({"error":error}))};
     if !quality.errors.is_empty(){return Err(json!({"error":quality.errors.join("; "),"data_quality":quality}));}
     if (quality.missing_open_intervals>0 || quality.unclassified_intervals>0 || quality.irregular_steps>0)
         && !request.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false) {

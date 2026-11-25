@@ -27,6 +27,32 @@ pub struct SymbolSeries {
     pub bars: Vec<Bar>,
 }
 
+impl SymbolSeries {
+    /// Prevent attaching another instrument's calendar or contradictory feed claims.
+    pub fn validate_calendar_context(&self)->Result<(),String>{
+        if let Some(source)=&self.source {
+            if source.instrument!=self.symbol || source.source.trim().is_empty() || source.source.len()>200 {
+                return Err("Dataset source does not match its instrument".into());
+            }
+            if source.source_confirmed && matches!(source.source.as_str(),"unknown"|"mixed") {
+                return Err("Unknown or mixed feed cannot be confirmed".into());
+            }
+        }
+        if let Some(calendar)=&self.calendar {
+            calendar.validate()?;
+            if let Some(frozen)=&calendar.frozen {
+                if frozen.binding.instrument!=self.symbol {return Err("Frozen calendar belongs to another instrument".into());}
+                if let Some(source)=&self.source {
+                    if serde_json::to_value(source).map_err(|e|e.to_string())?!=serde_json::to_value(&frozen.binding).map_err(|e|e.to_string())? {
+                        return Err("Dataset feed assumptions differ from its frozen calendar".into());
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Summary of one series for the UI.
 #[derive(Debug, Clone)]
 pub struct SymbolInfo {

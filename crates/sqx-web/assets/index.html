@@ -959,6 +959,8 @@ async function runGeneration() {
       const inputs=generatorInputs(box);if(!inputs)return;
       body=Object.assign({count:Number(document.getElementById('count').value),seed:Number(document.getElementById('seed').value),symbol:selectedSymbol()},inputs);
       if(!body.symbol)throw Error('Load and select market data before generating strategies.');
+      const review=await window.reviewGenerationData(body);if(!review)return;
+      body.data_review=review;body.allow_data_gaps=review.exploratory_consent;
       body.request_key=crypto.randomUUID();localStorage.setItem(generationPendingKey,JSON.stringify(body));
     }
     fresh.hidden=false;box.textContent=pending?'Locating the saved search…':'Generating and saving candidates…';
@@ -1819,13 +1821,16 @@ document.getElementById("qdb-load").onclick = async function() {
   const checked = Array.from(box.querySelectorAll(".qdb-sym:checked")).map(function(c){ return c.value; });
   if (!checked.length) { st.textContent = "Select at least one symbol"; return; }
   st.textContent = "Loading…";
-  var ok = 0, fail = 0, lastErr = "";
+  var ok = 0, fail = 0, lastErr = "";const importReviews=[];
   for (var i = 0; i < checked.length; i++) {
     const d = await postJSON("/api/questdb/load", JSON.stringify({ symbol: checked[i], timeframe: tf, limit: limit }));
+    if (d.review)importReviews.push(d.review);
     if (d.error) { fail++; lastErr = d.error; } else { ok++; }
   }
   st.textContent = "Loaded " + ok + " symbols" + (fail ? " (" + fail + " failed)" : "");
   if (fail && ok === 0) st.textContent = lastErr;
+  let reviewBox=document.getElementById("qdb-quality-reviews");if(!reviewBox){reviewBox=document.createElement("div");reviewBox.id="qdb-quality-reviews";st.insertAdjacentElement("afterend",reviewBox);}
+  reviewBox.innerHTML=importReviews.map(r=>window.sqxDataReviewHtml(r)).join("<hr>");
   await refreshDataManager();
   await loadInfo();
 };
@@ -1887,5 +1892,6 @@ if (themeBtn) themeBtn.onclick = function() {
 <script src="/operation-status.js"></script>
 <script src="/workspace.js"></script>
 <script src="/mcp-settings.js"></script>
+<script src="/calendar-settings.js"></script>
 </body>
 </html>

@@ -1,0 +1,18 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const elements=new Map();let dialog,requests=[],reply;
+function element(id){if(!elements.has(id))elements.set(id,{value:'',checked:false,disabled:false,textContent:'',innerHTML:'',style:{},appendChild(){},scrollIntoView(){}});return elements.get(id);}
+const document={getElementById:element,createElement(tag){if(tag!=='dialog')return element('created-card');dialog={style:{},nodes:{},innerHTML:'',addEventListener(event,fn){this[event]=fn;},querySelector(selector){return this.nodes[selector]??={};},showModal(){this.shown=true;},close(){this.closed=true;},remove(){this.removed=true;}};return dialog;},body:{appendChild(){}},querySelector(){return {click(){}};}};
+const report={dataset_id:'abc',symbol:'EURUSD',timeframe:'M1',as_of_ms:180000,questdb_available:true,source:{source:'mixed',source_confirmed:false,utc_timestamps_confirmed:false},calendar:null,unresolved:true,blocked:false,data_quality:{calendar_status:'unknown',scheduled_closed_intervals:0,missing_open_intervals:0,unclassified_intervals:1,irregular_steps:0,incomplete_bars:0,errors:[],gaps:[{start_time:60000,end_time:120000,intervals:1,kind:'unknown'}]}};
+const context={document,window:{},escapeHtml:s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'),selectedSymbol:()=>'EURUSD|M1',postJSON:async(path,body)=>{requests.push({path,body:JSON.parse(body)});return reply||report;},refreshDataInfo:async()=>{},loadInfo:async()=>{}};
+vm.runInNewContext(fs.readFileSync('crates/sqx-web/assets/calendar-settings.js','utf8'),context);
+(async()=>{
+ await element('cal-load').onclick();assert.equal(element('cal-source').value,'mixed');assert.equal(element('cal-source-confirmed').checked,false);assert.equal(element('cal-fields').disabled,true);
+ assert.match(element('cal-report').innerHTML,/Kalender onbekend/);assert.match(element('cal-report').innerHTML,/1970-01-01 00:01:00 UTC/);
+ let p=context.window.reviewGenerationData({allow_data_gaps:true});await new Promise(setImmediate);assert.equal(dialog.shown,true);assert.match(dialog.innerHTML,/Verkennend doorgaan/);dialog.nodes['[data-action="cancel"]'].onclick();assert.equal(await p,null);
+ p=context.window.reviewGenerationData({});await new Promise(setImmediate);dialog.nodes['[data-action="continue"]'].onclick();const consent=await p;assert.equal(consent.dataset_id,'abc');assert.equal(consent.exploratory_consent,true);
+ element('cal-source-confirmed').checked=false;element('cal-utc').checked=false;reply={...report,ok:true,snapshot_id:'version'};await element('cal-save').onclick();assert.equal(requests.at(-1).path,'/api/calendar/save');assert.equal(requests.at(-1).body.selection.profile,null);assert.equal(requests.at(-1).body.selection.binding.source,'mixed');assert.equal(requests.at(-1).body.use_for_questdb_imports,false);
+ reply={...report,changes:{added:1,removed:0,revised:0},snapshot_id:'repair'};await element('cal-refetch').onclick();assert.equal(requests.at(-1).path,'/api/calendar/refetch');assert.equal(requests.some(r=>r.path==='/api/data/load'),false);assert.match(element('cal-repair').innerHTML,/nog niet geladen/);
+ reply={...report,ok:true};await element('cal-repair-accept').onclick();assert(requests.some(r=>r.path==='/api/data/load'&&r.body.id==='repair'));
+ const html=context.window.sqxDataReviewHtml({...report,source:{source:'<img src=x onerror=alert(1)>'}});assert(!html.includes('<img'));assert(html.includes('&lt;img'));
+ console.log('Calendar review preserves unknown provenance, binds consent to a dataset, escapes text and requires accepting repair proposals.');
+})().catch(e=>{console.error(e);process.exitCode=1;});
