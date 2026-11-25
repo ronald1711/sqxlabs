@@ -126,32 +126,65 @@ refreshDataInfo = async function() {
   $('data-info').textContent=d.error || `${d.bars.toLocaleString()} bars`;
   updateContext();
 };
-getJSON = async function(url) { const r=await fetch(url); if (!r.ok) throw new Error(`Request failed (${r.status}). Please retry.`); return r.json(); };
-// Keep navigation and local editing available during requests; prevent duplicate submissions only.
-let pendingRequests=0, jobStarted=0, jobTimer=null;
-const job=document.createElement('div'); job.id='job-status'; job.hidden=true; job.setAttribute('role','status'); document.body.append(job);
-setBusy = function(on) {
-  pendingRequests=Math.max(0,pendingRequests+(on?1:-1));
-  job.hidden=pendingRequests===0;
-  if (on && pendingRequests===1) {
-    jobStarted=Date.now();
-    const tick=()=>job.textContent=`${pendingRequests} request${pendingRequests===1?'':'s'} running · ${Math.floor((Date.now()-jobStarted)/1000)}s elapsed · You can keep browsing`;
-    tick(); jobTimer=setInterval(tick,1000);
-  } else if (!pendingRequests) clearInterval(jobTimer);
+getJSON = async function(url) {
+  const tracked=url.split('?')[0]==='/api/questdb/symbols';
+  const op=tracked?operations.start(operationName(url)):null;
+  try{const r=await fetch(url);if(!r.ok)throw new Error(`Request failed (${r.status}). Please retry.`);
+    const data=await r.json();if(op)operations.finish(op,data);return data;
+  }catch(e){if(op)operations.fail(op,e.message);throw e;}
 };
+
+// Visible operation history survives completion and tab changes.
+const operationPanel=document.createElement('section');
+operationPanel.id='job-status';operationPanel.hidden=true;
+operationPanel.setAttribute('aria-label','Operation status');
+const operationHeading=document.createElement('strong');operationHeading.textContent='Activity';
+const operationList=document.createElement('div');
+const operationDismiss=document.createElement('button');operationDismiss.textContent='Clear finished';operationDismiss.className='secondary';
+operationDismiss.onclick=()=>operations.dismissCompleted();
+operationPanel.append(operationHeading,operationDismiss,operationList);document.body.append(operationPanel);
+const operationNames={
+  '/api/generate':'Find strategies','/api/backtest':'Backtest',
+  '/api/optimize':'Optimize / walk-forward','/api/robustness':'Robustness checks',
+  '/api/portfolio':'Build portfolio','/api/portfolio/databank':'Compare portfolio',
+  '/api/pipeline':'Research pipeline','/api/assistant':'AI assistant',
+  '/api/export':'Export strategy','/api/analyze':'Analyze strategy',
+  '/api/questdb/load':'Load market data','/api/questdb/symbols':'List market data',
+  '/api/data/import':'Import data','/api/data/load':'Load saved data',
+  '/api/experiments/jobs/step':'Save next search candidate'
+};
+function operationName(url){return operationNames[url.split('?')[0]] || url.split('?')[0].replace('/api/','').split('/').join(' · ');}
+const operations=SqxOperationStatus.create((items)=>{
+  operationPanel.hidden=!items.length;operationList.replaceChildren();
+  items.forEach(item=>{
+    const row=document.createElement('div');row.className='operation-row';
+    const label=document.createElement('div');label.textContent=item.label;
+    const status=document.createElement('div');status.className='muted';
+    status.setAttribute('role','status');status.textContent=item.message;
+    row.append(label,status);
+    if(item.state==='running'||item.total){
+      const bar=document.createElement('progress');bar.setAttribute('aria-label',item.label+' in progress');
+      if(item.total){bar.max=item.total;bar.value=item.completed;bar.setAttribute('aria-label',item.completed+' of '+item.total+' candidates saved');}
+      // Without a reported count the progress bar remains indeterminate.
+      row.append(bar);
+    }
+    row.dataset.state=item.state;operationList.append(row);
+  });
+});
+
 const inflight=new Set();
 postJSON = async function(url,body) {
   const requestKey=url+'\n'+body;
   if (inflight.has(requestKey)) return {error:'This request is already running.'};
   const initiator=document.activeElement && document.activeElement.tagName==='BUTTON' ? document.activeElement : null;
   if (initiator) initiator.disabled=true;
-  inflight.add(requestKey); setBusy(true);
+  inflight.add(requestKey); const op=operations.start(operationName(url));
   try {
     const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body});
     if (!r.ok) throw new Error(`Request failed (${r.status}).`);
-    const data=await r.json(); if (data.error) announce(data.error); return data;
-  } catch(e) { announce('Could not complete the request. '+e.message); return {error:e.message}; }
-  finally { inflight.delete(requestKey); setBusy(false); if (initiator) initiator.disabled=false; }
+    const data=await r.json(); operations.finish(op,data); if (data.error) announce(data.error); return data;
+  } catch(e) { operations.fail(op,e.message); announce('Could not complete the request. '+e.message); return {error:e.message}; }
+  finally { inflight.delete(requestKey); if (initiator) initiator.disabled=false; }
 };
 const originalConditionRow=buildConditionRow;
 buildConditionRow = function() {
