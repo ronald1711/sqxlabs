@@ -106,6 +106,13 @@
   .indicator-search { width:100% !important; margin:0 0 8px; }
   @media(max-width:1050px) { .editor-columns { grid-template-columns:1fr; } .journey,.metrics-grid { grid-template-columns:repeat(2,1fr); } }
   @media(max-width:700px) { header { flex-wrap:wrap; padding:12px; } header>span:last-child { margin-left:0 !important; flex-wrap:wrap; } .nav { position:static; min-height:0; } .journey,.metrics-grid { grid-template-columns:1fr; } .workspace-context { gap:10px; } }
+  #calendar-editor label { display:block; margin:10px 0; line-height:1.5; }
+  #calendar-editor input[type=text], #calendar-editor input[type=date] { max-width:100%; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:8px; }
+  #calendar-editor textarea { display:block; height:90px; margin-top:6px; }
+  #calendar-editor fieldset { margin:16px 0; padding:14px; border:1px solid var(--line); border-radius:8px; min-width:0; }
+  #calendar-editor [hidden] { display:none; }
+  #calendar-editor #cal-week { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:8px; }
+  @media(max-width:900px) { .nav { position:static; min-height:0; } }
 </style>
 </head>
 <body>

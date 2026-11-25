@@ -11,7 +11,7 @@ impl Selection {
     fn validate(&self,symbol:&str)->Result<(),String>{
         if self.binding.instrument!=symbol || self.binding.source.trim().is_empty() || self.binding.source.len()>200 {return Err("Specify the original feed and matching instrument; use unknown or mixed if necessary".into());}
         if self.binding.source_confirmed && matches!(self.binding.source.as_str(),"unknown"|"mixed") {return Err("An unknown or mixed feed cannot be confirmed".into());}
-        if let Some(profile)=&self.profile {profile.validate()?;if !profile.instruments.contains(&symbol.to_string()) || (self.binding.source_confirmed&&profile.source!=self.binding.source){return Err("Calendar source or instrument does not match this feed".into());}}
+        if let Some(profile)=&self.profile {profile.validate()?;if !profile.instruments.contains(&symbol.to_string()) || (profile.evidence!=sqx_data::calendar::EvidenceStatus::MarketAssumption&&self.binding.source_confirmed&&profile.source!=self.binding.source){return Err("Calendar source or instrument does not match this feed".into());}}
         Ok(())
     }
     pub(super) fn apply(&self,series:&mut SymbolSeries)->Result<(),String>{

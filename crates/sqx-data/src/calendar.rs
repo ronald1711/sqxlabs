@@ -8,7 +8,7 @@ use crate::quality::WeeklySession;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all="snake_case")]
-pub enum EvidenceStatus { Documented, Provisional }
+pub enum EvidenceStatus { Documented, Provisional, MarketAssumption }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -73,13 +73,13 @@ impl CalendarProfile {
         if self.weekly.len()>100 || self.date_overrides.len()>4000 || self.weekly.iter().any(|s|s.weekday>6||s.start_minute>=s.end_minute||s.end_minute>1440){return Err("Invalid weekly calendar sessions".into());}
         for (d,ranges) in &self.date_overrides {date(d)?;if ranges.len()>50||ranges.iter().any(|(a,b)|a>=b||*b>1440){return Err("Invalid calendar date override".into());}}
         if self.notes.len()>10000||self.references.len()>20||self.references.iter().any(|s|s.is_empty()||s.len()>2000){return Err("Calendar evidence exceeds its bounds".into());}
-        if self.evidence==EvidenceStatus::Documented && self.references.is_empty(){return Err("Documented calendars require source references".into());}
+        if self.evidence!=EvidenceStatus::Provisional && self.references.is_empty(){return Err("Documented calendars and market assumptions require source references".into());}
         Ok(())
     }
     pub fn freeze(&self,binding:CalendarBinding,start:i64,end:i64)->Result<FrozenCalendar,String>{
         self.validate()?;
         if !self.instruments.contains(&binding.instrument){return Err("Calendar does not cover this instrument".into());}
-        if binding.source_confirmed && binding.source!=self.source{return Err("Confirmed feed does not match calendar source".into());}
+        if self.evidence!=EvidenceStatus::MarketAssumption && binding.source_confirmed && binding.source!=self.source{return Err("Confirmed feed does not match calendar source".into());}
         if binding.source.len()>200||binding.source.trim().is_empty(){return Err("Feed identity is required; use unknown or mixed when appropriate".into());}
         let length=end.checked_sub(start).ok_or("Invalid calendar range")?;
         if length<=0||length>3660*86_400_000_i64{return Err("Calendar snapshot must cover more than zero and at most ten years".into());}
@@ -116,12 +116,12 @@ impl FrozenCalendar {
     pub fn validate(&self)->Result<(),String>{
         self.profile.validate()?;
         if self.schema!=1||self.profile_sha256!=self.profile.identity()||self.coverage_start>self.coverage_end||self.tzdb_version.is_empty(){return Err("Invalid frozen calendar identity or coverage".into());}
-        if !self.profile.instruments.contains(&self.binding.instrument)||(self.binding.source_confirmed&&self.binding.source!=self.profile.source){return Err("Frozen calendar source/instrument mismatch".into());}
+        if !self.profile.instruments.contains(&self.binding.instrument)||(self.profile.evidence!=EvidenceStatus::MarketAssumption&&self.binding.source_confirmed&&self.binding.source!=self.profile.source){return Err("Frozen calendar source/instrument mismatch".into());}
         let mut end=self.coverage_start;
         for r in &self.sessions {if r.start<end||r.start>=r.end||r.end>self.coverage_end{return Err("Invalid frozen UTC sessions".into());}end=r.end;}
         Ok(())
     }
-    pub fn classification_ready(&self)->bool {self.profile.evidence==EvidenceStatus::Documented && self.binding.source_confirmed && self.binding.utc_timestamps_confirmed}
+    pub fn classification_ready(&self)->bool {self.binding.utc_timestamps_confirmed && (self.profile.evidence==EvidenceStatus::MarketAssumption || (self.profile.evidence==EvidenceStatus::Documented && self.binding.source_confirmed))}
     /// None means unknown, including an interval partly outside bounded evidence.
     pub fn overlaps(&self,start:i64,end:i64)->Option<bool>{
         if !self.classification_ready()||start>=end||start<self.coverage_start||end>self.coverage_end{return None;}

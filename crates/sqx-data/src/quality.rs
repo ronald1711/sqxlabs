@@ -127,7 +127,7 @@ pub fn audit(bars:&[Bar],tf:Timeframe,as_of_ms:i64,calendar:Option<&MarketCalend
     let mut report=QualityReport{bars:bars.len(),calendar:calendar.map(|c|c.name.clone()),..Default::default()};
     report.calendar_status=match calendar {
         None=>"unknown",
-        Some(c)=>match &c.frozen {None=>"legacy_declared_utc",Some(f) if f.classification_ready()=>"documented_binding",Some(_)=>"unconfirmed_binding"},
+        Some(c)=>match &c.frozen {None=>"legacy_declared_utc",Some(f) if f.classification_ready() && f.profile.evidence==crate::calendar::EvidenceStatus::MarketAssumption=>"assumed_market_calendar",Some(f) if f.classification_ready()=>"documented_binding",Some(_)=>"unconfirmed_binding"},
     }.into();
     report.calendar_snapshot_id=calendar.and_then(|c|c.frozen.as_ref()).map(|f|f.identity());
     if let Some(c)=calendar{if let Err(e)=c.validate(){report.errors.push(e);return report;}}

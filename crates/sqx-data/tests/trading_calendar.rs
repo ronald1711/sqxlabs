@@ -46,3 +46,21 @@ fn archived_snapshot_survives_later_calendar_changes_and_coverage_is_bounded(){
  let mut mismatch=binding();mismatch.source="other-feed".into();assert!(p.freeze(mismatch,start,end).is_err());
  p.timezone="not/a/zone".into();assert!(p.freeze(binding(),start,end).is_err());
 }
+
+#[test]
+fn explicit_market_assumption_classifies_weekend_without_claiming_feed_verification(){
+ let mut p=fx();p.evidence=EvidenceStatus::MarketAssumption;
+ let first=ms("2026-11-20T21:59:00Z");let last=ms("2026-11-22T22:00:00Z");
+ let mut b=binding();b.source="mixed".into();b.source_confirmed=false;
+ let frozen=p.freeze(b.clone(),first,last+60000).unwrap();let calendar=frozen.into_market_calendar();
+ let q=audit(&[bar(first),bar(last)],Timeframe::M1,last+60000,Some(&calendar));
+ assert_eq!(q.calendar_status,"assumed_market_calendar");assert_eq!(q.scheduled_closed_intervals,2880);assert_eq!(q.unclassified_intervals,0);
+ assert!(!calendar.frozen.as_ref().unwrap().binding.source_confirmed);
+ // The selected market model must not silently assert the dataset's clock.
+ b.utc_timestamps_confirmed=false;let calendar=p.freeze(b,first,last+60000).unwrap().into_market_calendar();
+ let q=audit(&[bar(first),bar(last)],Timeframe::M1,last+60000,Some(&calendar));
+ assert_eq!(q.unclassified_intervals,2880);assert_eq!(q.scheduled_closed_intervals,0);
+ // A genuine weekday hole remains visible under the same market assumption.
+ let monday=ms("2026-11-23T10:00:00Z");let calendar=p.freeze(binding(),monday,monday+180000).unwrap().into_market_calendar();
+ let q=audit(&[bar(monday),bar(monday+120000)],Timeframe::M1,monday+180000,Some(&calendar));assert_eq!(q.missing_open_intervals,1);
+}

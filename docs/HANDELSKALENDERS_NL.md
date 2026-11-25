@@ -19,7 +19,7 @@ Een eerder begonnen zoekopdracht gebruikt zijn oorspronkelijke verzoek. Gebruik 
 
 Een aantal telt ontbrekende candle-intervallen: 60 ontbrekende minuten is bij M1 een aantal van 60, ook als het één aaneengesloten onderbreking is. De detailtabel groepeert aansluitende intervallen; maximaal 200 groepen worden weergegeven. De controle stopt met een fout bij meer dan één miljoen te onderzoeken intervallen.
 
-Gemengde of onbekende EURUSD-bronnen krijgen **geen automatische brokerkalender**. Een weekendpatroon in de candles is geen bewijs van officiële handelsuren. Laat bron- en tijdzonebevestigingen uit totdat deze zijn onderzocht.
+Gemengde of onbekende EURUSD-bronnen krijgen **geen automatische brokerkalender**. Met **Standaard forexweek invullen** kun je wel bewust een algemene marktaanname gebruiken: zondag 17:00 tot vrijdag 17:00 in `America/New_York`, met Amerikaanse zomer-/wintertijd. De instelling blijft zichtbaar als aanname en bevestigt de koersbron niet. Verklaar afzonderlijk dat de tijdstempels UTC voorstellen, controleer het geldigheidsbereik (vooraf ingevuld: 2026) en bekijk het resultaat vóór opslaan. Deze standaard bevat geen dagelijkse brokerpauzes of feestdagen. De algemene weekcyclus is ontleend aan [OANDA](https://www.oanda.com/us-en/trading/forex/); het is geen exacte OANDA-brokerkalender. Een weekendpatroon in de candles is geen bewijs van officiële handelsuren. Laat bron- en tijdzonebevestigingen uit totdat deze zijn onderzocht.
 
 ## Een kalender instellen
 
@@ -31,7 +31,7 @@ Open **Data → Bron en handelskalender → Geselecteerde dataset controleren**.
 - Geef de geldigheidsperiode en de datum waarop je de bron controleerde op. Buiten die periode blijft de classificatie onbekend.
 - Vul per dag de lokale openingstijden in. `00:00-12:00, 12:05-24:00` bevat een dagelijkse pauze. Leeg betekent gesloten. Splits sessies die over middernacht lopen over twee dagen.
 - Voeg gedateerde uitzonderingen toe, zoals `2026-12-25=closed` of `2026-12-24=00:00-13:00`.
-- Voeg referenties en aannames toe. Alleen als kalender én bron én UTC-klok zijn bevestigd, gebruikt de nieuwe kalender de categorieën gesloten/open. Een voorlopige kalender blijft onbekend.
+- Voeg referenties en aannames toe. Voor een brongebonden kalender moeten kalender, bron en UTC-klok zijn bevestigd. Voor een bewust gekozen algemene marktaanname is bronbevestiging niet nodig; de UTC-klokverklaring blijft nodig. De app benoemt dit expliciet als aanname. Een voorlopige kalender blijft onbekend.
 
 **Beoordeling vooraf bekijken** wijzigt niets. **Opslaan als nieuwe datasetversie** bewaart zowel de vorige als de nieuwe dataset. Bestaande onderzoeksruns veranderen niet.
 
