@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "name": "EURUSD EUR — voorlopig onderzoeksprofiel",
+  "status": "provisional_not_execution_validated",
+  "account": {
+    "currency": "EUR",
+    "max_leverage": 30
+  },
+  "market": {
+    "symbol": "EURUSD",
+    "contract_size": 100000,
+    "quote_currency": "USD",
+    "margin_currency": "EUR",
+    "point": 1e-05
+  },
+  "evidence": {
+    "source": "../../crates/sqx-backtest/tests/fixtures/mt5_eurusd_eur_calculation.json",
+    "scope": "Read-only MT5 profit and margin calculation snapshots; no complete strategy execution comparison"
+  },
+  "research_assumptions": {
+    "initial_deposit_eur": 10000,
+    "spread_fx_pips": 2,
+    "round_trip_commission_per_lot_eur": 0,
+    "extra_slippage_fx_pips": 0,
+    "financing_per_lot_per_day_eur": 0,
+    "status": "Explicit synthetic research assumptions, not verified Tickmill fees"
+  },
+  "requirements": [
+    "Use time-aligned USD-to-EUR conversion quotes; never reuse a snapshot conversion rate across history.",
+    "Persist effective costs and account settings with every run.",
+    "After changing settings, start a new study; retain original archived inputs."
+  ],
+  "sensitivity_scenarios": [
+    {
+      "name": "baseline",
+      "spread_fx_pips": 2,
+      "extra_slippage_fx_pips": 0
+    },
+    {
+      "name": "higher spread",
+      "spread_fx_pips": 3,
+      "extra_slippage_fx_pips": 0
+    },
+    {
+      "name": "higher spread and slippage",
+      "spread_fx_pips": 4,
+      "extra_slippage_fx_pips": 1
+    }
+  ],
+  "unknown": [
+    "Actual broker commission schedule",
+    "Historical spreads and slippage",
+    "Long/short swap schedule and rollover conventions"
+  ],
+  "activation": "Specification only; not automatically applied to running dashboard settings"
+}
