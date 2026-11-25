@@ -32,8 +32,10 @@ fn read(root:&Path)->Result<Value,String>{
  if !root.join("active.json").exists(){return Ok(json!({"saved":false,"config":template()?,"probe":null,"external_client_connection":"unknown","process_status":"unknown"}));}
  let (config,path)=current(root)?;
  let runtime=sqx_project::mcp_runtime::observe(&config.log_directory,&config.identity()).unwrap_or_else(|_|json!({"process_status":"unknown","error":"Cannot inspect local MCP process status"}));
+ let process_status=runtime["process_status"].clone();
+ let connection=if runtime["active_processes"].as_array().is_some_and(|ps|ps.iter().any(|p|p["initialized"]==true&&p["client_kind"]!="probe")){"observed_handshake"}else{"unknown"};
  let probe=std::fs::read(root.join(format!("{}.probe.json",config.identity()))).ok().and_then(|v|serde_json::from_slice::<Value>(&v).ok());
- Ok(json!({"saved":true,"configuration_id":config.identity(),"config":config,"client_config":config.client_config(&path)?,"probe":probe,"runtime":runtime,"external_client_connection":"unknown","process_status":"unknown","scope":"Saving does not restart any existing MCP process. The profile applies when a client next starts it."}))
+ Ok(json!({"saved":true,"configuration_id":config.identity(),"config":config,"client_config":config.client_config(&path)?,"probe":probe,"runtime":runtime,"external_client_connection":connection,"process_status":process_status,"scope":"Saving does not restart any existing MCP process. The profile applies when a client next starts it."}))
 }
 pub fn route(action:&str,body:&str)->String{
  let result=(||->Result<Value,String>{let root=storage()?;
