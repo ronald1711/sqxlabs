@@ -738,6 +738,13 @@ mod tests {
         let builds=done.run.result["report"]["builds"].as_array().unwrap();assert_eq!(builds.len(),4);
         let mut rng=rand::rngs::StdRng::seed_from_u64(123);let generator:GeneratorConfig=serde_json::from_value(start.strategy["generator"].clone()).unwrap();
         for (i,row) in builds.iter().enumerate(){assert_eq!(row["evaluation"]["strategy"],json!(random_strategy(&mut rng,&format!("s{i:04}"),&generator)));assert_eq!(row["selected"],false);assert_eq!(row["execution"]["equity"].as_array().unwrap().len(),40);}
+        // Even a search with no surviving candidates has exposed its input window.
+        // It must not become an apparently untouched holdout for a later study.
+        let experiment:serde_json::Value=serde_json::from_str(&experiment_json("create",&json!({"symbol":"EURUSD","holdout_start_time":1200000,"min_development_trades":1,"min_holdout_trades":1,"prior_exposure_disclosed":false,"allow_data_gaps":true}).to_string(),&state)).unwrap();
+        assert!(experiment.get("error").is_none(),"{experiment}");
+        let audit=&experiment["current_exposure_audit"];
+        assert_eq!(audit["classification"],"known_reuse_or_disclosed_exposure","{experiment}");
+        assert!(audit["known_overlaps"].as_array().unwrap().iter().any(|row|row["source"]=="archived_pipeline" && row["id"]==id));
         let backup=sqx_project::pipeline_archive::export(&state.archive,id).unwrap();let restored=research_state();restored.store.write().unwrap().series.clear();sqx_project::pipeline_archive::import(&restored.archive,backup).unwrap();std::fs::remove_dir_all(state.archive.root()).unwrap();
         let repeated:serde_json::Value=serde_json::from_str(&generate_json(&request.to_string(),&restored)).unwrap();assert_eq!(repeated["recovery_required"],true);assert_eq!(repeated["archive"]["started_run_id"],id);
         let replay=sqx_project::pipeline_archive::recover(&restored.archive,id,true).unwrap();assert_eq!(replay.completion_id,completion);assert_eq!(json!(replay.report),done.run.result["report"]);assert_eq!(replay.appended,0);
