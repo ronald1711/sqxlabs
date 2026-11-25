@@ -33,14 +33,23 @@ fn response(mut stream:TcpStream)->Value{
 
 #[test]
 fn killed_web_pipeline_restores_full_candidate_executions(){
+    assert_interrupted_search("/api/pipeline", "web_pipeline", "interrupted-pipeline");
+}
+
+#[test]
+fn killed_web_generation_restores_full_candidate_executions(){
+    assert_interrupted_search("/api/generate", "web_generation", "interrupted-generation");
+}
+
+fn assert_interrupted_search(route:&str, origin:&str, request_key:&str){
     let root=std::env::temp_dir().join(format!("sqx-web-pipeline-kill-{:032x}",rand::random::<u128>()));fs::create_dir_all(&root).unwrap();
     struct Cleanup(std::path::PathBuf);impl Drop for Cleanup{fn drop(&mut self){let _=fs::remove_dir_all(&self.0);}}
     let _cleanup=Cleanup(root.clone());
     fs::copy(env!("CARGO_BIN_EXE_sqx-cli"),root.join("frozen-cli")).unwrap();
     let data=root.join("source.csv");let mut csv="timestamp,open,high,low,close,volume\n".to_string();
     for i in 0..900{let p=1.1+(i as f64*0.07).sin()*0.01;csv.push_str(&format!("{},{p},{},{},{p},1\n",1700000000+i*60,p+0.001,p-0.001));}fs::write(&data,csv).unwrap();
-    let request=json!({"symbol":"EURUSD","count":40,"keep":2,"seed":123,"allow_data_gaps":true,"request_key":"interrupted-pipeline"});
-    let (mut server,addr)=start(&root,Some(&data));let pending=send(&addr,"/api/pipeline",&request);
+    let request=json!({"symbol":"EURUSD","count":40,"keep":2,"seed":123,"allow_data_gaps":true,"request_key":request_key});
+    let (mut server,addr)=start(&root,Some(&data));let pending=send(&addr,route,&request);
     let archive=Archive::new(root.join("data/research"));let deadline=Instant::now()+Duration::from_secs(90);
     let mut seen=std::collections::BTreeSet::new();
     let started=loop{
@@ -55,12 +64,12 @@ fn killed_web_pipeline_restores_full_candidate_executions(){
     };
     server.0.kill().unwrap();server.0.wait().unwrap();drop(pending);
     assert_eq!(sqx_project::pipeline_archive::summary(&archive,&started).unwrap()["status"],"incomplete");
-    let start_record=archive.load(&started).unwrap();assert_eq!(start_record.run.request["origin"],"web_pipeline");
+    let start_record=archive.load(&started).unwrap();assert_eq!(start_record.run.request["origin"],origin);
     let backup=sqx_project::pipeline_archive::export(&archive,&started).unwrap();let retained=backup["events"].as_array().unwrap().len();
     fs::remove_file(&data).unwrap();fs::remove_dir_all(archive.root()).unwrap();
     let (_restored,addr)=start(&root,None);
     let imported=response(send(&addr,"/api/pipeline/restore",&backup));assert_eq!(imported["status"],"incomplete","{imported}");
-    let before=archive.list().unwrap();let repeated=response(send(&addr,"/api/pipeline",&request));
+    let before=archive.list().unwrap();let repeated=response(send(&addr,route,&request));
     assert_eq!(repeated["recovery_required"],true,"{repeated}");assert_eq!(repeated["archive"]["started_run_id"],started);assert_eq!(archive.list().unwrap(),before);
     let completed=response(send(&addr,"/api/pipeline/replay",&json!({"run_id":started,"resume":true})));
     assert_eq!(completed["matches"],true,"{completed}");assert_eq!(completed["replayed_events"],retained);assert!(completed["appended_events"].as_u64().unwrap()>0);

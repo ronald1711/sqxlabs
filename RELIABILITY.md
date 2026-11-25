@@ -16,8 +16,11 @@ request after a lost response and offers an explicit new-search action.
 The targeted four-candidate no-survivor fixture passes archive export, removal of
 original inputs, restore and repeat recovery without duplicate outcomes. Browser
 checks cover lost responses, changed settings, overlapping clicks, saved failures,
-empty successes and selected-result rendering. Full integration and real HTTP
-process-kill coverage for this specific quick-search route remain pending. Shared
+empty successes and selected-result rendering. A real HTTP process-kill test also passes: it kills the server after a durable
+candidate, removes the source and archive, restores the backup, recovers all 40
+full executions, preserves the prior event prefix and matches the completion
+identity of an uninterrupted replay. Repeated recovery appends no events.
+Full integration checks remain pending. Shared
 pipeline recovery evidence does not by itself prove every entry point correct.
 
 ## Completion requirements
@@ -48,18 +51,19 @@ verification evidence. Scope must not be reduced to the currently passing tests.
 
 ## Current completion audit (supersedes historical pending notes below)
 
-Latest integration status (2026-11-24): [PR #20](https://github.com/ronald1711/sqxlabs/pull/20)
-merged as `f07fd64f` after all four required Linux/macOS debug/release checks passed
-on `162aad88` ([run 45481746750](https://github.com/ronald1711/sqxlabs/actions/runs/45481746750)).
-The same head passed 472 local workspace tests with zero failed or ignored, and
-the workspace build passed. Main includes MCP single-backtest and portfolio
-study recovery, operation-local shared-input validation and finite-only portfolio
-ranking. Earlier integration statements below are historical.
+Latest verified integration (2026-11-25): [PR #22](https://github.com/ronald1711/sqxlabs/pull/22)
+merged as `d0467fe0` after all four Linux/macOS debug/release checks passed on
+`fc77910b` ([run 45490340714](https://github.com/ronald1711/sqxlabs/actions/runs/45490340714)).
+This includes CLI/dashboard portfolio journal entry points and standalone dashboard
+optimization and walk-forward study recovery. PR #21 was superseded by that merge.
 
-The `codex/portfolio-entrypoints` follow-up extends the journal to CLI and
-both dashboard portfolio routes. Its targeted process-kill, portable recovery,
-request-identity and rendered-interface checks do not replace its own full
-workspace and four-check integration gate. That follow-up is not yet merged.
+[PR #23](https://github.com/ronald1711/sqxlabs/pull/23) extends full candidate and
+final-evaluation records to dashboard pipelines. [PR #24](https://github.com/ronald1711/sqxlabs/pull/24)
+adds the editable provisional EUR profile and limited synthetic arithmetic checks.
+Both remain pending their own integration gates as of this audit. Quick-search
+recovery on this development branch also remains pending full integration checks.
+Earlier integration statements below are historical.
+
 No completion requirement or independent platform-execution gap is closed by
 these test counts. MT5 terminal work is deferred at the user's request.
 
