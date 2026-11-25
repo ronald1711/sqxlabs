@@ -745,7 +745,10 @@ mod tests {
         let audit=&experiment["current_exposure_audit"];
         assert_eq!(audit["classification"],"known_reuse_or_disclosed_exposure","{experiment}");
         assert!(audit["known_overlaps"].as_array().unwrap().iter().any(|row|row["source"]=="archived_pipeline" && row["id"]==id));
+        let experiment_backup=experiment_json("backup",&json!({"experiment_id":experiment["experiment_id"]}).to_string(),&state);
         let backup=sqx_project::pipeline_archive::export(&state.archive,id).unwrap();let restored=research_state();restored.store.write().unwrap().series.clear();sqx_project::pipeline_archive::import(&restored.archive,backup).unwrap();std::fs::remove_dir_all(state.archive.root()).unwrap();
+        let restored_experiment:serde_json::Value=serde_json::from_str(&experiment_json("restore",&experiment_backup,&restored)).unwrap();
+        assert_eq!(restored_experiment["current_exposure_audit"],*audit,"prior-use evidence must survive portable restore without live data");
         let repeated:serde_json::Value=serde_json::from_str(&generate_json(&request.to_string(),&restored)).unwrap();assert_eq!(repeated["recovery_required"],true);assert_eq!(repeated["archive"]["started_run_id"],id);
         let replay=sqx_project::pipeline_archive::recover(&restored.archive,id,true).unwrap();assert_eq!(replay.completion_id,completion);assert_eq!(json!(replay.report),done.run.result["report"]);assert_eq!(replay.appended,0);
         assert!(reserve_web_research_request("web_optimization",&request,&restored).unwrap_err().contains("different inputs"));
