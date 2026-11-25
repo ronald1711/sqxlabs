@@ -22,13 +22,23 @@ fn receive(rx:&mpsc::Receiver<Result<Value,&'static str>>,id:u64,deadline:Instan
  let value=rx.recv_timeout(remaining).map_err(|_|"MCP response missing or timed out")?.map_err(String::from)?;
  if value["jsonrpc"]!="2.0"||value["id"]!=id||value.get("error").is_some(){return Err("MCP protocol response mismatch".into());}Ok(value["result"].clone())
 }
+fn executable_identity(path:&std::path::Path,deadline:Instant)->Result<String,String>{
+ use sha2::{Digest,Sha256};
+ let mut file=std::fs::File::open(path).map_err(|_|"Cannot read MCP executable")?;
+ let metadata=file.metadata().map_err(|_|"Cannot inspect MCP executable")?;
+ if !metadata.is_file()||metadata.len()>268_435_456{return Err("MCP executable must be a regular file of at most 256 MiB".into());}
+ let mut digest=Sha256::new();let mut buffer=[0_u8;65_536];let mut total=0_u64;
+ loop{if Instant::now()>=deadline{return Err("MCP executable verification timed out".into());}
+  let n=file.read(&mut buffer).map_err(|_|"Cannot read MCP executable")?;if n==0{break;}total+=n as u64;
+  if total>268_435_456{return Err("MCP executable exceeds verification limit".into());}digest.update(&buffer[..n]);
+ }Ok(format!("{:x}",digest.finalize()))
+}
 pub fn probe(config:&Config,profile:&std::path::Path,timeout:Duration)->Result<Value,String>{
  config.validate()?;
  // Match the file the subprocess will read, not merely the browser's form values.
  if Config::load(profile)?!=*config{return Err("Saved MCP profile changed; save and test again".into());}
- let executable=std::fs::read(&config.executable).map_err(|_|"Cannot read MCP executable")?;
- let executable_id=crate::archive::content_id(&executable);
  let deadline=Instant::now()+timeout;
+ let executable_id=executable_identity(&config.executable,deadline)?;
  let mut command=Command::new(&config.executable);command.current_dir(&config.working_directory).env("SQX_MCP_CONFIG",profile).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
  #[cfg(unix)] {use std::os::unix::process::CommandExt;command.process_group(0);}
  let mut process=Process(command.spawn().map_err(|_|"Cannot start MCP executable")?);
@@ -49,5 +59,6 @@ pub fn probe(config:&Config,profile:&std::path::Path,timeout:Duration)->Result<V
  loop{if let Some(status)=process.0.try_wait().map_err(|_|"Cannot inspect MCP process")?{if !status.success(){return Err("MCP test process exited unsuccessfully".into());}break;}if Instant::now()>=deadline{return Err("MCP process did not exit after handshake test".into());}std::thread::sleep(Duration::from_millis(10));}
  let (stderr_limit,logging_error,repaired)=error_rx.recv_timeout(deadline.saturating_duration_since(Instant::now())).map_err(|_|"MCP diagnostic stream did not close")?;
  if stderr_limit{return Err("MCP diagnostic output exceeded limit or could not be read".into());}
+ if executable_identity(&config.executable,deadline)?!=executable_id{return Err("MCP executable changed during the test; test again".into());}
  Ok(json!({"logging_warning":logging_error,"log_history_repaired":repaired,"configuration_id":config.identity(),"executable_id":executable_id,"handshake":"passed","tool_count":tools.len(),"research_executed":false,"probe_process":"exited","external_client_connection":"unknown","scope":"This local probe does not establish a Claude or ChatGPT connection."}))
 }
