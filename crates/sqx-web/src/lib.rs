@@ -1067,7 +1067,7 @@ mod tests {
     }
 
     #[test]
-    fn dedupe_push_keeps_unique_strategies() {
+    fn dedupe_push_keeps_unique_recorded_results() {
         let mut db = Vec::new();
         let row = json!({ "name": "a", "strategy": { "name": "a" } });
         let row2 = json!({ "name": "b", "strategy": { "name": "b" } });
@@ -1075,6 +1075,23 @@ mod tests {
         assert_eq!(db.len(), 2);
         dedupe_push(&mut db, &[row]);
         assert_eq!(db.len(), 2);
+    }
+
+    #[test]
+    fn same_rules_preserve_changed_metrics_costs_and_archived_origins() {
+        let original=json!({"name":"same","strategy":{"name":"rules"},"net_profit":10,
+            "research_context":{"config":{"spread":2}},"source_run_id":"first"});
+        let mut metric=original.clone();metric["net_profit"]=json!(20);
+        let mut cost=original.clone();cost["research_context"]["config"]["spread"]=json!(4);
+        let mut origin=original.clone();origin["source_run_id"]=json!("second");
+        let rows=vec![original,metric,cost,origin];let mut db=Vec::new();
+        dedupe_push(&mut db,&rows);assert_eq!(db,rows);
+        // A saved/reloaded result set must still deduplicate exact retries.
+        let bytes=serde_json::to_vec(&db).unwrap();
+        let mut restored:Vec<serde_json::Value>=serde_json::from_slice(&bytes).unwrap();
+        dedupe_push(&mut restored,&rows);assert_eq!(restored,rows);
+        dedupe_push(&mut restored,&[json!({"name":"invalid without strategy"})]);
+        assert_eq!(restored,rows);
     }
 
     #[test]
@@ -1316,14 +1333,17 @@ fn questdb_load_json(body: &str, state: &State) -> String {
     }
 }
 
-fn strategy_key(r: &serde_json::Value) -> Option<String> {
-    r.get("strategy").and_then(|s| serde_json::to_string(s).ok())
+// The databank stores observations, not just unique rule trees. Preserve the
+// same strategy evaluated with another dataset, account, cost model or run.
+fn recorded_result_key(r: &serde_json::Value) -> Option<String> {
+    r.get("strategy")?;
+    serde_json::to_string(r).ok()
 }
 
 fn dedupe_push(db: &mut Vec<serde_json::Value>, rows: &[serde_json::Value]) {
-    let mut seen: std::collections::HashSet<String> = db.iter().filter_map(strategy_key).collect();
+    let mut seen: std::collections::HashSet<String> = db.iter().filter_map(recorded_result_key).collect();
     for r in rows {
-        if let Some(key) = strategy_key(r) {
+        if let Some(key) = recorded_result_key(r) {
             if seen.insert(key) {
                 db.push(r.clone());
             }
