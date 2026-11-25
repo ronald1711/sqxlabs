@@ -108,3 +108,34 @@ mod tests{
  }
 
 }
+
+/// An explicit user selection: every component is retained, with no ranking.
+#[derive(Debug,Clone,Default,serde::Serialize)]
+pub struct CombinationReport{
+ pub names:Vec<String>,pub weights:Vec<f64>,pub components:Vec<CandidateExecution>,
+ pub combined:Option<PortfolioResult>,pub errors:Vec<String>,
+}
+#[allow(clippy::too_many_arguments)]
+pub fn combine_observed(names:&[String],strategies:&[Strategy],bars:&[Bar],instrument:&Instrument,config:&BacktestConfig,pyp:f64,
+ observer:&mut impl FnMut(SearchEvent<'_>)->Result<(),String>)->Result<CombinationReport,String>{
+ let mut report=CombinationReport{names:names.to_vec(),..Default::default()};
+ if !(2..=20).contains(&strategies.len()) || names.len()!=strategies.len() || !pyp.is_finite() || pyp<=0.0{
+  report.errors.push("Portfolio composition requires 2..20 named strategies and positive annualization".into());return Ok(report);
+ }
+ if let Err(error)=sqx_backtest::validate_backtest_inputs(bars,instrument,config){report.errors.push(error);return Ok(report);}
+ report.weights=equal_weights(strategies.len());
+ for (index,strategy) in strategies.iter().enumerate(){
+  observer(SearchEvent::CandidateStarted{index,strategy})?;
+  let result=backtest(strategy,bars,instrument,config);let mut errors=result.errors.clone();
+  if let Err(error)=sqx_metrics::validate_observations(&result){if !errors.contains(&error){errors.push(error);}}
+  let evaluation=CandidateExecution{strategy:strategy.clone(),metrics:compute(&result,bars.len(),pyp),result,errors};
+  observer(SearchEvent::CandidateOutcome{index,evaluation:&evaluation})?;
+  report.errors.extend(evaluation.errors.iter().map(|error|format!("Component {index}: {error}")));report.components.push(evaluation);
+ }
+ if !report.errors.is_empty(){return Ok(report);}
+ let indices:Vec<_>=(0..strategies.len()).collect();observer(SearchEvent::CombinationStarted{indices:&indices,weights:&report.weights})?;
+ let results:Vec<_>=report.components.iter().map(|row|row.result.clone()).collect();
+ let combined=combine(names,&results,&report.weights,config.initial_deposit,bars.len(),pyp);
+ observer(SearchEvent::CombinationOutcome{result:&combined})?;
+ report.errors.extend(combined.errors.iter().cloned());report.combined=Some(combined);Ok(report)
+}

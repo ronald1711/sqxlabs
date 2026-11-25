@@ -136,6 +136,16 @@ remaining execution assumptions and unsupported cases are visible.
 - [x] Resume a frozen MCP generation search under an exclusive process lock, replaying stored outcomes before completing missing candidates; preserve conflicts and deduplicate repeated recovery.
 - [ ] Retain successful, rejected, failed and interrupted trials before selection;
   distinguish archive record counts from independent trial counts.
+  Dashboard optimization follow-up (PR #22) now journals simple discovery and
+  every walk-forward/matrix cell, including full executions and configured IS/OOS
+  minimum trade counts. Three-mode portable recovery and an actual HTTP
+  process-kill/source-deletion test passed; the latter retains 96 candidate
+  outcomes and matches an uninterrupted completion identity. Browser request
+  retries reuse frozen inputs, and rendered insufficient-evidence results remain
+  visibly distinct from successful validation. Full integration gates remain
+  pending. The dashboard build/retest/optimize pipeline still writes its main
+  archive only after execution and needs the same pre-execution journal; do not
+  close the all-entry-point accounting requirement yet.
 - [ ] Independently review walk-forward boundaries, warmup, capital continuity,
   minimum evidence thresholds and untouched-holdout handling across all routes.
   Standalone CLI robustness now links walk-forward to a frozen family of the
@@ -274,8 +284,8 @@ See [README.md](README.md) for operation and [ci/README.md](ci/README.md) for ch
   Observer failure boundaries and rejected-candidate retention are tested.
   A 100-candidate/781-subset fixture survives original source/archive deletion,
   portable restore and checkpoint-only replay with identical full reports and
-  completion IDs. A rejected search stays invalid after restore. CLI/web portfolio
-  routes, process-kill coverage for this route, power-loss durability and
+  completion IDs. A rejected search stays invalid after restore. Web portfolio
+  routes, MCP-specific process-kill coverage, power-loss durability and
   large-study performance remain open.
 
 - [x] Reuse validated shared inputs within one pipeline archive operation when
@@ -284,3 +294,33 @@ See [README.md](README.md) for operation and [ci/README.md](ci/README.md) for ch
   and missing inputs, failed checks, invalid record identities and unchanged IDs
   compared with the original save path. Large backup transport and power-loss
   durability remain open; no cross-request validation cache is used.
+
+- [x] Journal CLI portfolio candidates, selection settings and subset outcomes
+  before returning a selection. Insufficient evidence returns a failed study;
+  invalid request bounds fail before creating an archive. An actual process-kill
+  fixture retains an incomplete prefix, deletes the CSV/original archive, imports
+  its backup and completes all 40 candidates/10 subsets with the exact completion
+  identity of an uninterrupted run. Repeated replay adds no records. This covers
+  the CLI process boundary, not power loss or independent execution correctness.
+
+- [x] Journal generated dashboard portfolio candidates and subset decisions;
+  freeze source/calendar/normalization, execution and selection settings. A
+  40-candidate/10-subset fixture restores and replays exactly without the live
+  dataset. Request identities survive restore and reject changed inputs or reuse
+  by another workflow. Frontend tests cover a lost response, unchanged retry
+  payload, duplicate-click exclusion and explicit new-study selection; the test
+  is included in CI. Rendered browser review and process-kill coverage of this
+  HTTP route remain open. Selected/databank portfolio composition is still not
+  journaled and must preserve the explicit selection when migrated.
+
+- [x] Journal explicit selected/databank portfolio compositions separately from
+  candidate search. Keep 2..20 chosen components and display names at equal
+  weights, without ranking or excluding zero-trade components; show those
+  components in the response/UI. Invalid components remain evidence and prevent
+  combination. Tests cover twenty-component preservation, every write boundary,
+  exact backup/replay without live data or databank, alias/source-row retention,
+  workflow labels and immutable retry settings after browser selection changes.
+  Supplied origin links remain unverified. A rendered browser fixture confirms
+  selected components, saved-study identity, market-name display and zero-trade
+  disclosure. HTTP process-kill, broader browser recovery and power-loss coverage
+  remain open.

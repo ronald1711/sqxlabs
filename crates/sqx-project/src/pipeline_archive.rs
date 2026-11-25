@@ -84,7 +84,7 @@ pub fn import(archive:&Archive,value:Value)->Result<Value,String>{
     if state.events.iter().ne(backup.events.iter().map(|e|&e.run_id)) {
         return Err("Backup events are not in recorded order".into());
     }
-    let request_key=if state.root.run.request["origin"]=="web_robustness" {
+    let request_key=if matches!(state.root.run.request["origin"].as_str(),Some("web_robustness"|"web_portfolio"|"web_portfolio_combination"|"web_optimization")) {
         state.root.run.request["web_request"].get("request_key").map(|value|value.as_str().ok_or("Invalid stress-test request key")).transpose()?
     }else{None};
     let _request_guard=request_key.map(|key|stress_request_lock(archive,key)).transpose()?;
@@ -94,7 +94,7 @@ pub fn import(archive:&Archive,value:Value)->Result<Value,String>{
     for record_id in &existing {
         let record=PortableRecord{run_id:record_id.clone(),run:existing_reader.load_run(record_id)?};
         if let Some(key)=request_key {
-            if record.run_id!=*id && record.run.request["research_kind"]=="cli_pipeline_started" && record.run.request["origin"]=="web_robustness" && record.run.request["web_request"]["request_key"]==key {
+            if record.run_id!=*id && record.run.request["research_kind"]=="cli_pipeline_started" && matches!(record.run.request["origin"].as_str(),Some("web_robustness"|"web_portfolio"|"web_portfolio_combination"|"web_optimization")) && record.run.request["web_request"]["request_key"]==key {
                 return Err("Restored stress-test request key conflicts with an existing study".into());
             }
         }
@@ -252,6 +252,14 @@ mod backup_tests {
         let before=target.list().unwrap();
         assert!(import(&target,second.clone()).unwrap_err().contains("conflicts with an existing study"));
         assert_eq!(target.list().unwrap(),before);
+        for origin in ["web_portfolio","web_portfolio_combination","web_optimization"]{
+        let other_id=source.save("a".repeat(64),json!({"bars":[]}),json!({}),json!({
+            "research_kind":"cli_pipeline_started","origin":origin,"attempt_id":"another-workflow",
+            "web_request":{"request_key":"shared-request"},"config":{},"seed":42
+        }),json!({"status":"execution_not_recorded"})).unwrap();
+        assert!(import(&target,export(&source,&other_id).unwrap()).unwrap_err().contains("conflicts with an existing study"));
+        assert_eq!(target.list().unwrap(),before,"a request key cannot be rebound through a portfolio backup");
+        }
         let concurrent=Archive::new(dir.join("concurrent"));
         let outcomes=std::thread::scope(|scope|{
             let a=scope.spawn(||import(&concurrent,first));let b=scope.spawn(||import(&concurrent,second));

@@ -154,7 +154,7 @@ cargo run -q -p sqx-cli -- replay-pipeline --run-id <checkpoint-id> --resume
 # export-pipeline / import-pipeline also support these standalone study archives.
 
 # portfolio: best subset of generated strategies (equal weights + correlation)
-cargo run -q -p sqx-cli -- portfolio --symbol EURUSD --timeframe M1 --data data/eurusd_sample.csv --count 300 --top 12
+cargo run -q -p sqx-cli -- portfolio --symbol EURUSD --timeframe M1 --data data/eurusd_sample.csv --count 300 --top 12 --archive-dir data/research
 
 # multi-market cross-check (explicit symbols and timeframes in a manifest)
 cargo run -q -p sqx-cli -- crosscheck --strategy examples/rsi-mean-reversion.json --manifest examples/crosscheck-markets.json
@@ -394,7 +394,24 @@ and the final equal-weight combination. Failed calculations remain explicit and
 prevent selection. The same research history, backup and replay tools apply;
 replay verifies the recorded prefix rather than resuming inside a calculation.
 This remains exploratory selection on the supplied data, not independent
-validation. CLI/web portfolio entry points do not yet share this full journal.
+validation. The CLI `portfolio` command also uses this journal and prints its checkpoint before
+calculation. Use `pipeline-history`, `export-pipeline`, `import-pipeline` and
+`replay-pipeline --resume` with that checkpoint to inspect, move or finish it.
+CLI requests accept 1–2000 candidates, a shortlist of 2–12, and subset bounds
+`2 <= min-k <= max-k <= top`; invalid bounds fail before creating a study.
+Insufficient qualifying candidates produce a failed study with retained evidence.
+A successful replay confirms repeatability; its `execution_valid` field separately
+reports whether the recorded calculation was valid.
+Generated dashboard portfolios also retain the full journal. The browser keeps a
+pending request identity after a lost response; retrying locates the same study,
+including after backup/restore and loss of the loaded dataset. Starting a new
+study with current settings is an explicit action and does not cancel prior work.
+Selected/databank portfolios also freeze the exact chosen strategies, display
+names and equal weights. They retain every component without ranking or a
+minimum-trade filter; any invalid component prevents a combined result. The
+selection and any supplied origin metadata are retained, but supplied origin
+links are not independently verified. Both dashboard portfolio routes support
+request-identity recovery after lost responses.
 
 MCP `robustness` uses the supplied strategy as its walk-forward control and
 varies only exit distances within the same rule family. It no longer substitutes

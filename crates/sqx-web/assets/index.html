@@ -316,7 +316,7 @@
           <input type="number" id="opt-oos" value="0.3" min="0.05" max="0.5" step="0.05">
           <label for="opt-min-is">Minimum training trades</label><input id="opt-min-is" type="number" min="1" value="10">
           <label for="opt-min-oos">Minimum test trades per window</label><input id="opt-min-oos" type="number" min="1" value="10">
-          <button id="opt-run">Run optimizer</button>
+          <button id="opt-run">Run optimizer</button><button id="opt-new-request" class="secondary" hidden>Use current settings for a new study</button>
         </div>
         <div id="opt-results" class="muted">Pick a type and run. Walk-forward evaluates out-of-sample windows; the matrix sweeps windows × OOS.</div>
       </div>
@@ -335,10 +335,10 @@
         <h2>Portfolio composer</h2>
         <div class="row">
           <label class="muted">Count</label>
-          <input type="number" id="pf-count" value="300" min="20">
+          <input type="number" id="pf-count" value="300" min="10" max="2000" step="1">
           <label class="muted">Seed</label>
           <input type="number" id="pf-seed" value="42">
-          <button id="pf-build">Build portfolio</button>
+          <button id="pf-build">Build portfolio</button><button id="pf-new-request" class="secondary" hidden>Use current settings for a new study</button>
         </div>
         <div id="pf-results" class="muted">Generate strategies, pick the best subset and show the combined portfolio.</div>
       </div>
@@ -360,7 +360,7 @@
         <div class="row">
           <span class="muted" id="res-count">0 strategies</span>
           <span class="muted" id="res-overview"></span>
-          <button id="res-portfolio">Build portfolio from selection</button>
+          <button id="res-portfolio">Build portfolio from selection</button><button id="res-portfolio-new" class="secondary" hidden>Use current selection for a new study</button>
           <button id="compare-selected" class="secondary">Compare selected</button><button id="res-clear" style="background:#3a2430">Clear databank…</button>
           <a id="res-csv" href="/api/databank.csv" download="databank.csv" class="muted" style="text-decoration:underline">Download CSV</a>
         </div>
@@ -1192,28 +1192,52 @@ document.getElementById("ai-text-only").onchange = function() {
 renderAiProviderSelect();
 selectProfile("Groq");
 refreshAiStatus();
-document.getElementById("pf-build").onclick = async function() {
-  const box = document.getElementById("pf-results");
-  box.textContent = "Building...";
-  const d = await postJSON("/api/portfolio", JSON.stringify(Object.assign({},settings(),{
-    count: Number(document.getElementById("pf-count").value),
-    seed: Number(document.getElementById("pf-seed").value),
-    symbol: selectedSymbol(),
-    top: 12, min_k: 2, max_k: 4
-  })));
-  if (d.error) { box.innerHTML = "<span class=\"neg\">" + escapeHtml(d.error) + "</span>"; return; }
+let portfolioRequestPending = false;
+const portfolioPendingKey = 'sqx.pendingPortfolio.v1';
+document.getElementById('pf-new-request').onclick = function(){
+  if(portfolioRequestPending)return;
+  localStorage.removeItem(portfolioPendingKey);this.hidden=true;
+  document.getElementById('pf-results').textContent='The next build will use the current settings. This does not cancel an earlier study; inspect Builder → Saved research for its status.';
+};
+async function buildPortfolio() {
+  const box=document.getElementById('pf-results'),button=document.getElementById('pf-build'),fresh=document.getElementById('pf-new-request');
+  if(portfolioRequestPending)return;
+  portfolioRequestPending=true;button.disabled=true;
+  try{
+    let request;const pending=localStorage.getItem(portfolioPendingKey);
+    if(pending){request=JSON.parse(pending);if(!request || typeof request.request_key!=='string')throw Error('Stored request is invalid. Use current settings for a new study after inspecting Saved research.');}
+    else{
+      const count=Number(document.getElementById('pf-count').value),seed=Number(document.getElementById('pf-seed').value),symbol=selectedSymbol();
+      if(!symbol)throw Error('Load and select market data before building a portfolio.');
+      if(!Number.isSafeInteger(count)||count<10||count>2000||!Number.isSafeInteger(seed)||seed<0)throw Error('Use 10–2000 candidates and a nonnegative whole-number seed.');
+      request=Object.assign({},settings(),{count,seed,symbol,top:12,min_k:2,max_k:4,request_key:crypto.randomUUID()});
+      localStorage.setItem(portfolioPendingKey,JSON.stringify(request));
+    }
+    fresh.hidden=false;box.textContent=pending?'Retrying the saved request with its original settings…':'Building and saving portfolio research…';
+    let d;
+    try{d=await postJSON('/api/portfolio',JSON.stringify(request));}
+    catch(error){box.textContent='The response could not be received. The study may still be running. Retry to locate the same request, or inspect Builder → Saved research before starting a new study.';return;}
+    const id=d.archive && d.archive.started_run_id;
+    const saved=id?'<p class="muted">Saved portfolio study: '+escapeHtml(id)+'. Open Builder → Saved research to inspect, back up or resume. Replay checks repeatability, not independent correctness.</p>':'';
+    if(id){localStorage.removeItem(portfolioPendingKey);fresh.hidden=true;}
+    if(d.recovery_required){box.innerHTML=saved+'<p>'+escapeHtml(d.message||'This study already exists; inspect its saved status.')+'</p>';return;}
+    if(d.error){box.innerHTML=saved+'<p class="neg">'+escapeHtml(d.error)+'</p>';return;}
   const m = d.metrics;
   let html = "<p class=\"muted\">" + d.components.length + " strategies · net " + fmt(m.net_profit, 2) + " · PF " + fmt(m.profit_factor, 2) + " · DD " + fmt(m.max_drawdown_pct, 2) + "% · Return/DD " + fmt(m.return_dd, 2) + "</p>";
   html += "<table><tr><th>Strategy</th><th>Weight</th><th>Net</th><th>DD %</th><th>Trades</th></tr>";
-  d.components.forEach(function(c) { html += "<tr><td>" + c.name + "</td><td>" + fmt(c.weight, 2) + "</td><td>" + fmt(c.net_profit, 2) + "</td><td>" + fmt(c.max_drawdown_pct, 2) + "</td><td>" + fmt(c.trades, 0) + "</td></tr>"; });
+  d.components.forEach(function(c) { html += "<tr><td>" + escapeHtml(c.name) + "</td><td>" + fmt(c.weight, 2) + "</td><td>" + fmt(c.net_profit, 2) + "</td><td>" + fmt(c.max_drawdown_pct, 2) + "</td><td>" + fmt(c.trades, 0) + "</td></tr>"; });
   html += "</table>";
   html += "<h2 style=\"margin-top:16px\">Correlation</h2><p>Undefined values are not evidence of diversification; flat returns or non-positive equity can make correlation unavailable.</p><table>";
   d.correlation.forEach(function(row) { html += "<tr>"; row.forEach(function(v) { html += "<td>" + fmt(v, 2) + "</td>"; }); html += "</tr>"; });
   html += "</table>";
   html += "<h2 style=\"margin-top:16px\">Portfolio equity</h2><div id=\"pf-chart\"></div>";
-  box.innerHTML = html;
+  box.innerHTML = saved + html;
   drawChart(d.equity, "pf-chart");
-};
+
+  }catch(error){box.textContent=error.message||String(error);fresh.hidden=false;}
+  finally{portfolioRequestPending=false;button.disabled=false;}
+}
+document.getElementById('pf-build').onclick=buildPortfolio;
 
 async function loadCatalog() {
   CATALOG = await getJSON("/api/catalog");
@@ -1239,11 +1263,24 @@ document.getElementById("proj-run").onclick = async function() {
   box.textContent = researchNotice(d.research_context)+"\nDatabank: " + (d.databank || 0) + " strategies\n\n" + (d.log || []).join("\n")+archiveNote;
 };
 
-document.getElementById("opt-run").onclick = async function() {
+let optimizationRequestPending=false;
+const optimizationPendingKey='sqx.pendingOptimization.v1';
+document.getElementById('opt-new-request').onclick=function(){
+  if(optimizationRequestPending)return;
+  localStorage.removeItem(optimizationPendingKey);this.hidden=true;
+  document.getElementById('opt-results').textContent='The next run will use current settings. This does not cancel an earlier study; inspect Builder → Saved research for its status.';
+};
+async function runOptimization() {
   const box = document.getElementById("opt-results");
-  box.textContent = "Running...";
+  const button=document.getElementById('opt-run'),fresh=document.getElementById('opt-new-request');
+  if(optimizationRequestPending)return;
+  optimizationRequestPending=true;button.disabled=true;
+  try{
+  let body;const pending=localStorage.getItem(optimizationPendingKey);
+  if(pending){body=JSON.parse(pending);if(!body||typeof body.request_key!=='string')throw Error('Stored request is invalid. Inspect Saved research before choosing a new study.');}
+  else{
   const inputs=generatorInputs(box);if(!inputs)return;
-  const body = Object.assign({
+  body = Object.assign({
     kind: document.getElementById("opt-kind").value,
     count: Number(document.getElementById("opt-count").value),
     windows: Number(document.getElementById("opt-windows").value),
@@ -1252,23 +1289,32 @@ document.getElementById("opt-run").onclick = async function() {
     oos: Number(document.getElementById("opt-oos").value),
     symbol: selectedSymbol()
   }, inputs);
-  const d = await postJSON("/api/optimize", JSON.stringify(body));
-  if (d.error) { box.innerHTML = "<span class=\"neg\">" + escapeHtml(d.error) + "</span>"; return; }
+  if(!body.symbol)throw Error('Load and select market data before optimization.');
+  body.request_key=crypto.randomUUID();localStorage.setItem(optimizationPendingKey,JSON.stringify(body));
+  }
+  fresh.hidden=false;box.textContent=pending?'Retrying the saved optimization settings…':'Running and saving optimization research…';
+  let d;try{d=await postJSON('/api/optimize',JSON.stringify(body));}
+  catch(error){box.textContent='The response could not be received. The study may still be running. Retry to locate the same request, or inspect Builder → Saved research before starting a new study.';return;}
+  const id=d.archive&&d.archive.started_run_id;
+  const saved=id?'<p class="muted">Saved optimization study: '+escapeHtml(id)+'. Open Builder → Saved research to inspect, back up or resume. Replay checks repeatability, not independent correctness.</p>':'';
+  if(id){localStorage.removeItem(optimizationPendingKey);fresh.hidden=true;refreshResearchRuns();}
+  if(d.recovery_required){box.innerHTML=saved+'<p>'+escapeHtml(d.message||'This study already exists; inspect its saved status.')+'</p>';return;}
+  if(d.error){box.innerHTML=saved+'<p class="neg">'+escapeHtml(d.error)+'</p>';return;}
   if (d.kind === "simple") {
     let html = "<table><tr><th>Name</th><th>PF</th><th>Net</th><th>Trades</th><th>DD %</th></tr>";
     (d.results || []).forEach(function(r) {
       html += "<tr><td>" + escapeHtml(r.name) + "</td><td>" + fmt(r.profit_factor, 2) + "</td><td>" + fmt(r.net_profit, 2) + "</td><td>" + fmt(r.trades, 0) + "</td><td>" + fmt(r.dd_pct, 2) + "</td></tr>";
     });
     html += "</table>";
-    box.innerHTML = html;
+    box.innerHTML = saved+html;
     refreshDatabank();
   } else if (d.kind === "walk-forward") {
-    let html = "<table><tr><th>Windows</th><th>OOS trades</th><th>OOS net</th><th>OOS PF</th><th>OOS win %</th><th>OOS DD %</th></tr>";
+    let html = "<table><tr><th>Windows with OOS execution</th><th>OOS trades</th><th>OOS net</th><th>OOS PF</th><th>OOS win %</th><th>OOS DD %</th></tr>";
     html += "<tr><td>" + d.windows + "</td><td>" + d.oos_trades + "</td><td>" + fmt(d.oos_net_profit, 2) + "</td><td>" + fmt(d.oos_profit_factor, 2) + "</td><td>" + fmt(d.oos_winning_pct, 1) + "</td><td>" + fmt(d.oos_max_dd_pct, 2) + "</td></tr></table>";
     html += '<p><b>'+ (d.evidence_sufficient ? 'Trade-count criteria met' : 'Insufficient or incomplete evidence') + '</b> · '+d.candidates_attempted+' candidates attempted. This is not a robustness certificate or an untouched final holdout.</p>';
     if(d.errors && d.errors.length)html+='<p class="neg">'+d.errors.map(escapeHtml).join('; ')+'</p>';
     html+='<div class="table-scroll"><table><tr><th>Window</th><th>Test start</th><th>Test end</th><th>Starting equity</th><th>Final equity</th><th>Trades</th><th>Evidence</th></tr>'+(d.window_results||[]).map(w=>'<tr><td>'+(w.index+1)+'</td><td>'+day(w.test_start)+'</td><td>'+day(w.test_end)+'</td><td>'+fmt(w.starting_equity,2)+'</td><td>'+fmt(w.final_equity,2)+'</td><td>'+w.oos_trades+'</td><td>'+escapeHtml(w.reason)+'</td></tr>').join('')+'</table></div>';
-    box.innerHTML = html;
+    box.innerHTML = saved+html;
   } else {
     let html = "<table><tr><th>Windows</th><th>OOS</th><th>Net</th><th>PF</th><th>Trades</th><th>DD %</th><th>Evidence</th></tr>";
     (d.rows || []).forEach(function(r) {
@@ -1277,10 +1323,13 @@ document.getElementById("opt-run").onclick = async function() {
       html += "<tr style=\"background:" + bg + "\"><td>" + r.windows + "</td><td>" + fmt(r.oos, 2) + "</td><td>" + fmt(r.net, 2) + "</td><td>" + fmt(r.pf, 2) + "</td><td>" + r.trades + "</td><td>" + fmt(r.dd_pct, 2) + "</td><td>" + (r.evidence_sufficient ? "Trade-count criteria met" : "Insufficient evidence") + "</td></tr>";
     });
     html += "</table><p>Matrix cells are additional research trials; selecting the best cell does not create an untouched holdout.</p>";
-    box.innerHTML = html;
+    box.innerHTML = saved+html;
   }
   const notice=document.createElement("p");notice.textContent=researchNotice(d.research_context);box.prepend(notice);
-};
+  }catch(error){box.textContent=error.message||String(error);fresh.hidden=false;}
+  finally{optimizationRequestPending=false;button.disabled=false;}
+}
+document.getElementById('opt-run').onclick=runOptimization;
 
 function parseGeneratorRanges(text) {
   const ranges=[],seen=new Set();

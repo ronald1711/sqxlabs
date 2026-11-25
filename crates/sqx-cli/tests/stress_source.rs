@@ -9,14 +9,21 @@ fn stress_and_portfolio_commands_bind_sources_and_reject_failed_execution(){
     let csv="timestamp,open,high,low,close,volume\n1700000000,150,151,149,150,1\n1700000060,150,151,149,150,1\n";fs::write(&data,csv).unwrap();
     let run=|name:&str,args:&[&str]|{
         let mut cmd=Command::new(env!("CARGO_BIN_EXE_sqx-cli"));cmd.arg(name).arg("--data").arg(&data);
-        if matches!(name,"robustness"|"montecarlo") {cmd.arg("--archive-dir").arg(root.join("archive"));}
+        if matches!(name,"robustness"|"montecarlo"|"portfolio") {cmd.arg("--archive-dir").arg(root.join("archive"));}
         if name=="portfolio"{cmd.args(["--count","2"]);}else{cmd.arg("--strategy").arg(&strategy);if name=="montecarlo"{cmd.args(["--runs","2"]);}else{cmd.args(["--mc-runs","2","--retest-runs","2","--windows","2"]);}}
         cmd.args(args).output().unwrap()
     };
     for name in ["montecarlo","robustness","portfolio"]{
         let missing=run(name,&[]);assert!(!missing.status.success());assert!(String::from_utf8_lossy(&missing.stderr).contains("--symbol"));
-        let output=run(name,&["--symbol","USDJPY","--timeframe","M1","--config",config.to_str().unwrap()]);assert_eq!(output.status.success(),name=="portfolio","{}",String::from_utf8_lossy(&output.stderr));
+        let output=run(name,&["--symbol","USDJPY","--timeframe","M1","--config",config.to_str().unwrap()]);assert!(!output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
         let text=String::from_utf8(output.stdout).unwrap();let context:Value=serde_json::from_str(text.lines().find_map(|s|s.strip_prefix("Research context: ")).unwrap()).unwrap();
+        if name=="portfolio"{
+            let receipt:Value=serde_json::from_str(text.lines().find_map(|s|s.strip_prefix("Portfolio archive: ")).unwrap()).unwrap();
+            let saved=sqx_project::archive::Archive::new(root.join("archive")).load(receipt["run_id"].as_str().unwrap()).unwrap();
+            assert_eq!(saved.run.result["report"]["portfolio"]["candidates"].as_array().unwrap().len(),2);
+            assert!(!saved.run.result["report"]["errors"].as_array().unwrap().is_empty());
+            assert!(saved.run.result["report"]["portfolio"]["selected"].as_array().unwrap().is_empty());
+        }
         if name=="robustness" {
             let errors=context["errors"].as_array().expect("aggregate errors recorded");
             for stage in ["Monte Carlo:","MC retest:","Walk-forward:"] {

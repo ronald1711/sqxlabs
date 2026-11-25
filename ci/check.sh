@@ -29,6 +29,9 @@ node crates/sqx-web/tests/confirmation_notice.cjs
 node crates/sqx-web/tests/backtest_errors.cjs
 
 node crates/sqx-web/tests/robustness_errors.cjs
+node crates/sqx-web/tests/portfolio_request.cjs
+node crates/sqx-web/tests/optimization_request.cjs
+node crates/sqx-web/tests/selected_portfolio_request.cjs
 node crates/sqx-web/tests/dataset_context.cjs
 
 node crates/sqx-web/tests/comparison_ui.cjs

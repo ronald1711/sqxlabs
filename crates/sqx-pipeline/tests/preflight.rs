@@ -200,3 +200,15 @@ fn mixed_defined_and_undefined_portfolio_scores_have_a_valid_ranking_order(){
  for &i in &study.shortlist{assert!(study.candidates[i].metrics.profit_factor.is_finite());assert!(study.candidates[i].metrics.number_of_trades>=5.0);}
  for pair in study.shortlist.windows(2){assert!(study.candidates[pair[0]].metrics.profit_factor>=study.candidates[pair[1]].metrics.profit_factor);}
 }
+
+#[test]
+fn fixed_portfolio_composition_is_standalone_and_never_becomes_a_search(){
+ let bars:Vec<_>=(0..4).map(|i|Bar::new(i*60000,1.1,1.1,1.1,1.1,1.0)).collect();let instrument=Instrument::fx("EURUSD");let config=BacktestConfig::default();let generator=GeneratorConfig::default();
+ let task=Task{kind:TaskKind::PortfolioCombination{names:vec!["First display name".into(),"Second display name".into()],strategies:vec![sqx_strategy::Strategy::new("first rules"),sqx_strategy::Strategy::new("second rules")]}};
+ let pipeline=Pipeline{name:"fixed selection".into(),tasks:vec![task.clone()]};let mut events=Vec::new();
+ let report=sqx_pipeline::run_observed(&pipeline,&bars,&instrument,&config,252.0,&generator,0,&mut |event|{events.push(serde_json::to_value(event).unwrap());Ok(())}).unwrap();
+ assert!(report.errors.is_empty());assert!(report.portfolio.is_none());assert!(report.databank.is_empty());let combination=report.portfolio_combination.unwrap();assert_eq!(combination.components.len(),2);assert_eq!(combination.names[0],"First display name");assert_eq!(combination.components[0].strategy.name,"first rules");
+ assert_eq!(events[1]["kind"],"portfolio_combination");assert!(!events.iter().any(|event|matches!(event["event"]["kind"].as_str(),Some("shortlist"|"subset"))));
+ let mixed=Pipeline{name:"invalid mixed composition".into(),tasks:vec![task,Task{kind:TaskKind::Build{count:1,keep:1}}]};
+ let invalid=sqx_pipeline::run_observed(&mixed,&bars,&instrument,&config,252.0,&generator,0,&mut |_|panic!("mixed composition must be rejected before evaluation")).unwrap();assert!(!invalid.errors.is_empty());assert!(invalid.portfolio_combination.is_none());
+}

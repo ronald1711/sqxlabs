@@ -1,8 +1,29 @@
 use std::{fs,io::Write,process::{Command,Stdio}};
 use serde_json::{json,Value};
 use sqx_project::archive::Archive;
+// Parallel Unix process startup can briefly inherit a sibling test's writable
+// executable descriptor until exec closes it. Retry only ETXTBSY, before any
+// child exists; never rerun an executed study or suppress other spawn errors.
+fn retry_text_busy<T>(mut spawn:impl FnMut()->std::io::Result<T>)->std::io::Result<T>{
+ for attempt in 0..100 {
+  match spawn(){
+   Err(error) if cfg!(unix) && error.raw_os_error()==Some(26) && attempt<99=>std::thread::sleep(std::time::Duration::from_millis(10)),
+   result=>return result,
+  }
+ }
+ unreachable!()
+}
+#[test]
+fn process_start_retry_is_bounded_and_does_not_hide_other_errors(){
+ let mut calls=0;
+ let result=retry_text_busy(||{calls+=1;if calls<3{Err(std::io::Error::from_raw_os_error(26))}else{Ok(42)}});
+ if cfg!(unix){assert_eq!(result.unwrap(),42);assert_eq!(calls,3);}else{assert!(result.is_err());assert_eq!(calls,1);}
+ let mut calls=0;let result:std::io::Result<()>=retry_text_busy(||{calls+=1;Err(std::io::Error::from_raw_os_error(2))});assert_eq!(result.unwrap_err().raw_os_error(),Some(2));assert_eq!(calls,1);
+ let mut calls=0;let result:std::io::Result<()>=retry_text_busy(||{calls+=1;Err(std::io::Error::from_raw_os_error(26))});assert_eq!(result.unwrap_err().raw_os_error(),Some(26));assert_eq!(calls,if cfg!(unix){100}else{1});
+}
 fn rpc(executable:&std::path::Path,root:&std::path::Path,name:&str,args:Value)->Value{
- let mut child=Command::new(executable).env("SQX_MCP_RESEARCH_DIR",root).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+ let mut command=Command::new(executable);command.env("SQX_MCP_RESEARCH_DIR",root).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+ let mut child=retry_text_busy(||command.spawn()).unwrap();
  writeln!(child.stdin.take().unwrap(),"{}",json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":args}})).unwrap();
  let output=child.wait_with_output().unwrap();assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
  let response:Value=serde_json::from_slice(&output.stdout).unwrap();response["result"].clone()
@@ -22,7 +43,8 @@ fn mcp_robustness_survives_process_death_source_deletion_and_portable_restore(){
  for kind in [sqx_strategy::SignalKind::LongEntry,sqx_strategy::SignalKind::LongExit]{strategy.signals.push(sqx_strategy::Signal::new(kind,vec![sqx_strategy::Condition::new(sqx_strategy::Operand::Const(1.0),sqx_strategy::Comparator::Gt,sqx_strategy::Operand::Const(0.0))],sqx_strategy::Join::And));}
  let archive=Archive::new(root.join("archive"));
  struct Child(std::process::Child);impl Drop for Child{fn drop(&mut self){let _=self.0.kill();let _=self.0.wait();}}
- let mut child=Child(Command::new(&executable).env("SQX_MCP_RESEARCH_DIR",archive.root()).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
+ let mut command=Command::new(&executable);command.env("SQX_MCP_RESEARCH_DIR",archive.root()).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
+ let mut child=Child(retry_text_busy(||command.spawn()).unwrap());
  writeln!(child.0.stdin.take().unwrap(),"{}",json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"robustness","arguments":{"data":csv,"symbol":"EURUSD","timeframe":"M1","strategy":strategy}}})).unwrap();
  let deadline=std::time::Instant::now()+std::time::Duration::from_secs(120);let mut seen=std::collections::BTreeSet::new();
  loop{

@@ -32,20 +32,20 @@ verification evidence. Scope must not be reduced to the currently passing tests.
 
 ## Current completion audit (supersedes historical pending notes below)
 
-Latest integration status (2026-11-24): [PR #19](https://github.com/ronald1711/sqxlabs/pull/19)
-merged as `56ee98be` after all four required Linux/macOS debug/release checks passed
-on `4efdfd58` ([run 45473982490](https://github.com/ronald1711/sqxlabs/actions/runs/45473982490)).
-The same head passed 459 local workspace tests with zero failed or ignored, and
-the workspace build passed. Main now includes standalone Monte Carlo recovery,
-MCP robustness study recovery, shared-input validation during archive listings,
-and explicit empty/loading/failed dataset states in the dashboard.
+Latest integration status (2026-11-24): [PR #20](https://github.com/ronald1711/sqxlabs/pull/20)
+merged as `f07fd64f` after all four required Linux/macOS debug/release checks passed
+on `162aad88` ([run 45481746750](https://github.com/ronald1711/sqxlabs/actions/runs/45481746750)).
+The same head passed 472 local workspace tests with zero failed or ignored, and
+the workspace build passed. Main includes MCP single-backtest and portfolio
+study recovery, operation-local shared-input validation and finite-only portfolio
+ranking. Earlier integration statements below are historical.
 
-The `codex/mcp-backtest-evidence` follow-up adds MCP single-backtest and portfolio
-study records and reduces repeated shared-input processing. It is not yet merged;
-its targeted tests and completed portable portfolio recovery checks do not
-replace a full-workspace and four-check release gate for that revision. Earlier
-integration statements below are historical. No completion requirement or
-independent platform-execution gap is closed by these test counts.
+The `codex/portfolio-entrypoints` follow-up extends the journal to CLI and
+both dashboard portfolio routes. Its targeted process-kill, portable recovery,
+request-identity and rendered-interface checks do not replace its own full
+workspace and four-check integration gate. That follow-up is not yet merged.
+No completion requirement or independent platform-execution gap is closed by
+these test counts. MT5 terminal work is deferred at the user's request.
 
 This table is an incomplete-work audit, not certification. Later sections are an
 append-only implementation history; an older “pending” statement may have been
@@ -55,13 +55,13 @@ resolved by a later increment. The numbered requirements above remain unchanged.
 | --- | --- | --- |
 | 1. Accounting/execution | Account fixtures and engine/tick tests exercise costs, conversions, margin, stops and financing. Frozen MT5 calculation references cover four EURUSD/EUR and four USDJPY/EUR cases; the opt-in forex-base margin model separates margin conversion from profit conversion (not actual-fill parity). Schema-1 results reconcile settlement chains, financing accruals, sampled account components, admission/exit/stop-out correspondence, effective stop chains and final equity; inconsistent evidence is rejected by metrics. | Independent end-to-end execution comparisons across supported instrument/account combinations; complete auditable account/order event reconciliation. |
 | 2. Simulation contract | `ExecutionEvidence` stores entry attempts, scheduled exit decisions, tick coverage and currency; `BarAmbiguity` explicitly limits two-path comparisons to local scenarios. | Full intrabar order lifecycle and state transitions; distinguish local path scenarios from global adverse/favourable bounds; remaining confirmation/calendar coverage cases. |
-| 3. Independent evidence | Indicator cross-checks use pinned Rust reference packages with seed/convention exceptions. Separate Decimal references cover eight scoped USDJPY/EUR strategy cases, and integer-price fixtures cover walk-forward and symmetric/dynamic stop cases. Run 45473982490 passed all four required Linux/macOS debug/release checks for 4efdfd58, merged in 56ee98be; follow-up revisions require their own checks. The isolated MT5 mathematical tester runs, but no market-mode strategy comparison has completed. | Coverage of every advertised indicator/convention and supported execution feature; independently sourced MT5/broker strategy/fill fixtures; durable release artifacts and successful required checks for each released revision. The four matrix checks are now required on main with strict/admin enforcement; green checks do not prove the broader validation requirements. |
+| 3. Independent evidence | Indicator cross-checks use pinned Rust reference packages with seed/convention exceptions. Separate Decimal references cover eight scoped USDJPY/EUR strategy cases, and integer-price fixtures cover walk-forward and symmetric/dynamic stop cases. Run 45481746750 passed all four required Linux/macOS debug/release checks for 162aad88, merged in f07fd64f; follow-up revisions require their own checks. The isolated MT5 mathematical tester runs, but no market-mode strategy comparison has completed. | Coverage of every advertised indicator/convention and supported execution feature; independently sourced MT5/broker strategy/fill fixtures; durable release artifacts and successful required checks for each released revision. The four matrix checks are now required on main with strict/admin enforcement; green checks do not prove the broader validation requirements. |
 | 4. Reproducible records | Immutable inputs/results, restore/replay and process-kill tests cover selected CLI, assistant and evolution routes. Standalone Monte Carlo, CLI/web stress studies and MCP robustness also retain their frozen inputs and ordered outcomes through shared pipeline recovery and backup tools. Browser imports persist as immutable versions and can be explicitly reloaded after restart, including optional calendar/normalization evidence. Selected routes automatically retain exact engine bytes; CLI evolution inspection distinguishes missing and verified copies. MCP generation preserves every candidate checkpoint/full result and supports single-trial and whole-search recovery with engine checks, replay and writer exclusion; recovery reproduces all 64 outcomes of a separate uninterrupted fixture. MT5 journals support verified export and process resume; new captures bind server/login through a private fingerprint. | Complete recording/conversion provenance and durable accounting on all research routes; legacy missing-engine recovery, provider-conversation recovery and bounded retained-result memory. Executable copies do not preserve runtime dependencies. |
 | 5. Research validity | Walk-forward warms from history, carries capital and records candidate outcomes/selection; an independent integer-price SMA fixture checks segmented selection and capital. Holdout audits include declared candle extents, assistant/crosscheck/comparison/evolution exposure and MCP generation phases; record counts remain distinct from independent trial counts. Commitment evidence survives experiment restore. | Complete durable trial accounting across every entry point and independent boundary/evidence review. Search-history completeness and no-known-overlap labels do not establish untouched data outside the registry. |
 | 6. Operational workspace | Resumable evolution and MCP generation, raw backups, saved comparisons and bounded assistant tools have tests. UI trade explanations show protection, financing, stop-out and settlement; overview explains limited evidence. A 15-window read-only live capture matched all 45 bid candles but failed the declared conversion freshness limit at 13 USDJPY events; it retained legacy account binding. A separate fingerprint-bound recording resumed across processes. A prospective five-window capture passed observed OHLC/freshness checks; seven execution cases matched independent arithmetic, while one absent SMA signal left execution coverage incomplete. HTTP remote addresses are rejected. | Broader live recording/outage/power-loss validation, complete evidence/recovery UI, AI provider-conversation recovery, known-strategy paper reconciliation and export parity. Remote authenticated service is not supported. |
 
 
-### MCP portfolio recovery evidence (follow-up branch, 2026-11-24)
+### MCP portfolio recovery evidence (merged in PR #20, 2026-11-24)
 
 The portfolio study retains all candidate executions before selection, explicit
 shortlist indices, subset start/outcome records and the final equal-weight
@@ -82,7 +82,8 @@ the local verification log. These concurrent local runs are not a controlled
 benchmark. Large backup memory/latency and broader failure testing remain open.
 CLI/web portfolio entry points still need the same complete journal. This is
 reproducibility evidence for exploratory research, not independent execution or
-holdout validation. Full-workspace/remote checks for the follow-up remain pending.
+holdout validation. The full-workspace and four remote checks passed for the
+merged MCP revision; CLI/web follow-up checks remain separate.
 
 ### Standalone robustness recovery evidence (2026-11-24)
 
@@ -4357,3 +4358,45 @@ Compact backup SHA-256:
 `e89405f596dd3ae0128af74e751613bdb66ccb56a0854cec7629c35bf3f6e397`.
 Exporter executable SHA-256:
 `feb8f356e23d8a69b908787827b93c6661299a96ba89aa227a881bbe77f4ca20`.
+
+### Dashboard optimization journal (unmerged follow-up, 2026-11-24)
+
+The optimization endpoint now freezes a shared-pipeline start record before
+execution. Simple discovery retains every candidate; walk-forward and matrix
+modes retain explicit cell specifications, minimum IS/OOS trade thresholds,
+per-candidate execution events and full cell reports. The matrix does not select
+a best OOS cell or populate a deployable-strategy databank. Invalid cells remain
+in the archived report and prevent the response from claiming a successful study.
+Existing default pipeline/CLI discovery serialization remains unchanged.
+
+The browser retains request settings and identity after a lost response, blocks
+double starts and offers an explicit new-study action. Recovery lookup precedes
+live-data lookup, and imported identities share the existing cross-workflow
+conflict checks. Saved-study receipts point to the existing inspection, portable
+backup and recovery UI. Original files and terminal access are not needed for
+replay of frozen inputs.
+
+Two pipeline tests pass: full reports match direct configured computation and
+every observer failure boundary aborts with the exact prior event prefix. The
+frontend request test and inline syntax checks pass. An invalid twelve-cell
+matrix survives deletion/import/replay without becoming valid. Successful
+three-mode portable recovery passed (67.19 seconds). A real HTTP process-kill
+test stops after a persisted walk-forward candidate outcome, deletes the source
+CSV and original archive, imports the partial backup into an empty server and
+resumes all 96 candidate outcomes. The saved prefix is unchanged; the final
+completion identity matches an uninterrupted frozen-input replay, and a second
+recovery appends nothing. Full workspace, platform checks and rendered
+optimization UI verification remain pending for this increment. This is reproducibility evidence, not an
+independent review of walk-forward arithmetic or untouched holdout provenance.
+
+
+Rendered optimization review (2026-11-24): an isolated local dashboard ran a
+1500-bar EURUSD/M1 synthetic fixture, two walk-forward windows and two candidates
+per window, with deliberately unmet 999/777 trade thresholds. The page showed
+four attempts, both rejected windows, unchanged equity, the immutable saved-study
+receipt and explicit insufficient-evidence/holdout limitations. It did not present
+missing trades as validation success. The review exposed an ambiguous “Windows”
+summary label: that counter counts only OOS executions, not all examined windows.
+The label now says “Windows with OOS execution”. Inline syntax and request tests
+pass; the final label-only revision has not been recaptured in the browser.
+This was a local fixture; no MT5 or broker connection was used.
