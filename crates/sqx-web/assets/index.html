@@ -67,6 +67,9 @@
   .muted, .card h2, .cond-row label { font-size:13px; }
   .nav { position:sticky; top:0; align-self:flex-start; min-height:calc(100vh - 70px); }
   .nav-btn { min-height:44px; }
+  .search-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; }
+  .search-fields label { display:flex; flex-direction:column; gap:6px; }
+  .search-fields input[type=number] { width:100%; box-sizing:border-box; }
   .workspace-context { display:flex; flex-wrap:wrap; gap:8px 22px; padding:12px 18px; margin-bottom:18px; border:1px solid var(--line); border-radius:10px; background:var(--panel); }
   .workspace-context strong { display:block; color:var(--fg); }
   .workspace-context span { color:var(--dim); font-size:12px; }
@@ -129,7 +132,7 @@
     <div id="research-context" class="workspace-context" aria-label="Current research context"></div>
     <div id="workspace-message" role="alert" hidden></div>
     <section id="tab-home" class="tab active">
-      <div class="card hero"><h2>From market data to tested strategies.</h2><p>Build transparent rules, challenge the results, and export your research.</p><div class="row"><button data-go="builder">Continue in Builder</button><button data-go="data" class="secondary">Import market data</button></div></div>
+      <div class="card hero"><h2>From market data to tested strategies.</h2><p>Build transparent rules, challenge the results, and export your research.</p><div class="row"><button data-go="optimizer">Find and compare strategies</button><button data-go="data" class="secondary">Import market data</button></div></div>
       <div class="journey"><button data-go="data">01 · Prepare data<small>Inspect coverage and import CSV</small></button><button data-go="builder">02 · Build or discover<small>Write rules and run a simulation</small></button><button data-go="retester">03 · Validate<small>Explore costs and Monte Carlo outcomes</small></button><button data-go="results">04 · Compare & export<small>Inspect candidates and choose a platform</small></button></div>
       <div class="card" aria-labelledby="validation-scope-title">
         <h2 id="validation-scope-title">How much can you trust a result?</h2>
@@ -276,28 +279,45 @@
       </div>
     </section>
     <section id="tab-optimizer" class="tab">
+      <div class="card" aria-labelledby="discovery-guide-title">
+        <h2 id="discovery-guide-title">Find and compare strategies</h2>
+        <p>Start here. A search tries many rule combinations and keeps candidates worth investigating. A high score is a starting point, not proof that a strategy works.</p>
+        <ol style="line-height:1.8">
+          <li><b>Choose your market data.</b> Check the selected symbol, period and data quality. <button class="secondary" data-go="data">Check data</button></li>
+          <li><b>Check your account and costs.</b> Use the editable EUR starting profile or enter your assumptions. <button class="secondary" data-go="settings">Check costs</button></li>
+          <li><b>Choose how to search.</b> For serious research, reserve final-test data before searching. To learn the interface, use the exploratory search below.</li>
+          <li><b>Compare candidates.</b> Look at profit, drawdown and trade count together. Open a candidate to inspect its rules and trades, then test its sensitivity to costs.</li>
+        </ol>
+        <div class="row"><button data-go="builder" data-focus="experiment-panel">Set up a search with separate final-test data</button><button class="secondary" data-go="optimizer" data-focus="quick-search">Try an exploratory search</button></div>
+        <p class="muted">An exploratory search uses the full selected dataset. Those same data cannot later be described as an untouched final test. Opening a setup does not start a search or change your settings.</p>
+      </div>
       <div class="card">
-        <h2>Discover strategies</h2><p class="muted">Choose the search space, generate candidates, then evaluate them on unseen data. Generated results are not robustness certificates.</p>
-        <div class="row">
-          <label class="muted">Min cond.</label>
-          <input type="number" id="gen-minc" value="1" min="1" max="6">
-          <label class="muted">Max cond.</label>
-          <input type="number" id="gen-maxc" value="3" min="1" max="6">
-          <label class="muted">SL min</label>
-          <input type="number" id="gen-slmin" value="0">
-          <label class="muted">SL max</label>
-          <input type="number" id="gen-slmax" value="200">
-          <label class="muted">PT min</label>
-          <input type="number" id="gen-ptmin" value="0">
-          <label class="muted">PT max</label>
-          <input type="number" id="gen-ptmax" value="400">
-          <label class="muted">Size</label>
-          <input type="number" id="gen-size" value="0.1" step="0.1">
+        <h2>Search settings · which rules may be tried?</h2><p class="muted">Choose the search space, generate candidates, then evaluate them on unseen data. Generated results are not robustness certificates.</p>
+        <div class="search-fields">
+          <label>Minimum conditions<input type="number" id="gen-minc" value="1" min="1" max="6"></label>
+          <label>Maximum conditions<input type="number" id="gen-maxc" value="3" min="1" max="6"></label>
+          <label>Stop-loss minimum<input type="number" id="gen-slmin" value="0"></label>
+          <label>Stop-loss maximum<input type="number" id="gen-slmax" value="200"></label>
+          <label>Profit-target minimum<input type="number" id="gen-ptmin" value="0"></label>
+          <label>Profit-target maximum<input type="number" id="gen-ptmax" value="400"></label>
+          <label>Size<input type="number" id="gen-size" value="0.1" step="0.1"></label>
           <label><input type="checkbox" id="gen-long" checked> Long</label>
           <label><input type="checkbox" id="gen-short" checked> Short</label>
         </div>
         <label class="muted" style="display:block; margin-top:8px;">Parameter ranges — one per line: INDICATOR.param=min..max</label>
         <textarea id="gen-ranges" style="height:80px;" placeholder="RSI.period=5..30&#10;SMA.period=10..50"></textarea>
+      </div>
+      <div id="quick-search" tabindex="-1" class="card" style="margin-top:18px">
+        <h2 id="quick-search-title">Exploratory search · try the workflow</h2><p>Uses all selected candles and the search settings above. Candidate count controls how many strategies are tried; the seed lets you repeat the same search with the same inputs.</p>
+        <div class="row">
+          <label class="muted">Count</label>
+          <input type="number" id="count" value="200" min="1" max="2000">
+          <label class="muted">Seed</label>
+          <input type="number" id="seed" value="42">
+          <button id="btn-generate">Find candidates</button>
+          <button id="gen-new-request" hidden>Start a new search</button>
+        </div>
+        <div id="gen-results" class="muted">No search results yet. Choose your data and costs, review the search settings, then select Find candidates.</div>
       </div>
       <div class="card" style="margin-top:18px">
         <h2>Optimizer</h2>
@@ -319,18 +339,6 @@
           <button id="opt-run">Run optimizer</button><button id="opt-new-request" class="secondary" hidden>Use current settings for a new study</button>
         </div>
         <div id="opt-results" class="muted">Pick a type and run. Walk-forward evaluates out-of-sample windows; the matrix sweeps windows × OOS.</div>
-      </div>
-      <div class="card" style="margin-top:18px">
-        <h2>Reproducible quick search</h2>
-        <div class="row">
-          <label class="muted">Count</label>
-          <input type="number" id="count" value="200" min="1" max="2000">
-          <label class="muted">Seed</label>
-          <input type="number" id="seed" value="42">
-          <button id="btn-generate">Generate</button>
-          <button id="gen-new-request" hidden>Start a new search</button>
-        </div>
-        <div id="gen-results" class="muted">Click generate to backtest random strategies and rank them.</div>
       </div>
       <div class="card" style="margin-top:18px">
         <h2>Portfolio composer</h2>
@@ -357,7 +365,7 @@
     </section>
     <section id="tab-results" class="tab">
       <div class="card">
-        <h2>Results — databank</h2>
+        <h2>Compare saved candidates</h2><p>Select two or more candidates, then choose Compare selected. Compare candidates tested with the same data and costs. Profit factor is gross profit divided by gross loss; drawdown is the largest equity fall. A small trade count gives weak evidence.</p>
         <div class="row">
           <span class="muted" id="res-count">0 strategies</span>
           <span class="muted" id="res-overview"></span>
@@ -914,13 +922,14 @@ async function runGeneration() {
     rows += "<tr><td>" + escapeHtml(r.name) + "</td><td class=\"" + cls(r.profit_factor - 1) + "\">" + fmt(r.profit_factor, 2) + "</td><td class=\"" + cls(r.net_profit) + "\">" + fmt(r.net_profit, 2) + "</td><td>" + fmt(r.trades, 0) + "</td><td>" + fmt(r.dd_pct, 2) + "</td></tr>";
   });
   rows += "</table>";
-  box.innerHTML = "<p>"+escapeHtml(researchNotice(d.research_context)+saved)+"</p>"+rows;
+  const next=d.results.length ? '<p><b>'+d.results.length+' candidates shown.</b> Compare profit, drawdown and trade count before choosing. <button class="secondary" data-go="results">Compare candidates in Strategies</button></p>' : '<p><b>No candidates survived this search.</b> This is a valid research outcome. Inspect the saved search for rejected candidates and errors before changing the rules or trying another seed.</p>';
+  box.innerHTML = next+"<p>"+escapeHtml(researchNotice(d.research_context)+saved)+"</p>"+rows;
   refreshDatabank();
   box.querySelectorAll("tr").forEach(function(tr, i) {
     if (i === 0) return;
     const td = document.createElement("td");
     const btn = document.createElement("button");
-    btn.textContent = "Use";
+    btn.textContent = "Inspect rules and trades";
     btn.style.padding = "4px 9px";
     btn.style.fontSize = "12px";
     btn.onclick = function() {
@@ -1775,7 +1784,7 @@ document.querySelectorAll(".nav-btn").forEach(function(b) {
     document.querySelectorAll(".tab").forEach(function(x) { x.classList.remove("active"); });
     b.classList.add("active");
     var t = document.getElementById("tab-" + b.dataset.tab);
-    if (t) t.classList.add("active");
+    if (t) { t.classList.add("active"); window.scrollTo({top:0}); }
     if (b.dataset.tab === "data") { refreshDataManager(); refreshProfiles(); }
     if (b.dataset.tab === "results") refreshDatabank();
     if (b.dataset.tab === "home") refreshHome();

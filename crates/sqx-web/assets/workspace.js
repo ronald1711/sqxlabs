@@ -435,18 +435,37 @@ $('dm-file').onchange=async function() {
   const lines=text.trim().split(/\r?\n/);$('csv-preview').hidden=false;$('csv-preview').textContent=`${file.name} · ${lines.length.toLocaleString()} lines\nPreview only — confirm the timestamp format and OHLCV columns before importing.\n\n`+lines.slice(0,6).join('\n');
 };
 document.addEventListener('click',e=>{
-  const go=e.target.closest('[data-go]');if(go)document.querySelector(`.nav-btn[data-tab="${go.dataset.go}"]`).click();
+  const go=e.target.closest('[data-go]');if(go){
+    document.querySelector(`.nav-btn[data-tab="${go.dataset.go}"]`).click();
+    const target=go.dataset.focus && $(go.dataset.focus);
+    if(target){if(target.tagName==='DETAILS')target.open=true;target.setAttribute('tabindex','-1');target.scrollIntoView({block:'start'});target.focus({preventScroll:true});}
+  }
   const prompt=e.target.closest('[data-prompt]');if(prompt)$('ai-q').value=prompt.dataset.prompt+'\nStrategy: '+$('strategy').value;
 });
 window.addEventListener('unhandledrejection',e=>{announce('An operation could not finish. '+(e.reason.message || e.reason));});
 loadInfo();loadCatalog();refreshHome();
 
-// Selection follows strategy content rather than row position or sort order.
+// Selection follows the complete recorded row, including its source and metrics.
+// A refreshed result for the same rules must never reuse a stale selection.
+function candidateRecordedContext(row) {
+  const context=row.research_context || {}, config=context.config, source=row.source_run_id;
+  const origin=typeof source==='string' && source ? 'Recorded study '+source.slice(0,12) : 'Study not recorded';
+  if(!config)return origin+' · Costs not included in this row';
+  const value=x=>typeof x==='number' && Number.isFinite(x)?String(x):'not recorded';
+  const account=config.account || {};
+  return origin+' · '+(context.symbol || 'Market not recorded')+' · '+(context.timeframe || 'Timeframe not recorded')+
+    ' · '+(account.currency || 'Currency not recorded')+' · Spread '+value(config.spread_points)+
+    ' points · Slippage '+value(config.slippage_points)+' points · Commission '+value(config.commission_per_lot)+
+    '/lot round trip · Financing long/short '+value(account.long_financing_per_lot)+'/'+value(account.short_financing_per_lot)+'/lot per rollover';
+}
+function candidateSelectionKey(row) { return JSON.stringify(row); }
 const selectedStrategies=new Map();
 const originalRenderResults=renderResults;
 renderResults=function() {
-  const available=new Set(RESULTS.map(row=>JSON.stringify(row.strategy)));
-  for(const key of selectedStrategies.keys()) if(!available.has(key)) selectedStrategies.delete(key);
+  const available=new Set(RESULTS.map(candidateSelectionKey));
+  let selectionChanged=false;
+  for(const key of selectedStrategies.keys()) if(!available.has(key)){selectedStrategies.delete(key);selectionChanged=true;}
+  if(selectionChanged)$('comparison').textContent='A selected result changed or is no longer available. Select the current candidates and compare again.';
   originalRenderResults();
   $('res-overview').textContent='Select candidates to compare or combine. Validation evidence is not recorded for historical rows.';
   $('res-portfolio').textContent=`Build portfolio (${selectedStrategies.size} selected)`;
@@ -455,7 +474,8 @@ renderResults=function() {
     if (!index) cell.textContent='Select';
     else {
       const open=row.querySelector('[data-ri]');if (!open)return;
-      const item=RESULTS[Number(open.dataset.ri)],key=JSON.stringify(item.strategy);
+      const item=RESULTS[Number(open.dataset.ri)],key=candidateSelectionKey(item);
+      const context=document.createElement('small');context.textContent=candidateRecordedContext(item);context.style.display='block';row.cells[0].append(context);
       const input=document.createElement('input');input.type='checkbox';input.checked=selectedStrategies.has(key);input.setAttribute('aria-label','Select '+item.name);
       input.onchange=()=>{if(input.checked)selectedStrategies.set(key,copy(item));else selectedStrategies.delete(key);$('res-portfolio').textContent=`Build portfolio (${selectedStrategies.size} selected)`;};cell.append(input);
     }
@@ -466,7 +486,7 @@ $('compare-selected').onclick=()=>{
   const rows=Array.from(selectedStrategies.values());
   if(rows.length<2 || rows.length>5){announce('Select 2 to 5 strategies for a side-by-side comparison.');return;}
   const metrics=[['Net profit','net_profit'],['Profit factor','profit_factor'],['Trades','trades'],['Drawdown %','dd_pct']];
-  $('comparison').innerHTML='<div class="table-scroll"><table><thead><tr><th>Recorded metric</th>'+rows.map(r=>'<th>'+escapeHtml(r.name)+'</th>').join('')+'</tr></thead><tbody>'+metrics.map(([label,key])=>'<tr><th>'+label+'</th>'+rows.map(r=>'<td>'+fmt(r[key],key==='trades'?0:2)+'</td>').join('')+'</tr>').join('')+'<tr><th>Independent validation</th>'+rows.map(()=>'<td>Not recorded</td>').join('')+'</tr></tbody></table></div>';
+  $('comparison').innerHTML='<div class="table-scroll"><table><thead><tr><th>Recorded metric</th>'+rows.map(r=>'<th>'+escapeHtml(r.name)+'</th>').join('')+'</tr></thead><tbody>'+metrics.map(([label,key])=>'<tr><th>'+label+'</th>'+rows.map(r=>'<td>'+fmt(r[key],key==='trades'?0:2)+'</td>').join('')+'</tr>').join('')+'<tr><th>Recorded context</th>'+rows.map(r=>'<td>'+escapeHtml(candidateRecordedContext(r))+'</td>').join('')+'</tr><tr><th>Independent validation</th>'+rows.map(()=>'<td>Not recorded</td>').join('')+'</tr></tbody></table></div>';
 };
 let selectedPortfolioPending=false;
 const selectedPortfolioKey='sqx.pendingSelectedPortfolio.v1';

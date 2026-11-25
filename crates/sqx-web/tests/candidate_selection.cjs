@@ -1,0 +1,25 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert'),path=require('path');
+const source=fs.readFileSync(path.join(__dirname,'../assets/workspace.js'),'utf8');
+const code=source.slice(source.indexOf('function candidateRecordedContext('),source.indexOf("$('compare-selected').onclick="));
+const nodes={'res-overview':{},'res-portfolio':{},'comparison':{}};
+const ctx={RESULTS:[],renderResults:()=>{},$:id=>nodes[id],document:{querySelectorAll:()=>[]},copy:v=>JSON.parse(JSON.stringify(v))};
+vm.createContext(ctx);vm.runInContext(code,ctx);
+const original={name:'A',strategy:{name:'Rules',long:true},net_profit:10,source_run_id:'first'};
+ctx.RESULTS=[original];vm.runInContext('selectedStrategies.set(candidateSelectionKey(RESULTS[0]),copy(RESULTS[0]))',ctx);
+ctx.RESULTS=[{name:'B',strategy:{name:'B'}},JSON.parse(JSON.stringify(original))];ctx.renderResults();
+assert.equal(vm.runInContext('selectedStrategies.size',ctx),1,'sorting and reload preserve an unchanged selected row');
+ctx.RESULTS=[{...original,net_profit:20}];ctx.renderResults();
+assert.equal(vm.runInContext('selectedStrategies.size',ctx),0,'new metrics invalidate the old selection');
+assert.match(nodes.comparison.textContent,/changed or is no longer available/);
+ctx.RESULTS=[original];vm.runInContext('selectedStrategies.set(candidateSelectionKey(RESULTS[0]),copy(RESULTS[0]))',ctx);
+ctx.RESULTS=[{...original,source_run_id:'second'}];ctx.renderResults();
+assert.equal(vm.runInContext('selectedStrategies.size',ctx),0,'new archived origin invalidates even identical metrics');
+ctx.RESULTS=[original,{...original,source_run_id:'second'}];
+assert.equal(vm.runInContext('new Set(RESULTS.map(candidateSelectionKey)).size',ctx),2,'identical rules from different runs remain distinct');
+console.log('Candidate selection preserves exact recorded results, not stale rules-only matches');
+
+assert.match(ctx.candidateRecordedContext({}),/Costs not included in this row/);
+const row={source_run_id:'abcdef1234567890',research_context:{symbol:'EURUSD',timeframe:'M1',config:{spread_points:0,slippage_points:1,commission_per_lot:6,account:{currency:'EUR',long_financing_per_lot:0,short_financing_per_lot:-2}}}};
+assert.match(ctx.candidateRecordedContext(row),/abcdef123456.*EURUSD.*M1.*EUR.*Spread 0.*Slippage 1.*Commission 6/);
+assert.match(ctx.candidateRecordedContext(row),/Financing long\/short 0\/-2/);
+assert.match(ctx.candidateRecordedContext({research_context:{config:{}}}),/Spread not recorded/);

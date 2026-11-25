@@ -35,6 +35,7 @@ node crates/sqx-web/tests/optimization_request.cjs
 node crates/sqx-web/tests/pipeline_request.cjs
 node crates/sqx-web/tests/generation_request.cjs
 node crates/sqx-web/tests/selected_portfolio_request.cjs
+node crates/sqx-web/tests/candidate_selection.cjs
 node crates/sqx-web/tests/dataset_context.cjs
 
 node crates/sqx-web/tests/comparison_ui.cjs

@@ -735,6 +735,9 @@ mod tests {
         let request=json!({"symbol":"EURUSD","count":4,"seed":123,"allow_data_gaps":true,"request_key":"quick-search-recovery"});
         let response:serde_json::Value=serde_json::from_str(&generate_json(&request.to_string(),&state)).unwrap();assert!(response.get("error").is_none(),"{response}");assert!(response["results"].as_array().unwrap().is_empty());
         let id=response["archive"]["started_run_id"].as_str().unwrap();let completion=response["archive"]["run_id"].as_str().unwrap();let done=state.archive.load(completion).unwrap();let start=state.archive.load(id).unwrap();
+        assert_eq!(response["research_context"]["config"],start.run.request["config"]);
+        assert_eq!(response["research_context"],start.dataset["source_context"]);
+        assert_eq!(response["research_context"]["symbol"],"EURUSD");
         let builds=done.run.result["report"]["builds"].as_array().unwrap();assert_eq!(builds.len(),4);
         let mut rng=rand::rngs::StdRng::seed_from_u64(123);let generator:GeneratorConfig=serde_json::from_value(start.strategy["generator"].clone()).unwrap();
         for (i,row) in builds.iter().enumerate(){assert_eq!(row["evaluation"]["strategy"],json!(random_strategy(&mut rng,&format!("s{i:04}"),&generator)));assert_eq!(row["selected"],false);assert_eq!(row["execution"]["equity"].as_array().unwrap().len(),40);}
@@ -1067,7 +1070,7 @@ mod tests {
     }
 
     #[test]
-    fn dedupe_push_keeps_unique_strategies() {
+    fn dedupe_push_keeps_unique_recorded_results() {
         let mut db = Vec::new();
         let row = json!({ "name": "a", "strategy": { "name": "a" } });
         let row2 = json!({ "name": "b", "strategy": { "name": "b" } });
@@ -1075,6 +1078,23 @@ mod tests {
         assert_eq!(db.len(), 2);
         dedupe_push(&mut db, &[row]);
         assert_eq!(db.len(), 2);
+    }
+
+    #[test]
+    fn same_rules_preserve_changed_metrics_costs_and_archived_origins() {
+        let original=json!({"name":"same","strategy":{"name":"rules"},"net_profit":10,
+            "research_context":{"config":{"spread":2}},"source_run_id":"first"});
+        let mut metric=original.clone();metric["net_profit"]=json!(20);
+        let mut cost=original.clone();cost["research_context"]["config"]["spread"]=json!(4);
+        let mut origin=original.clone();origin["source_run_id"]=json!("second");
+        let rows=vec![original,metric,cost,origin];let mut db=Vec::new();
+        dedupe_push(&mut db,&rows);assert_eq!(db,rows);
+        // A saved/reloaded result set must still deduplicate exact retries.
+        let bytes=serde_json::to_vec(&db).unwrap();
+        let mut restored:Vec<serde_json::Value>=serde_json::from_slice(&bytes).unwrap();
+        dedupe_push(&mut restored,&rows);assert_eq!(restored,rows);
+        dedupe_push(&mut restored,&[json!({"name":"invalid without strategy"})]);
+        assert_eq!(restored,rows);
     }
 
     #[test]
@@ -1316,14 +1336,17 @@ fn questdb_load_json(body: &str, state: &State) -> String {
     }
 }
 
-fn strategy_key(r: &serde_json::Value) -> Option<String> {
-    r.get("strategy").and_then(|s| serde_json::to_string(s).ok())
+// The databank stores observations, not just unique rule trees. Preserve the
+// same strategy evaluated with another dataset, account, cost model or run.
+fn recorded_result_key(r: &serde_json::Value) -> Option<String> {
+    r.get("strategy")?;
+    serde_json::to_string(r).ok()
 }
 
 fn dedupe_push(db: &mut Vec<serde_json::Value>, rows: &[serde_json::Value]) {
-    let mut seen: std::collections::HashSet<String> = db.iter().filter_map(strategy_key).collect();
+    let mut seen: std::collections::HashSet<String> = db.iter().filter_map(recorded_result_key).collect();
     for r in rows {
-        if let Some(key) = strategy_key(r) {
+        if let Some(key) = recorded_result_key(r) {
             if seen.insert(key) {
                 db.push(r.clone());
             }
@@ -1639,10 +1662,13 @@ fn pipeline_json(body: &str, state: &State) -> String {
         None => return json!({ "error": "no data" }).to_string(),
     };
     let quality=match research_data_quality(&series,&val,sqx_data::quality::now_ms()) {Ok(quality)=>quality,Err(error)=>return error.to_string()};
-    let research_context=json!({"data_quality":quality,"data_gaps_acknowledged":val.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false),"scope":"Exploratory research; candidate selection and data reuse require separate final-test validation."});
+    let mut research_context=json!({"data_quality":quality,"data_gaps_acknowledged":val.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false),"scope":"Exploratory research; candidate selection and data reuse require separate final-test validation."});
     let inst = instrument_for(&series.symbol);
     let pyp = pyp_for(&series.bars);
     let cfg = match config_for_series(&val,&series){Ok(config)=>config,Err(error)=>return json!({"error":error}).to_string()};
+    research_context["config"]=json!(cfg);
+    research_context["symbol"]=json!(series.symbol);
+    research_context["timeframe"]=json!(series.timeframe);
     if let Err(error)=sqx_backtest::validate_backtest_inputs(&series.bars,&inst,&cfg){return json!({"error":error}).to_string();}
     let count=input.count;
     let keep=input.keep;
@@ -2699,9 +2725,12 @@ fn generate_json(body: &str, state: &State) -> String {
     };
 
     let quality=match research_data_quality(&series,&val,sqx_data::quality::now_ms()) {Ok(quality)=>quality,Err(error)=>return error.to_string()};
-    let research_context=json!({"data_quality":quality,"data_gaps_acknowledged":val.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false),"scope":"Exploratory research; candidate selection and data reuse require separate final-test validation."});
+    let mut research_context=json!({"data_quality":quality,"data_gaps_acknowledged":val.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false),"scope":"Exploratory research; candidate selection and data reuse require separate final-test validation."});
     let inst = instrument_for(&series.symbol);
     let cfg = match config_for_series(&val,&series){Ok(config)=>config,Err(error)=>return json!({"error":error}).to_string()};
+    research_context["config"]=json!(cfg);
+    research_context["symbol"]=json!(series.symbol);
+    research_context["timeframe"]=json!(series.timeframe);
     if let Err(error)=sqx_backtest::validate_backtest_inputs(&series.bars,&inst,&cfg){return json!({"error":error}).to_string();}
     let pyp = pyp_for(&series.bars);
     let count = req.count;
