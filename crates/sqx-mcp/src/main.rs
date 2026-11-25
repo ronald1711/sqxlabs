@@ -22,10 +22,19 @@ mod diagnostics;
 mod generation_archive;
 mod research_archive;
 
+static PROCESS_CONFIG: std::sync::OnceLock<sqx_project::mcp_config::Config> = std::sync::OnceLock::new();
+
 const PROTOCOL: &str = "2024-11-05";
 
 fn main() {
-    let log_config=match diagnostics::Config::from_env(){Ok(c)=>c,Err(error)=>{eprintln!("{error}");std::process::exit(2);}};
+    if let Some(path)=std::env::var_os("SQX_MCP_CONFIG") {
+        let path=std::path::PathBuf::from(path);
+        if !path.is_absolute(){eprintln!("SQX_MCP_CONFIG must be an absolute path");std::process::exit(2);}
+        let config=match sqx_project::mcp_config::Config::load(&path){Ok(c)=>c,Err(e)=>{eprintln!("MCP configuration: {e}");std::process::exit(2);}};
+        if std::env::set_current_dir(&config.working_directory).is_err(){eprintln!("Cannot enter configured MCP working directory");std::process::exit(2);}
+        let _=PROCESS_CONFIG.set(config);
+    }
+    let log_config=match PROCESS_CONFIG.get().map(|c|Ok(diagnostics::Config{directory:c.log_directory.clone(),max_bytes:c.log_max_bytes,max_files:c.log_max_files,retention_days:c.log_retention_days})).unwrap_or_else(diagnostics::Config::from_env){Ok(c)=>c,Err(error)=>{eprintln!("{error}");std::process::exit(2);}};
     let mut diagnostic=diagnostics::Log::new(log_config);
     diagnostic.event(0,"process",None,"started",0);
     let stdin = std::io::stdin();
@@ -170,7 +179,10 @@ fn err_result(s: String) -> Value {
 
 fn call_tool(params: &Value) -> Value {
     let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
-    let args = params.get("arguments").cloned().unwrap_or(json!({}));
+    let mut args = params.get("arguments").cloned().unwrap_or(json!({}));
+    if matches!(name,"backtest"|"generate"|"portfolio"|"robustness") {
+        if let Some(config)=PROCESS_CONFIG.get(){args=config.apply_source(&args);}
+    }
     match name {
         "research_history"|"research_resume"|"research_export"|"research_import"=>match research_archive::call(name,&args,&generation_archive::configured_archive()){
             Ok(value)=>{let mut response=text_result(value.to_string());if value["report"]["errors"].as_array().is_some_and(|errors|!errors.is_empty()){response["isError"]=json!(true);}response},

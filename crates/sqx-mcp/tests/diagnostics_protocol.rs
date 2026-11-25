@@ -18,3 +18,15 @@ fn run(root:&std::path::Path,input:&str,log:&std::path::Path)->std::process::Out
 #[test] fn logging_failure_uses_stderr_and_keeps_protocol_working(){
  let root=root();let logs=root.0.join("not-a-directory");fs::write(&logs,"file").unwrap();let output=run(&root.0,"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\n",&logs);assert!(output.status.success());let reply:Value=serde_json::from_slice(&output.stdout).unwrap();assert!(reply["result"]["tools"].is_array());assert!(String::from_utf8(output.stderr).unwrap().contains("SQX_MCP_LOG_UNAVAILABLE"));
 }
+#[test] fn configured_process_uses_frozen_source_and_archive_locations(){
+ let root=root();let working=root.0.join("working");fs::create_dir(&working).unwrap();let csv=root.0.join("sample.csv");
+ let mut bars="timestamp,open,high,low,close,volume\n".to_owned();for i in 0..200{let close=1.1+(i as f64*0.15).sin()*0.01;bars.push_str(&format!("{},1.1,1.12,1.08,{},10\n",1700000040_i64+i*60,close));}fs::write(&csv,bars).unwrap();
+ let profile=sqx_project::mcp_config::Config{schema:1,executable:env!("CARGO_BIN_EXE_sqx-mcp").into(),working_directory:working.clone(),research_directory:root.0.join("archive"),log_directory:root.0.join("logs"),log_max_bytes:4096,log_max_files:3,log_retention_days:7,source:sqx_project::mcp_config::Source::Csv{path:csv,symbol:"EURUSD".into(),timeframe:"M1".into()}};
+ let path=root.0.join("profile.json");fs::write(&path,serde_json::to_vec(&profile).unwrap()).unwrap();
+ let strategy:Value=serde_json::from_str(include_str!("../../../examples/rsi-mean-reversion.json")).unwrap();
+ let mut child=Command::new(env!("CARGO_BIN_EXE_sqx-mcp")).current_dir(&root.0).env("SQX_MCP_CONFIG",&path).env("SQX_MCP_RESEARCH_DIR",root.0.join("wrong-archive")).env("SQX_MCP_LOG_DIR",root.0.join("wrong-logs")).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+ writeln!(child.stdin.take().unwrap(),"{}",json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"backtest","arguments":{"strategy":strategy}}})).unwrap();
+ let output=child.wait_with_output().unwrap();assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));let reply:Value=serde_json::from_slice(&output.stdout).unwrap();assert_ne!(reply["result"]["isError"],true,"{reply}");
+ assert!(!sqx_project::archive::Archive::new(&profile.research_directory).list().unwrap().is_empty());assert!(!root.0.join("wrong-archive").exists());assert!(!root.0.join("wrong-logs").exists());assert!(!working.join("data/research").exists());
+ let log=fs::read_to_string(profile.log_directory.join("mcp.jsonl")).unwrap();assert!(log.lines().map(|l|serde_json::from_str::<Value>(l).unwrap()).any(|v|v["tool"]=="backtest"&&v["status"]=="completed"));
+}
