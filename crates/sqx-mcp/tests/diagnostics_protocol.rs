@@ -49,3 +49,21 @@ fn run(root:&std::path::Path,input:&str,log:&std::path::Path)->std::process::Out
   fs::write(&executable,script).unwrap();fs::set_permissions(&executable,fs::Permissions::from_mode(0o700)).unwrap();let started=std::time::Instant::now();assert!(sqx_project::mcp_probe::probe(&profile,&path,std::time::Duration::from_millis(200)).is_err());assert!(started.elapsed()<std::time::Duration::from_secs(3));
  }
 }
+
+#[test]
+fn missing_csv_with_valid_strategy_returns_error_and_record(){
+ let root=root();let logs=root.0.join("logs");
+ let strategy:Value=serde_json::from_str(include_str!("../../../examples/rsi-mean-reversion.json")).unwrap();
+ let request=json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"backtest","arguments":{"source":"csv","data":root.0.join("missing.csv"),"symbol":"EURUSD","timeframe":"M1","strategy":strategy}}});
+ let out=run(&root.0,&format!("{request}\n"),&logs);assert!(out.status.success());let reply:Value=serde_json::from_slice(&out.stdout).unwrap();assert_eq!(reply["result"]["isError"],true);
+ let records=fs::read_to_string(logs.join("mcp.jsonl")).unwrap();assert!(records.lines().filter_map(|l|serde_json::from_str::<Value>(l).ok()).any(|r|r["tool"]=="backtest"&&r["status"]=="tool_error"));
+}
+#[test]
+fn separate_processes_can_share_log_directory_without_protocol_cross_talk(){
+ let root=root();let logs=root.0.join("logs");
+ let threads:Vec<_>=(0..4).map(|n|{let cwd=root.0.clone();let logs=logs.clone();std::thread::spawn(move||{
+  let input=format!("{}\n",json!({"jsonrpc":"2.0","id":n,"method":"tools/list"}));let out=run(&cwd,&input,&logs);assert!(out.status.success());assert!(out.stderr.is_empty());let reply:Value=serde_json::from_slice(&out.stdout).unwrap();assert_eq!(reply["id"],n);assert!(reply["result"]["tools"].is_array());
+ })}).collect();for thread in threads{thread.join().unwrap();}
+ let rows:Vec<Value>=fs::read_to_string(logs.join("mcp.jsonl")).unwrap().lines().map(|l|serde_json::from_str(l).unwrap()).collect();
+ let sessions:std::collections::HashSet<_>=rows.iter().map(|v|v["session"].as_str().unwrap()).collect();assert_eq!(sessions.len(),4);assert_eq!(rows.iter().filter(|v|v["method"]=="tools/list"&&v["status"]=="completed").count(),4);
+}
