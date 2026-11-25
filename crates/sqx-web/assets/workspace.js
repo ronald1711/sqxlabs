@@ -435,7 +435,11 @@ $('dm-file').onchange=async function() {
   const lines=text.trim().split(/\r?\n/);$('csv-preview').hidden=false;$('csv-preview').textContent=`${file.name} · ${lines.length.toLocaleString()} lines\nPreview only — confirm the timestamp format and OHLCV columns before importing.\n\n`+lines.slice(0,6).join('\n');
 };
 document.addEventListener('click',e=>{
-  const go=e.target.closest('[data-go]');if(go)document.querySelector(`.nav-btn[data-tab="${go.dataset.go}"]`).click();
+  const go=e.target.closest('[data-go]');if(go){
+    document.querySelector(`.nav-btn[data-tab="${go.dataset.go}"]`).click();
+    const target=go.dataset.focus && $(go.dataset.focus);
+    if(target){if(target.tagName==='DETAILS')target.open=true;target.setAttribute('tabindex','-1');target.scrollIntoView({block:'start'});target.focus({preventScroll:true});}
+  }
   const prompt=e.target.closest('[data-prompt]');if(prompt)$('ai-q').value=prompt.dataset.prompt+'\nStrategy: '+$('strategy').value;
 });
 window.addEventListener('unhandledrejection',e=>{announce('An operation could not finish. '+(e.reason.message || e.reason));});
