@@ -3,13 +3,13 @@
 const el=id=>document.getElementById(id);
 let savedId=null,clientConfig=null,busy=false;
 const fields={executable:'mcp-executable',working_directory:'mcp-working',research_directory:'mcp-research',log_directory:'mcp-logs',log_max_bytes:'mcp-log-bytes',log_max_files:'mcp-log-files',log_retention_days:'mcp-log-days'};
-function buttons(){Object.values(fields).concat(['mcp-source','mcp-csv','mcp-symbol','mcp-timeframe']).forEach(id=>el(id).disabled=busy);el('mcp-save').disabled=busy;el('mcp-reload').disabled=busy;el('mcp-probe').disabled=busy||!savedId;el('mcp-copy').disabled=busy||!clientConfig;}
+function buttons(){Object.values(fields).concat(['mcp-source','mcp-csv','mcp-symbol','mcp-timeframe','mcp-questdb-host','mcp-questdb-port']).forEach(id=>el(id).disabled=busy);el('mcp-save').disabled=busy;el('mcp-reload').disabled=busy;el('mcp-probe').disabled=busy||!savedId;el('mcp-copy').disabled=busy||!clientConfig;}
 function dirty(){savedId=null;clientConfig=null;el('mcp-client-config').textContent='';el('mcp-status').textContent='Unsaved changes. Save before testing or copying. Existing MCP processes are unchanged.';buttons();}
-Object.values(fields).concat(['mcp-source','mcp-csv','mcp-symbol','mcp-timeframe']).forEach(id=>el(id).addEventListener('input',dirty));
+Object.values(fields).concat(['mcp-source','mcp-csv','mcp-symbol','mcp-timeframe','mcp-questdb-host','mcp-questdb-port']).forEach(id=>el(id).addEventListener('input',dirty));
 function fill(response){
  if(response.error)throw Error(response.error);
  const config=response.config;Object.entries(fields).forEach(([key,id])=>el(id).value=config[key]);
- el('mcp-source').value=config.source.kind;el('mcp-csv').value=config.source.path||'';el('mcp-symbol').value=config.source.symbol||'';el('mcp-timeframe').value=config.source.timeframe||'';
+ el('mcp-source').value=config.source.kind;el('mcp-csv').value=config.source.path||'';el('mcp-symbol').value=config.source.symbol||'';el('mcp-timeframe').value=config.source.timeframe||'';el('mcp-questdb-host').value=config.source.host||'';el('mcp-questdb-port').value=config.source.port||9000;
  savedId=response.configuration_id||null;clientConfig=response.client_config||null;
  el('mcp-client-config').textContent=clientConfig?JSON.stringify(clientConfig,null,2):'';
  const r=response.runtime||{process_status:'unknown',active_processes:[]};
@@ -20,7 +20,7 @@ function fill(response){
 }
 function read(){
  const config={schema:1};Object.entries(fields).forEach(([key,id])=>config[key]=['log_max_bytes','log_max_files','log_retention_days'].includes(key)?Number(el(id).value):el(id).value.trim());
- const kind=el('mcp-source').value;config.source={kind};if(kind!=='request'){config.source.symbol=el('mcp-symbol').value.trim();config.source.timeframe=el('mcp-timeframe').value.trim();}if(kind==='csv')config.source.path=el('mcp-csv').value.trim();return config;
+ const kind=el('mcp-source').value;config.source={kind};if(kind!=='request'){config.source.symbol=el('mcp-symbol').value.trim();config.source.timeframe=el('mcp-timeframe').value.trim();}if(kind==='csv')config.source.path=el('mcp-csv').value.trim();if(kind==='questdb'){config.source.host=el('mcp-questdb-host').value.trim();config.source.port=Number(el('mcp-questdb-port').value);}return config;
 }
 async function perform(action){if(busy)return;busy=true;buttons();try{await action();}catch(e){el('mcp-status').textContent='MCP operation failed: '+e.message;}finally{busy=false;buttons();}}
 el('mcp-reload').onclick=()=>perform(async()=>fill(await getJSON('/api/mcp/config')));

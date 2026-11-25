@@ -12,7 +12,7 @@ pub struct Config {
 }
 #[derive(Clone,Debug,Serialize,Deserialize,PartialEq)]
 #[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]
-pub enum Source {Request,Csv{path:PathBuf,symbol:String,timeframe:String},Questdb{symbol:String,timeframe:String}}
+pub enum Source {Request,Csv{path:PathBuf,symbol:String,timeframe:String},Questdb{host:String,port:u16,symbol:String,timeframe:String}}
 impl Config {
  pub fn validate(&self)->Result<(),String>{
   if self.schema!=1{return Err("Unsupported MCP configuration schema".into());}
@@ -25,7 +25,7 @@ impl Config {
   match &self.source{
    Source::Request=>{},
    Source::Csv{path,symbol,timeframe}=>{if !path.is_absolute()||!path.is_file(){return Err("CSV source must be an existing absolute file path".into());}validate_market(symbol,timeframe)?;},
-   Source::Questdb{symbol,timeframe}=>validate_market(symbol,timeframe)?,
+   Source::Questdb{host,port,symbol,timeframe}=>{if host.is_empty()||host.len()>253||!host.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'.'||b==b'-')||*port==0{return Err("QuestDB requires a hostname or IPv4 address and port 1–65535".into());}validate_market(symbol,timeframe)?;},
   }
   Ok(())
  }
@@ -49,7 +49,7 @@ impl Config {
   match &self.source{
    Source::Request=>{},
    Source::Csv{path,symbol,timeframe}=>{args["source"]=json!("csv");args["data"]=json!(path);args["symbol"]=json!(symbol);args["timeframe"]=json!(timeframe);},
-   Source::Questdb{symbol,timeframe}=>{args["source"]=json!("questdb");args["symbol"]=json!(symbol);args["timeframe"]=json!(timeframe);},
+   Source::Questdb{symbol,timeframe,..}=>{args["source"]=json!("questdb");args["symbol"]=json!(symbol);args["timeframe"]=json!(timeframe);},
   }args
  }
 }
@@ -60,7 +60,7 @@ fn validate_market(symbol:&str,timeframe:&str)->Result<(),String>{
 }
 #[cfg(test)]mod tests{
  use super::*;
- fn cfg()->Config{Config{schema:1,executable:std::env::current_exe().unwrap(),working_directory:std::env::current_dir().unwrap(),research_directory:std::env::temp_dir().join("sqx-research"),log_directory:std::env::temp_dir().join("sqx-logs"),log_max_bytes:4096,log_max_files:3,log_retention_days:7,source:Source::Questdb{symbol:"EURUSD".into(),timeframe:"M5".into()}}}
+ fn cfg()->Config{Config{schema:1,executable:std::env::current_exe().unwrap(),working_directory:std::env::current_dir().unwrap(),research_directory:std::env::temp_dir().join("sqx-research"),log_directory:std::env::temp_dir().join("sqx-logs"),log_max_bytes:4096,log_max_files:3,log_retention_days:7,source:Source::Questdb{host:"192.168.10.33".into(),port:9000,symbol:"EURUSD".into(),timeframe:"M5".into()}}}
  #[test]fn exact_source_and_client_config(){let c=cfg();c.validate().unwrap();let p=std::env::temp_dir().join("profile.json");let generated=c.client_config(&p).unwrap();assert_eq!(generated["mcpServers"]["sqxlabs"]["env"]["SQX_MCP_CONFIG"],json!(p));let args=c.apply_source(&json!({"count":2}));assert_eq!(args["source"],"questdb");assert_eq!(args["symbol"],"EURUSD");let explicit=json!({"data":"other.csv"});assert_eq!(c.apply_source(&explicit),explicit);let mut changed=c.clone();changed.log_retention_days=8;assert_ne!(changed.identity(),c.identity());}
  #[test]fn invalid_paths_limits_and_unknown_fields_rejected(){let mut c=cfg();c.executable=PathBuf::from("relative");assert!(c.validate().is_err());let mut c=cfg();c.log_retention_days=0;assert!(c.validate().is_err());let mut value=json!(cfg());value["api_key"]=json!("do not persist");assert!(serde_json::from_value::<Config>(value).is_err());}
 }

@@ -26,6 +26,17 @@ static PROCESS_CONFIG: std::sync::OnceLock<sqx_project::mcp_config::Config> = st
 
 const PROTOCOL: &str = "2024-11-05";
 
+fn effective_questdb_config()->QuestdbConfig {
+    bound_questdb_config(QuestdbConfig::from_env(),PROCESS_CONFIG.get().map(|c|&c.source))
+}
+fn bound_questdb_config(mut config:QuestdbConfig,source:Option<&sqx_project::mcp_config::Source>)->QuestdbConfig{
+    if let Some(sqx_project::mcp_config::Source::Questdb{host,port,..})=source{
+        // Environment credentials stay bound to the endpoint they were configured for.
+        if config.host!=*host||config.port!=*port{config.user=None;config.password=None;}
+        config.host=host.clone();config.port=*port;
+    }config
+}
+
 fn main() {
     if let Some(path)=std::env::var_os("SQX_MCP_CONFIG") {
         let path=std::path::PathBuf::from(path);
@@ -258,7 +269,7 @@ fn tool_list_symbols(args: &Value) -> Value {
 }
 
 fn tool_questdb_symbols() -> Value {
-    let client = QuestdbClient::new(&QuestdbConfig::from_env());
+    let client = QuestdbClient::new(&effective_questdb_config());
     match client.list_symbols() {
         Ok(syms) => text_result(syms.join("
 ")),
@@ -276,7 +287,7 @@ fn tool_questdb_bars(args: &Value) -> Value {
         Err(e) => return err_result(format!("bad timeframe: {e}")),
     };
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(5000).clamp(1, 200_000) as usize;
-    let client = QuestdbClient::new(&QuestdbConfig::from_env());
+    let client = QuestdbClient::new(&effective_questdb_config());
     let bars = match client.fetch_bars(&symbol, tf, None, None, Some(limit)) {
         Ok(b) => b,
         Err(e) => return err_result(e),
@@ -325,7 +336,7 @@ fn resolve_bars(args:&Value)->Result<(Vec<Bar>,String,Timeframe,Value),String>{
         read_csv_bars(data)?
     }else{
         let limit=args.get("limit").and_then(|v|v.as_u64()).unwrap_or(5000).clamp(1,200000) as usize;
-        QuestdbClient::new(&QuestdbConfig::from_env()).fetch_bars(&request.symbol,request.timeframe,None,None,Some(limit))?
+        QuestdbClient::new(&effective_questdb_config()).fetch_bars(&request.symbol,request.timeframe,None,None,Some(limit))?
     };
     let quality=research_quality(args,&bars,request.timeframe,sqx_data::quality::now_ms())?;
     Ok((bars,request.symbol,request.timeframe,quality))
@@ -746,4 +757,15 @@ mod tests {
         }
     }
 
+}
+
+#[cfg(test)]mod mcp_endpoint_tests {
+ use super::*;
+ #[test]fn changed_profile_endpoint_does_not_carry_environment_credentials(){
+  let original=QuestdbConfig{host:"data.example".into(),port:9000,user:Some("user".into()),password:Some("secret".into())};
+  let mut source=sqx_project::mcp_config::Source::Questdb{host:"other.example".into(),port:9000,symbol:"EURUSD".into(),timeframe:"M5".into()};
+  let changed=bound_questdb_config(original.clone(),Some(&source));assert!(changed.user.is_none());assert!(changed.password.is_none());assert_eq!(changed.host,"other.example");
+  if let sqx_project::mcp_config::Source::Questdb{host,..}=&mut source{*host="data.example".into();}
+  assert_eq!(bound_questdb_config(original,Some(&source)).password.as_deref(),Some("secret"));
+ }
 }

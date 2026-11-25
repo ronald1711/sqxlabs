@@ -486,8 +486,10 @@
             <label>CSV file (absolute path)<input id="mcp-csv" type="text"></label>
             <label>Source symbol<input id="mcp-symbol" type="text"></label>
             <label>Source timeframe<input id="mcp-timeframe" type="text" placeholder="M1 / M5 / H1"></label>
+            <label>QuestDB host<input id="mcp-questdb-host" type="text" placeholder="Hostname or IPv4 address"></label>
+            <label>QuestDB port<input id="mcp-questdb-port" type="number" min="1" max="65535" value="9000"></label>
           </div>
-          <p>Research-source defaults apply to backtest, generate, portfolio and robustness. An explicit source field in a tool request replaces all source defaults. QuestDB uses the MCP process environment; dashboard data are not shared automatically.</p>
+          <p>Research-source defaults apply to backtest, generate, portfolio and robustness. An explicit source field in a tool request replaces all source defaults. QuestDB uses the saved host and port. Credentials come from the MCP process environment only when its endpoint matches this profile; otherwise no credentials are sent. Dashboard data and credentials are not copied automatically.</p>
           <div class="row"><button id="mcp-reload" class="secondary">Load saved profile</button><button id="mcp-save">Save MCP profile</button><button id="mcp-probe" class="secondary" disabled>Test saved profile</button><button id="mcp-copy" class="secondary" disabled>Copy client configuration</button></div>
           <p id="mcp-status" role="status">Not loaded. No MCP process has been started by this page.</p>
           <pre id="mcp-client-config" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
