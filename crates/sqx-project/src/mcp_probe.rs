@@ -44,7 +44,7 @@ pub fn probe(config:&Config,profile:&std::path::Path,timeout:Duration)->Result<V
  let mut process=Process(command.spawn().map_err(|_|"Cannot start MCP executable")?);
  let (error_tx,error_rx)=mpsc::channel();
  let stderr=process.0.stderr.take().ok_or("MCP stderr unavailable")?;
- std::thread::spawn(move||{let mut bytes=Vec::new();let read=stderr.take(65_537).read_to_end(&mut bytes);let text=String::from_utf8_lossy(&bytes);let _=error_tx.send((read.is_err()||bytes.len()>65_536,text.contains("SQX_MCP_LOG_UNAVAILABLE"),text.contains("SQX_MCP_LOG_REPAIRED")));});
+ std::thread::spawn(move||{let mut bytes=Vec::new();let read=stderr.take(65_537).read_to_end(&mut bytes);let text=String::from_utf8_lossy(&bytes);let _=error_tx.send((read.is_err()||bytes.len()>65_536,text.contains("SQX_MCP_LOG_UNAVAILABLE"),text.contains("SQX_MCP_LOG_REPAIRED"),text.contains("SQX_MCP_STATUS_UNAVAILABLE")));});
  let rx=reader(process.0.stdout.take().ok_or("MCP stdout unavailable")?);
  let mut input=process.0.stdin.take().ok_or("MCP stdin unavailable")?;
  writeln!(input,"{}",json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"SqxLabs configuration probe","version":"1"}}})).map_err(|_|"Cannot write MCP handshake")?;
@@ -57,8 +57,8 @@ pub fn probe(config:&Config,profile:&std::path::Path,timeout:Duration)->Result<V
  if tools.is_empty()||tools.iter().any(|t|!t["name"].is_string()||!t["inputSchema"].is_object()){return Err("MCP tool list invalid".into());}
  drop(input);
  loop{if let Some(status)=process.0.try_wait().map_err(|_|"Cannot inspect MCP process")?{if !status.success(){return Err("MCP test process exited unsuccessfully".into());}break;}if Instant::now()>=deadline{return Err("MCP process did not exit after handshake test".into());}std::thread::sleep(Duration::from_millis(10));}
- let (stderr_limit,logging_error,repaired)=error_rx.recv_timeout(deadline.saturating_duration_since(Instant::now())).map_err(|_|"MCP diagnostic stream did not close")?;
+ let (stderr_limit,logging_error,repaired,status_warning)=error_rx.recv_timeout(deadline.saturating_duration_since(Instant::now())).map_err(|_|"MCP diagnostic stream did not close")?;
  if stderr_limit{return Err("MCP diagnostic output exceeded limit or could not be read".into());}
  if executable_identity(&config.executable,deadline)?!=executable_id{return Err("MCP executable changed during the test; test again".into());}
- Ok(json!({"logging_warning":logging_error,"log_history_repaired":repaired,"configuration_id":config.identity(),"executable_id":executable_id,"handshake":"passed","tool_count":tools.len(),"research_executed":false,"probe_process":"exited","external_client_connection":"unknown","scope":"This local probe does not establish a Claude or ChatGPT connection."}))
+ Ok(json!({"process_status_warning":status_warning,"logging_warning":logging_error,"log_history_repaired":repaired,"configuration_id":config.identity(),"executable_id":executable_id,"handshake":"passed","tool_count":tools.len(),"research_executed":false,"probe_process":"exited","external_client_connection":"unknown","scope":"This local probe does not establish a Claude or ChatGPT connection."}))
 }

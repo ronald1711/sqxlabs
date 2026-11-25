@@ -67,3 +67,15 @@ fn separate_processes_can_share_log_directory_without_protocol_cross_talk(){
  let rows:Vec<Value>=fs::read_to_string(logs.join("mcp.jsonl")).unwrap().lines().map(|l|serde_json::from_str(l).unwrap()).collect();
  let sessions:std::collections::HashSet<_>=rows.iter().map(|v|v["session"].as_str().unwrap()).collect();assert_eq!(sessions.len(),4);assert_eq!(rows.iter().filter(|v|v["method"]=="tools/list"&&v["status"]=="completed").count(),4);
 }
+
+#[test]
+fn live_process_and_handshake_are_observed_but_killed_process_is_not_active(){
+ let root=root();let profile=sqx_project::mcp_config::Config{schema:1,executable:env!("CARGO_BIN_EXE_sqx-mcp").into(),working_directory:root.0.clone(),research_directory:root.0.join("archive"),log_directory:root.0.join("logs"),log_max_bytes:4096,log_max_files:3,log_retention_days:7,source:sqx_project::mcp_config::Source::Request};
+ let path=root.0.join("config.json");fs::write(&path,serde_json::to_vec(&profile).unwrap()).unwrap();
+ let mut child=Command::new(&profile.executable).env("SQX_MCP_CONFIG",path).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+ let mut input=child.stdin.take().unwrap();writeln!(input,"{}",json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Claude Desktop"}}})).unwrap();writeln!(input,"{}",json!({"jsonrpc":"2.0","method":"notifications/initialized"})).unwrap();input.flush().unwrap();
+ let deadline=std::time::Instant::now()+std::time::Duration::from_secs(5);
+ let observed=loop{let r=sqx_project::mcp_runtime::observe(&profile.log_directory,&profile.identity()).unwrap();if r["active_processes"].as_array().is_some_and(|a|a.iter().any(|p|p["initialized"]==true)){break r;}if std::time::Instant::now()>deadline{let _=child.kill();let _=child.wait();panic!("no live handshake observation");}std::thread::sleep(std::time::Duration::from_millis(10));};
+ assert_eq!(observed["process_status"],"observed_active");assert_eq!(observed["active_processes"][0]["client_kind"],"claude_declared");
+ child.kill().unwrap();child.wait().unwrap();drop(input);let stopped=sqx_project::mcp_runtime::observe(&profile.log_directory,&profile.identity()).unwrap();assert_eq!(stopped["process_status"],"unknown");assert!(stopped["active_processes"].as_array().unwrap().is_empty());
+}

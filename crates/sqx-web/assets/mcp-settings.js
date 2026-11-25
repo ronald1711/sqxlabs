@@ -12,7 +12,11 @@ function fill(response){
  el('mcp-source').value=config.source.kind;el('mcp-csv').value=config.source.path||'';el('mcp-symbol').value=config.source.symbol||'';el('mcp-timeframe').value=config.source.timeframe||'';
  savedId=response.configuration_id||null;clientConfig=response.client_config||null;
  el('mcp-client-config').textContent=clientConfig?JSON.stringify(clientConfig,null,2):'';
- el('mcp-status').textContent=(response.saved?'Saved profile loaded. ':'Suggested paths loaded; validate and save first. ')+(response.probe?'Last test: '+response.probe.handshake+'. Retest after changing the executable. ':'Configuration not tested. ')+'Running process: unknown. External client connection: unknown.';
+ const r=response.runtime||{process_status:'unknown',active_processes:[]};
+ const active=r.active_processes||[];const external=active.filter(p=>p.initialized&&p.client_kind!=='probe');
+ el('mcp-status').textContent=(response.saved?'Saved profile loaded. ':'Suggested paths loaded; validate and save first. ')+(response.probe?'Last configuration test: '+response.probe.handshake+'. Retest after changing the executable. ':'Configuration not tested. ')+
+ '\nRunning process: '+r.process_status+'. '+active.map(p=>'PID '+p.pid+' · '+p.client_kind+' · '+(p.initialized?'handshake observed':'handshake not observed')+(p.logging_degraded?' · LOGGING DEGRADED':'')).join('; ')+
+ '\nExternal client handshake: '+(external.length?'observed (self-declared client; not authenticated).':'unknown.')+' '+(r.error||r.scope||'');
 }
 function read(){
  const config={schema:1};Object.entries(fields).forEach(([key,id])=>config[key]=['log_max_bytes','log_max_files','log_retention_days'].includes(key)?Number(el(id).value):el(id).value.trim());
@@ -24,7 +28,7 @@ el('mcp-save').onclick=()=>perform(async()=>fill(await postJSON('/api/mcp/config
 el('mcp-probe').onclick=()=>perform(async()=>{
  el('mcp-status').textContent='Testing saved executable: start → handshake → tools list. No research tools are called.';
  const result=await postJSON('/api/mcp/probe',JSON.stringify({configuration_id:savedId}));if(result.error)throw Error(result.error);
- el('mcp-status').textContent='Handshake passed · '+result.tool_count+' tools · test process exited. '+(result.logging_warning?'Warning: MCP logging unavailable. ':'')+(result.log_history_repaired?'Warning: log history was repaired and may be incomplete. ':'')+'External Claude/ChatGPT connection: unknown. No research was executed.';
+ el('mcp-status').textContent='Handshake passed · '+result.tool_count+' tools · test process exited. '+(result.logging_warning?'Warning: MCP logging unavailable. ':'')+(result.process_status_warning?'Warning: live process status unavailable. ':'')+(result.log_history_repaired?'Warning: log history was repaired and may be incomplete. ':'')+'External Claude/ChatGPT connection: unknown. No research was executed.';
 });
 el('mcp-copy').onclick=()=>perform(async()=>{await navigator.clipboard.writeText(JSON.stringify(clientConfig,null,2));el('mcp-status').textContent='Client configuration copied. Add it to your client MCP settings; this does not establish a connection.';});
 

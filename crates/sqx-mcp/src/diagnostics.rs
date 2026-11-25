@@ -18,10 +18,14 @@ fn open_private(path:&Path)->io::Result<File>{
     options.open(path)
 }
 fn timestamp()->u64{SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().min(u64::MAX as u128) as u64}
-pub struct Log {config:Config,session:String,sequence:u64,client_kind:&'static str,configuration_id:Option<String>,pub degraded:bool}
+pub struct Log {config:Config,session:String,sequence:u64,client_kind:&'static str,configuration_id:Option<String>,lease:Option<sqx_project::mcp_runtime::Lease>,initialized:bool,handshake_started:bool,pub degraded:bool}
 impl Log {
-    pub fn new(config:Config)->Self{Self{config,session:format!("{:032x}",rand::random::<u128>()),sequence:0,client_kind:"unknown",configuration_id:super::PROCESS_CONFIG.get().map(|c|c.identity()),degraded:false}}
+    pub fn new(config:Config)->Self{
+        let lease=sqx_project::mcp_runtime::Lease::acquire(&config.directory).map_err(|_|eprintln!("SQX_MCP_STATUS_UNAVAILABLE: process status cannot be recorded; protocol continues.")).ok();
+        Self{config,session:format!("{:032x}",rand::random::<u128>()),sequence:0,client_kind:"unknown",configuration_id:super::PROCESS_CONFIG.get().map(|c|c.identity()),lease,initialized:false,handshake_started:false,degraded:false}
+    }
     pub fn observe_client(&mut self,name:Option<&str>){
+        self.handshake_started=true;
         // A client's declared name is not authentication. Never store the original string.
         self.client_kind=match name {Some("SqxLabs configuration probe")=>"probe",Some("claude-ai"|"Claude Desktop"|"claude-desktop")=>"claude_declared",Some("ChatGPT"|"chatgpt")=>"chatgpt_declared",Some(_)=>"other",None=>"unknown"};
     }
@@ -31,12 +35,15 @@ impl Log {
         let status=match status{"started"|"completed"|"tool_error"|"parse_error"|"unsupported_method"|"stdin_error"|"stopped"=>status,_=>"unknown"};
         // Tool strings must be selected from our catalog at the call site, never from params directly.
         let tool=tool.filter(|name|super::tools_list().iter().any(|t|t["name"].as_str()==Some(name)));
+        if self.handshake_started&&method=="notifications/initialized"&&status=="completed"{self.initialized=true;}
         let row=json!({"schema":1,"configuration_id":self.configuration_id,"client_kind":self.client_kind,"utc_unix_ms":timestamp(),"pid":std::process::id(),"session":self.session,"request_sequence":request,"method":method,"tool":tool,"status":status,"duration_ms":duration_ms.min(u64::MAX as u128) as u64});
         if self.append(&row.to_string()).is_err(){
             self.degraded=true;
             eprintln!("SQX_MCP_LOG_UNAVAILABLE: diagnostic event could not be stored; protocol continues. Check log directory permissions, space and concurrent writers.");
         }
+        if let Some(lease)=self.lease.as_mut(){if lease.update(self.configuration_id.as_deref(),&self.session,self.client_kind,self.initialized,self.degraded).is_err(){eprintln!("SQX_MCP_STATUS_UNAVAILABLE: process status cannot be updated; protocol continues.");self.lease=None;}}
     }
+        
     // Called under the writer lock. Retention follows event timestamps, not file mtime.
     fn maintain(&self,now:u64)->io::Result<()>{
         let cutoff=now.saturating_sub(self.config.retention_days*86_400_000);
