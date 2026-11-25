@@ -35,3 +35,22 @@ De ontwikkelversie biedt een knop in Instellingen om dit profiel toe te passen.
 Je kiest zelf wanneer; de knop verandert de geselecteerde markt niet. De UI
 vermeldt onbekende kosten en laat handmatige wijzigingen toe. Een volledige
 EUR-strategieproef en releasecontroles voor deze uitbreiding staan nog open.
+
+## Aanvullende signaal- en kascontrole
+
+`crates/sqx-backtest/tests/eur_signal_reference.rs` controleert vier handmatig
+uitgerekende scenario’s met 0,1 lot, 2 pips spread en EUR 6 commissie per lot.
+Een kruising op candle 1 geeft een entry op de open van candle 2; de omgekeerde
+kruising op candle 2 sluit op de open van candle 3.
+
+| Richting | Entry | Exit | Bruto USD | Netto EUR |
+| --- | ---: | ---: | ---: | --- |
+| Long verlies | 1,1022 | 1,0980 | −42 | −42 / 1,0980 − 0,60 |
+| Long winst | 1,1022 | 1,1050 | 28 | 28 / 1,1050 − 0,60 |
+| Short verlies | 1,0980 | 1,1022 | −42 | −42 / 1,1022 − 0,60 |
+| Short winst | 1,0980 | 1,0952 | 28 | 28 / 1,0952 − 0,60 |
+
+De proef controleert signaaltijden, uitvoeringsprijzen, commissie, kasmutatie en
+eindsaldo. Een later toegevoegde prijs verandert de afgesloten trade en haar
+exitbeslissing niet. Deze proef dekt geen SL/TP, trailing, financieringsrollover,
+margin call, ticks of werkelijke brokeruitvoering.
