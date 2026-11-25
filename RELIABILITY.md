@@ -4,6 +4,22 @@ Status: in progress. Passing existing tests does not certify trading correctness
 Existing databanks were produced by an execution model with known material defects;
 they must be rerun after the execution model is validated.
 
+## Pending quick-search evidence
+
+The development branch now routes dashboard quick searches through the shared
+pipeline journal. It freezes data, engine, parameters and seed before execution;
+retains full results for rejected as well as selected candidates; and links
+promoted rows to their saved candidate identity. A retry uses the original request
+even if the current dataset or settings have changed. The browser retains that
+request after a lost response and offers an explicit new-search action.
+
+The targeted four-candidate no-survivor fixture passes archive export, removal of
+original inputs, restore and repeat recovery without duplicate outcomes. Browser
+checks cover lost responses, changed settings, overlapping clicks, saved failures,
+empty successes and selected-result rendering. Full integration and real HTTP
+process-kill coverage for this specific quick-search route remain pending. Shared
+pipeline recovery evidence does not by itself prove every entry point correct.
+
 ## Completion requirements
 
 1. Accounting and execution: applied spread/commission/slippage; account-currency

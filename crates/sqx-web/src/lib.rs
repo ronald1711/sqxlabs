@@ -14,7 +14,7 @@ use sqx_backtest::{backtest, BacktestConfig, BacktestResult};
 use sqx_core::{Bar, Instrument, Timeframe};
 use sqx_data::{DataStore, QuestdbClient, SymbolSeries};
 use sqx_metrics::{compute as compute_metrics, Metrics};
-use sqx_optimizer::{backtest_batch, rank, random_strategy, Fitness, GeneratorConfig};
+use sqx_optimizer::{random_strategy, GeneratorConfig};
 use sqx_robustness::{monte_carlo_trade_manipulation, what_if};
 use sqx_strategy::{render as render_pseudocode, Strategy};
 
@@ -2694,7 +2694,6 @@ fn generate_json(body: &str, state: &State) -> String {
     let cfg = match config_for_series(&val,&series){Ok(config)=>config,Err(error)=>return json!({"error":error}).to_string()};
     if let Err(error)=sqx_backtest::validate_backtest_inputs(&series.bars,&inst,&cfg){return json!({"error":error}).to_string();}
     let pyp = pyp_for(&series.bars);
-    if !(1..=2000).contains(&req.count){return json!({"error":"count must be between 1 and 2000"}).to_string();}
     let count = req.count;
     let gen = GeneratorConfig {
         min_conditions: req.min_conditions.unwrap_or(1),
