@@ -15,12 +15,15 @@ fn write_json(path:&Path,value:&Value)->Result<(),String>{
  file.sync_all().map_err(|_|"Cannot sync MCP settings")?;std::fs::rename(&temporary,path).map_err(|_|"Cannot publish MCP settings")?;Ok(())})();
  if result.is_err(){let _=std::fs::remove_file(temporary);}result
 }
+fn client_profile(config:&Config)->PathBuf{config.working_directory.join(".sqxlabs-mcp/profiles").join(format!("{}.json",config.identity()))}
 fn current(root:&Path)->Result<(Config,PathBuf),String>{
  let bytes=std::fs::read(root.join("active.json")).map_err(|_|"No saved MCP profile")?;
  let pointer:Value=serde_json::from_slice(&bytes).map_err(|_|"Invalid MCP profile pointer")?;
  let id=pointer["configuration_id"].as_str().filter(|id|id.len()==64&&id.bytes().all(|b|b.is_ascii_hexdigit())).ok_or("Invalid MCP profile identity")?;
  let path=root.join("profiles").join(format!("{id}.json"));let config=Config::load(&path)?;
- if config.identity()!=id{return Err("MCP profile identity mismatch".into());}Ok((config,path))
+ if config.identity()!=id{return Err("MCP profile identity mismatch".into());}
+ let runtime=client_profile(&config);
+ if runtime.exists(){if Config::load(&runtime)?!=config{return Err("MCP client profile differs from the saved dashboard profile; save again".into());}Ok((config,runtime))}else{Ok((config,path))}
 }
 fn template()->Result<Config,String>{
  let cwd=std::env::current_dir().map_err(|_|"Cannot locate working directory")?;
@@ -45,7 +48,7 @@ pub fn route(action:&str,body:&str)->String{
  let body:Value=serde_json::from_str(body).map_err(|_|"Invalid MCP settings request")?;
  match action {
  "save"=>{let config:Config=serde_json::from_value(body).map_err(|_|"Invalid MCP configuration fields")?;config.validate()?;
-  let id=config.identity();let path=root.join("profiles").join(format!("{id}.json"));write_json(&path,&json!(config))?;write_json(&root.join("active.json"),&json!({"configuration_id":id}))?;read(&root)
+  let id=config.identity();let path=root.join("profiles").join(format!("{id}.json"));write_json(&client_profile(&config),&json!(config))?;write_json(&path,&json!(config))?;write_json(&root.join("active.json"),&json!({"configuration_id":id}))?;read(&root)
  },
  "probe"=>{let (config,path)=current(&root)?;if body["configuration_id"]!=config.identity(){return Err("Save or reload the current profile before testing".into());}
   let mut result=match sqx_project::mcp_probe::probe(&config,&path,std::time::Duration::from_secs(8)){Ok(v)=>v,Err(error)=>json!({"configuration_id":config.identity(),"handshake":"failed","error":error})};
@@ -58,9 +61,14 @@ pub fn route(action:&str,body:&str)->String{
  use super::*;
  #[test]fn immutable_profile_pointer_roundtrip_and_tamper_rejection(){
   let root=std::env::temp_dir().join(format!("sqx-mcp-settings-{:032x}",rand::random::<u128>()));
-  let config=Config{schema:1,executable:std::env::current_exe().unwrap(),working_directory:std::env::current_dir().unwrap(),research_directory:root.join("archive"),log_directory:root.join("logs"),log_max_bytes:4096,log_max_files:2,log_retention_days:7,source:Source::Request};
+  std::fs::create_dir_all(root.join("working")).unwrap();
+  let config=Config{schema:1,executable:std::env::current_exe().unwrap(),working_directory:root.join("working"),research_directory:root.join("archive"),log_directory:root.join("logs"),log_max_bytes:4096,log_max_files:2,log_retention_days:7,source:Source::Request};
   let id=config.identity();let path=root.join("profiles").join(format!("{id}.json"));write_json(&path,&json!(config)).unwrap();write_json(&root.join("active.json"),&json!({"configuration_id":id})).unwrap();
   let loaded=read(&root).unwrap();assert_eq!(loaded["config"],json!(config));assert_eq!(loaded["process_status"],"unknown");assert_eq!(loaded["external_client_connection"],"unknown");assert_eq!(loaded["client_config"]["mcpServers"]["sqxlabs"]["env"]["SQX_MCP_CONFIG"],json!(path));
+  let runtime=client_profile(&config);write_json(&runtime,&json!(config)).unwrap();
+  assert_eq!(current(&root).unwrap().1,runtime);
+  assert_eq!(read(&root).unwrap()["client_config"]["mcpServers"]["sqxlabs"]["env"]["SQX_MCP_CONFIG"],json!(runtime));
+  let mut other=config.clone();other.log_retention_days=9;write_json(&runtime,&json!(other)).unwrap();assert!(current(&root).is_err());write_json(&runtime,&json!(config)).unwrap();
   write_json(&root.join("active.json"),&json!({"configuration_id":"../outside"})).unwrap();assert!(current(&root).is_err());
   write_json(&root.join("active.json"),&json!({"configuration_id":id})).unwrap();let mut changed=config.clone();changed.log_retention_days=8;write_json(&path,&json!(changed)).unwrap();assert!(current(&root).is_err());std::fs::remove_dir_all(root).unwrap();
  }

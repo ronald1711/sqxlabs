@@ -11,6 +11,8 @@ Deze route is voor Claude Desktop en andere clients die een lokaal programma via
 5. Kies **Copy client configuration**. Voeg de `sqxlabs`-vermelding samen met de bestaande `mcpServers` in de clientconfiguratie; vervang niet zomaar de configuratie van andere servers. Bij Claude Desktop is dit op macOS `~/Library/Application Support/Claude/claude_desktop_config.json`.
 6. Laat de client de server opnieuw starten zodra er geen ander werk wordt onderbroken. Open daarna opnieuw het opgeslagen profiel om de lokale proceswaarneming te vernieuwen.
 
+Een opgeslagen clientprofiel is een afzonderlijk bestand onder `.sqxlabs-mcp/profiles` in de gekozen MCP-werkmap. Het dashboard bewaart daarnaast zijn eigen kopie. Op deze Mac is voor de Claude-proef een lokale map onder `~/Library/Application Support/SqxLabs` gebruikt: het starten vanaf de externe projectschijf bleef vóór de eigen opstartcode hangen. Er zijn geen macOS-beveiligingen uitgezet. Kies een werkmap en databron die voor de client toegankelijk zijn.
+
 Een opgeslagen profiel is een afzonderlijk bestand. Na wijzigen en opslaan moet ook de gekopieerde clientconfiguratie worden bijgewerkt. Reeds draaiende processen blijven hun eerdere profiel gebruiken.
 
 ## Wat de status betekent
@@ -40,3 +42,9 @@ Automatische proefgevallen controleren profielopslag, handshake/tools-list zonde
 Een geslaagde interne probe is geen echte Claude/ChatGPT-clienttest. Het bewijs van zo'n clientproef moet apart worden vastgelegd. Een lokale stdio-configuratie kan niet rechtstreeks worden ingevuld als een remote HTTP-connector. Er wordt geen openbare server of tunnel geopend.
 
 Deze MCP-functionaliteit rondt het volledige betrouwbaarheidsprogramma van SqxLabs niet af. De berekeningen, marktdata, uitvoeringsaannames en strategievalidatie behouden hun eigen bewijsstatus en beperkingen. MT5-vergelijkingswerk blijft voorlopig uitgesteld.
+
+### Waargenomen Claude-proef op deze Mac
+
+Claude Desktop 6.28899.6 startte het programma vanuit de lokale Application Support-map, deed de handshake en vroeg de tools op. Een afzonderlijke chat voerde één backtest uit op 900 synthetische EURUSD M1-bars en las daarna `research_history`. Het resultaat met 10 trades was terug te vinden als voltooide studie. Voor beide toolaanroepen is alleen eenmalige toestemming gebruikt. Bestaande andere MCP-vermeldingen bleven behouden.
+
+Dit bewijst deze lokale clientroute, niet elke clientversie of een onafhankelijke controle van de handelsberekeningen. ChatGPT is niet met deze lokale stdio-server getest. De synthetische proef liet bovendien een extreem grote SQN-waarde zien; trek uit die proef geen conclusie over de bruikbaarheid van alle statistieken.

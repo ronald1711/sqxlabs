@@ -473,7 +473,7 @@
         <div class="row"><button class="secondary" data-go="data">Market data / QuestDB</button><button class="secondary" data-go="settings" data-focus="ai-provider-controls">AI provider settings</button><button id="connections-check" class="secondary">Check local configuration</button></div>
         <p id="connections-status" role="status">Not checked. This check contacts only your local SqxLabs server; it does not send a prompt or place orders.</p>
         <details id="mcp-settings-panel"><summary>MCP connections</summary>
-          <p>These settings apply to a separately launched MCP process, not to the current dashboard's data or account settings. Save a profile, test it, then copy its configuration into your client. After changing a profile, copy the new configuration and restart the client server.</p>
+          <p>These settings apply to a separately launched MCP process, not to the current dashboard's data or account settings. Save a profile, test it, then copy its configuration into your client. The client profile is stored under .sqxlabs-mcp/profiles in the working directory; choose paths accessible to your client. After changing a profile, copy the new configuration and restart the client server.</p>
           <div class="search-fields">
             <label>Executable (absolute path)<input id="mcp-executable" type="text"></label>
             <label>Working directory<input id="mcp-working" type="text"></label>
