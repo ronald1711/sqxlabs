@@ -4,6 +4,16 @@ Status: in progress. Passing existing tests does not certify trading correctness
 Existing databanks were produced by an execution model with known material defects;
 they must be rerun after the execution model is validated.
 
+## Catalog causality regression (development)
+
+`crates/sqx-backtest/tests/catalog_causality.rs` exercises all 179 current catalog
+entries through the strategy indicator dispatcher at their default parameters.
+For a 320-bar oscillating OHLCV fixture, 14 truncated histories must preserve every
+historical value bit-for-bit, including NaN warmup positions. The test also requires
+aligned output lengths and at least one defined value for each entry. It passes.
+This tests future-prefix invariance at selected boundaries, not formula correctness,
+all parameter choices, every input shape or the entire execution engine.
+
 ## Completion requirements
 
 1. Accounting and execution: applied spread/commission/slippage; account-currency
