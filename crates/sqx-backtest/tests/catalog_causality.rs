@@ -16,7 +16,7 @@ fn default_catalog_outputs_do_not_change_when_future_candles_arrive() {
         let complete = sqx_backtest::compute(indicator.name, &params, &bars).expect("catalog indicator must be registered");
         assert_eq!(complete.len(), bars.len(), "{} output alignment", indicator.name);
         assert!(complete.iter().any(|v| v.is_finite()), "{} must have defined coverage in this fixture", indicator.name);
-        for end in [1, 2, 3, 5, 10, 14, 20, 26, 50, 100, 199, 200, 255, 319] {
+        for end in 1..bars.len() {
             let prefix = sqx_backtest::compute(indicator.name, &params, &bars[..end]).unwrap();
             assert_eq!(prefix.len(), end, "{} truncated alignment", indicator.name);
             for (index, (&before, &after)) in prefix.iter().zip(&complete).enumerate() {
