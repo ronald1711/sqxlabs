@@ -450,7 +450,7 @@ loadInfo();loadCatalog();refreshHome();
 function candidateRecordedContext(row) {
   const context=row.research_context || {}, config=context.config, source=row.source_run_id;
   const origin=typeof source==='string' && source ? 'Recorded study '+source.slice(0,12) : 'Study not recorded';
-  if(!config)return origin+' · Original costs not recorded';
+  if(!config)return origin+' · Costs not included in this row';
   const value=x=>typeof x==='number' && Number.isFinite(x)?String(x):'not recorded';
   const account=config.account || {};
   return origin+' · '+(context.symbol || 'Market not recorded')+' · '+(context.timeframe || 'Timeframe not recorded')+

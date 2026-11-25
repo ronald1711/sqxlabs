@@ -18,7 +18,7 @@ ctx.RESULTS=[original,{...original,source_run_id:'second'}];
 assert.equal(vm.runInContext('new Set(RESULTS.map(candidateSelectionKey)).size',ctx),2,'identical rules from different runs remain distinct');
 console.log('Candidate selection preserves exact recorded results, not stale rules-only matches');
 
-assert.match(ctx.candidateRecordedContext({}),/Original costs not recorded/);
+assert.match(ctx.candidateRecordedContext({}),/Costs not included in this row/);
 const row={source_run_id:'abcdef1234567890',research_context:{symbol:'EURUSD',timeframe:'M1',config:{spread_points:0,slippage_points:1,commission_per_lot:6,account:{currency:'EUR',long_financing_per_lot:0,short_financing_per_lot:-2}}}};
 assert.match(ctx.candidateRecordedContext(row),/abcdef123456.*EURUSD.*M1.*EUR.*Spread 0.*Slippage 1.*Commission 6/);
 assert.match(ctx.candidateRecordedContext(row),/Financing long\/short 0\/-2/);
