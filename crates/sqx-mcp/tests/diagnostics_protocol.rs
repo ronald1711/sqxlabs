@@ -30,3 +30,20 @@ fn run(root:&std::path::Path,input:&str,log:&std::path::Path)->std::process::Out
  assert!(!sqx_project::archive::Archive::new(&profile.research_directory).list().unwrap().is_empty());assert!(!root.0.join("wrong-archive").exists());assert!(!root.0.join("wrong-logs").exists());assert!(!working.join("data/research").exists());
  let log=fs::read_to_string(profile.log_directory.join("mcp.jsonl")).unwrap();assert!(log.lines().map(|l|serde_json::from_str::<Value>(l).unwrap()).any(|v|v["tool"]=="backtest"&&v["status"]=="completed"));
 }
+#[test] fn explicit_probe_checks_protocol_and_never_runs_research(){
+ let root=root();let profile=sqx_project::mcp_config::Config{schema:1,executable:env!("CARGO_BIN_EXE_sqx-mcp").into(),working_directory:root.0.clone(),research_directory:root.0.join("archive"),log_directory:root.0.join("logs"),log_max_bytes:4096,log_max_files:3,log_retention_days:7,source:sqx_project::mcp_config::Source::Request};
+ let path=root.0.join("config.json");fs::write(&path,serde_json::to_vec(&profile).unwrap()).unwrap();
+ let result=sqx_project::mcp_probe::probe(&profile,&path,std::time::Duration::from_secs(5)).unwrap();assert_eq!(result["handshake"],"passed");assert_eq!(result["probe_process"],"exited");assert_eq!(result["external_client_connection"],"unknown");assert!(!profile.research_directory.exists());
+ let logs=fs::read_to_string(profile.log_directory.join("mcp.jsonl")).unwrap();assert!(!logs.contains("tools/call"));assert!(logs.contains("notifications/initialized"));
+ let mut altered=profile.clone();altered.log_retention_days=8;assert!(sqx_project::mcp_probe::probe(&altered,&path,std::time::Duration::from_secs(5)).unwrap_err().contains("changed"));
+}
+#[cfg(unix)]
+#[test] fn probe_timeout_and_invalid_protocol_are_bounded(){
+ use std::os::unix::fs::PermissionsExt;
+ let root=root();let executable=root.0.join("fake-server");
+ let profile=sqx_project::mcp_config::Config{schema:1,executable:executable.clone(),working_directory:root.0.clone(),research_directory:root.0.join("archive"),log_directory:root.0.join("logs"),log_max_bytes:4096,log_max_files:3,log_retention_days:7,source:sqx_project::mcp_config::Source::Request};
+ let path=root.0.join("config.json");fs::write(&path,serde_json::to_vec(&profile).unwrap()).unwrap();
+ for script in ["#!/bin/sh\nsleep 60\n","#!/bin/sh\necho not-json\n","#!/bin/sh\nexit 1\n"]{
+  fs::write(&executable,script).unwrap();fs::set_permissions(&executable,fs::Permissions::from_mode(0o700)).unwrap();let started=std::time::Instant::now();assert!(sqx_project::mcp_probe::probe(&profile,&path,std::time::Duration::from_millis(200)).is_err());assert!(started.elapsed()<std::time::Duration::from_secs(3));
+ }
+}

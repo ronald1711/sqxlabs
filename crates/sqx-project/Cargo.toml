@@ -17,3 +17,4 @@ serde_json.workspace = true
 sha2 = "0.10"
 rand.workspace = true
 sqx-pipeline = { path = "../sqx-pipeline" }
+libc = "0.2"
