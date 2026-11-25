@@ -72,6 +72,8 @@ pub struct QuestdbClient {
 }
 
 impl QuestdbClient {
+    /// Transport identity only; excludes authentication headers.
+    pub fn source_scope(&self)->&str { &self.base_url }
     pub fn new(config: &QuestdbConfig) -> Self {
         let agent = ureq::AgentBuilder::new()
             .timeout(Duration::from_secs(60))

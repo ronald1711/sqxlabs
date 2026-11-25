@@ -16,6 +16,7 @@ pub struct Datasets {archive:Archive}
 impl Datasets {
     pub fn new(root:impl Into<std::path::PathBuf>)->Self {Self{archive:Archive::new(root)}}
     fn validate(series:&SymbolSeries)->Result<(),String>{
+        series.validate_calendar_context()?;
         if series.symbol.trim().is_empty(){return Err("Saved dataset requires a symbol".into());}
         let quality=sqx_data::quality::audit(&series.bars,series.timeframe,sqx_data::quality::now_ms(),series.calendar.as_ref());
         if !quality.errors.is_empty(){return Err(quality.errors.join("; "));}

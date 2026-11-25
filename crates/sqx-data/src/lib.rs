@@ -8,6 +8,7 @@ use sqx_core::{Bar, Tick, Timeframe};
 
 mod questdb;
 pub mod quality;
+pub mod calendar;
 
 pub use questdb::{QuestdbClient, QuestdbConfig};
 
@@ -18,9 +19,38 @@ pub struct SymbolSeries {
     pub symbol: String,
     pub timeframe: Timeframe,
     pub calendar: Option<quality::MarketCalendar>,
+    /// Original feed and timestamp assumptions, independent of calendar availability.
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub source: Option<calendar::CalendarBinding>,
     /// Exact clock-normalization evidence, when supplied; callers must verify against bars.
     pub normalization: Option<normalization::Bundle>,
     pub bars: Vec<Bar>,
+}
+
+impl SymbolSeries {
+    /// Prevent attaching another instrument's calendar or contradictory feed claims.
+    pub fn validate_calendar_context(&self)->Result<(),String>{
+        if let Some(source)=&self.source {
+            if source.instrument!=self.symbol || source.source.trim().is_empty() || source.source.len()>200 {
+                return Err("Dataset source does not match its instrument".into());
+            }
+            if source.source_confirmed && matches!(source.source.as_str(),"unknown"|"mixed") {
+                return Err("Unknown or mixed feed cannot be confirmed".into());
+            }
+        }
+        if let Some(calendar)=&self.calendar {
+            calendar.validate()?;
+            if let Some(frozen)=&calendar.frozen {
+                if frozen.binding.instrument!=self.symbol {return Err("Frozen calendar belongs to another instrument".into());}
+                if let Some(source)=&self.source {
+                    if serde_json::to_value(source).map_err(|e|e.to_string())?!=serde_json::to_value(&frozen.binding).map_err(|e|e.to_string())? {
+                        return Err("Dataset feed assumptions differ from its frozen calendar".into());
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Summary of one series for the UI.
@@ -47,7 +77,7 @@ impl DataStore {
     /// Add or replace a series.
     pub fn add(&mut self, symbol: &str, timeframe: Timeframe, bars: Vec<Bar>) {
         self.series.retain(|s| !(s.symbol == symbol && s.timeframe == timeframe));
-        self.series.push(SymbolSeries { symbol: symbol.to_string(), timeframe, calendar: None, normalization: None, bars });
+        self.series.push(SymbolSeries { symbol: symbol.to_string(), timeframe, calendar: None, source: None, normalization: None, bars });
     }
 
     /// Import a CSV file as a symbol series.

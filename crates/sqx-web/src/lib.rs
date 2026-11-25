@@ -19,6 +19,7 @@ use sqx_robustness::{monte_carlo_trade_manipulation, what_if};
 use sqx_strategy::{render as render_pseudocode, Strategy};
 
 mod mcp_settings;
+mod calendar_settings;
 
 const INDEX: &str = include_str!("../assets/index.html");
 
@@ -423,7 +424,7 @@ mod tests {
 
     #[test]
     fn source_duration_binding_handles_calendar_and_fixed_timeframes(){
-        let mut series=SymbolSeries{symbol:"EURUSD".into(),timeframe:Timeframe::M1,calendar:None,normalization:None,bars:vec![]};
+        let mut series=SymbolSeries{symbol:"EURUSD".into(),timeframe:Timeframe::M1,calendar:None,source:None,normalization:None,bars:vec![]};
         for (timeframe,width) in [(Timeframe::M1,60000),(Timeframe::M5,300000),(Timeframe::D1,86400000),(Timeframe::W1,604800000)] {
             series.timeframe=timeframe;
             for request in [json!({}),json!({"bar_duration_ms":null}),json!({"bar_duration_ms":width})] {
@@ -790,7 +791,7 @@ mod tests {
             assert_eq!(result["builds"].as_array().unwrap().len(),count);
             if count==0 {assert!(result["error"].is_string());}
             let request=json!({"research_kind":"pipeline","config":cfg,"generator":gen,"count":count,"keep":2,"seed":123,"periods_per_year":pyp,"research_context":context});
-            let dataset=json!(ArchivedDataset{symbol:series.symbol.clone(),timeframe:series.timeframe,instrument:inst.clone(),calendar:series.calendar.clone(),normalization:series.normalization.clone(),bars:series.bars.clone()});
+            let dataset=json!(ArchivedDataset{symbol:series.symbol.clone(),timeframe:series.timeframe,instrument:inst.clone(),calendar:series.calendar.clone(),source:series.source.clone(),normalization:series.normalization.clone(),bars:series.bars.clone()});
             let id=state.archive.save(engine_identity().unwrap(),dataset,json!({"name":"Pipeline","kind":"pipeline"}),request,result.clone()).unwrap();
             let bytes=serde_json::to_vec(&state.archive.load(&id).unwrap()).unwrap();
             let restored=research_state();
@@ -873,7 +874,7 @@ mod tests {
         let instrument=instrument_for(&series.symbol);let strategy=Strategy::new("legacy stress report");
         let spec=RobustnessSpec{config:BacktestConfig::default(),scenarios:vec![(0.0,0.0,0.0)],runs:2,skip_probability:0.1,seed:42,context:json!({})};
         let result=compute_robustness_report(&strategy,&series,&instrument,&spec);
-        let dataset=json!(ArchivedDataset{symbol:series.symbol,timeframe:series.timeframe,instrument,calendar:series.calendar,normalization:series.normalization,bars:series.bars});
+        let dataset=json!(ArchivedDataset{symbol:series.symbol,timeframe:series.timeframe,instrument,calendar:series.calendar,source:series.source,normalization:series.normalization,bars:series.bars});
         let id=state.archive.save(engine_identity().unwrap(),dataset,json!(strategy),json!({"research_kind":"robustness","spec":spec}),result.clone()).unwrap();
         state.store.write().unwrap().series.clear();
         let replay:serde_json::Value=serde_json::from_str(&research_replay_json(&json!({"run_id":id}).to_string(),&state)).unwrap();
@@ -886,7 +887,7 @@ mod tests {
         let state=research_state();let series=state.store.read().unwrap().series[0].clone();let inst=instrument_for(&series.symbol);
         let strategy=Strategy::new("No trades does not certify parity");let mut request=json!(strategy);request["allow_data_gaps"]=json!(true);
         let report:serde_json::Value=serde_json::from_str(&backtest_series_json(&request.to_string(),&series,&inst)).unwrap();assert!(report.get("error").is_none(),"{report}");
-        let dataset=json!(ArchivedDataset{symbol:series.symbol.clone(),timeframe:series.timeframe,instrument:inst.clone(),calendar:series.calendar.clone(),normalization:series.normalization.clone(),bars:series.bars.clone()});
+        let dataset=json!(ArchivedDataset{symbol:series.symbol.clone(),timeframe:series.timeframe,instrument:inst.clone(),calendar:series.calendar.clone(),source:series.source.clone(),normalization:series.normalization.clone(),bars:series.bars.clone()});
         let run_id=state.archive.save(engine_identity().unwrap(),dataset,json!(strategy),request,report).unwrap();
         let source=json!({"schema":1,"source_label":"Synthetic empty fixture","scope":{"market":inst.name,"quote_currency":inst.quote_currency,"account_currency":"USD","contract_size":inst.contract_size,"start_ms":series.bars.first().unwrap().time,"end_ms":series.timeframe.bucket_bounds(series.bars.last().unwrap().time).unwrap().1-1},"trades":[]}).to_string();
         let import=json!({"run_id":run_id,"source_json":source,"tolerances":{"time_ms":0,"price":0.0,"size":0.0,"money":0.0}});
@@ -1166,6 +1167,11 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("GET", "/api/datasources") => ("200 OK", "application/json", datasources_json(state)),
         ("GET", "/api/questdb/symbols") => ("200 OK", "application/json", questdb_symbols_json(state)),
         ("POST", "/api/questdb/load") => ("200 OK", "application/json", questdb_load_json(body, state)),
+        ("POST", "/api/data/review") => ("200 OK", "application/json", calendar_settings::route("inspect",body,state)),
+        ("POST", "/api/calendar/refetch") => ("200 OK", "application/json", calendar_settings::route("refetch",body,state)),
+        ("POST", "/api/calendar/preview") => ("200 OK", "application/json", calendar_settings::route("preview",body,state)),
+        ("POST", "/api/calendar/save") => ("200 OK", "application/json", calendar_settings::route("save",body,state)),
+        ("GET", "/calendar-settings.js") => ("200 OK", "text/javascript; charset=utf-8", include_str!("../assets/calendar-settings.js").to_string()),
         ("GET", "/api/data") => ("200 OK", "application/json", data_json(state, &qsym)),
         ("POST", "/api/backtest") => ("200 OK", "application/json", archived_backtest_json(body, state)),
         ("GET", "/api/experiments/backup") => ("200 OK", "application/json", experiment_json("backup",&json!({"experiment_id":query_param(full_path,"id")}).to_string(),state)),
@@ -1338,8 +1344,18 @@ fn questdb_load_json(body: &str, state: &State) -> String {
     match client.fetch_bars(&symbol, timeframe, None, None, Some(limit)) {
         Ok(bars) => {
             let n = bars.len();
-            state.store.write().unwrap().add(&symbol, timeframe, bars);
-            json!({ "ok": true, "symbol": symbol, "timeframe": timeframe.label(), "bars": n }).to_string()
+            let mut series=SymbolSeries{symbol:symbol.clone(),timeframe,calendar:None,source:None,normalization:None,bars};
+            let selection=match calendar_settings::for_import(state,&symbol){Ok(s)=>s,Err(error)=>return json!({"error":error}).to_string()};
+            if let Err(error)=selection.apply(&mut series){return json!({"error":error}).to_string();}
+            let review=calendar_settings::report(&series,sqx_data::quality::now_ms());
+            let saved=sqx_project::datasets::Datasets::new(state.archive.root());
+            let snapshot=match saved.save(&series){Ok(id)=>id,Err(error)=>return json!({"error":error,"review":review}).to_string()};
+            let mut store=state.store.write().unwrap();
+            if let Some(old)=store.series.iter().find(|s|s.symbol==symbol&&s.timeframe==timeframe){
+                if let Err(error)=saved.save(old){return json!({"error":format!("Previous dataset could not be preserved: {error}")}).to_string();}
+            }
+            store.series.retain(|s|!(s.symbol==symbol&&s.timeframe==timeframe));store.series.push(series);
+            json!({ "ok": true, "symbol": symbol, "timeframe": timeframe.label(), "bars": n,"snapshot_id":snapshot,"review":review }).to_string()
         }
         Err(e) => json!({ "error": e }).to_string(),
     }
@@ -1428,7 +1444,7 @@ fn portfolio_databank_json(body: &str, state: &State) -> String {
         names:names.clone(),strategies:strategies.into_iter().map(|(_,strategy)|strategy).collect(),
     }}]};
     let request=json!({"research_kind":"cli_pipeline_started","origin":"web_portfolio_combination","attempt_id":format!("{:032x}",rand::random::<u128>()),"web_request":val,"config":cfg,"seed":0,"periods_per_year":pyp});
-    let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,"normalization":series.normalization,"bars":series.bars,"source_context":research_context});
+    let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,"source":series.source,"normalization":series.normalization,"bars":series.bars,"source_context":research_context});
     let specification=json!({"pipeline":pipeline,"generator":GeneratorConfig::default()});
     let started=match retained_engine_identity(state).and_then(|engine|state.archive.save(engine,dataset,specification,request,json!({"status":"execution_not_recorded"}))){Ok(id)=>id,Err(error)=>return json!({"error":format!("Portfolio composition could not be archived: {error}")}).to_string()};
     drop(creation_guard);
@@ -1686,7 +1702,7 @@ fn pipeline_json(body: &str, state: &State) -> String {
     let mut pipeline=sqx_pipeline::default_pipeline(count,keep);
     pipeline.tasks.push(sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::EvaluateDatabank});
     let request=json!({"research_kind":"cli_pipeline_started","origin":"web_pipeline","attempt_id":format!("{:032x}",rand::random::<u128>()),"web_request":val,"config":cfg,"seed":input.seed,"periods_per_year":pyp});
-    let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,"normalization":series.normalization,"bars":series.bars,"source_context":research_context});
+    let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,"source":series.source,"normalization":series.normalization,"bars":series.bars,"source_context":research_context});
     let started=match retained_engine_identity(state).and_then(|engine|state.archive.save(engine,dataset,json!({"pipeline":pipeline,"generator":gen}),request,json!({"status":"execution_not_recorded"}))){
         Ok(id)=>id,Err(error)=>return json!({"error":format!("Pipeline could not be archived: {error}")}).to_string()
     };
@@ -1810,7 +1826,7 @@ fn optimize_json(body: &str, state: &State) -> String {
     };
     let pipeline=sqx_pipeline::Pipeline{name:"Dashboard optimization study".into(),tasks:vec![sqx_pipeline::Task{kind:task}]};
     let request=json!({"research_kind":"cli_pipeline_started","origin":"web_optimization","attempt_id":format!("{:032x}",rand::random::<u128>()),"web_request":val,"config":cfg,"seed":seed,"periods_per_year":pyp});
-    let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,"normalization":series.normalization,"bars":series.bars,"source_context":research_context});
+    let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,"source":series.source,"normalization":series.normalization,"bars":series.bars,"source_context":research_context});
     let started=match retained_engine_identity(state).and_then(|engine|state.archive.save(engine,dataset,json!({"pipeline":pipeline,"generator":gen}),request,json!({"status":"execution_not_recorded"}))){
         Ok(id)=>id,Err(error)=>return json!({"error":format!("Optimization could not be archived: {error}")}).to_string()
     };
@@ -1867,7 +1883,7 @@ fn import_json(body: &str, state: &State) -> String {
     let quality=sqx_data::quality::audit(&bars,timeframe,sqx_data::quality::now_ms(),calendar.as_ref());
     if !quality.errors.is_empty(){return json!({"error":quality.errors.join("; "),"data_quality":quality}).to_string();}
     let n = bars.len();
-    let series=SymbolSeries{symbol:symbol.clone(),timeframe,calendar,normalization,bars};
+    let series=SymbolSeries{symbol:symbol.clone(),timeframe,calendar,source:None,normalization,bars};
     let snapshot_id=match sqx_project::datasets::Datasets::new(state.archive.root()).save(&series) {
         Ok(id)=>id,Err(error)=>return json!({"error":format!("Dataset could not be saved: {error}")}).to_string(),
     };
@@ -1910,7 +1926,7 @@ fn data_json(state: &State, symbol: &str) -> String {
             "timeframe": s.timeframe,
             "bars": s.bars.len(),
             "fingerprint": bars_fingerprint(&s.bars),
-            "calendar":s.calendar,
+            "calendar":s.calendar,"source":s.source,
             "normalization":normalization_status(&s),
             "data_quality":sqx_data::quality::audit(&s.bars,s.timeframe,sqx_data::quality::now_ms(),s.calendar.as_ref()),
             "first_time": s.bars.first().map(|b| b.time).unwrap_or(0),
@@ -2001,10 +2017,11 @@ fn normalization_status(series:&SymbolSeries)->serde_json::Value {
 }
 
 fn research_data_quality(series:&SymbolSeries, request:&serde_json::Value, as_of_ms:i64) -> Result<sqx_data::quality::QualityReport,serde_json::Value> {
+    if let Err(error)=series.validate_calendar_context(){return Err(json!({"error":error}));}
     let normalization=normalization_status(series);
     if normalization["status"]=="invalid" {return Err(json!({"error":normalization["error"],"normalization":normalization}));}
 
-    let quality=sqx_data::quality::audit(&series.bars,series.timeframe,as_of_ms,series.calendar.as_ref());
+    let quality=match calendar_settings::reviewed_quality(series,request){Ok(Some(q))=>q,Ok(None)=>sqx_data::quality::audit(&series.bars,series.timeframe,as_of_ms,series.calendar.as_ref()),Err(error)=>return Err(json!({"error":error}))};
     if !quality.errors.is_empty(){return Err(json!({"error":quality.errors.join("; "),"data_quality":quality}));}
     if (quality.missing_open_intervals>0 || quality.unclassified_intervals>0 || quality.irregular_steps>0)
         && !request.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false) {
@@ -2073,7 +2090,7 @@ fn robustness_json(body: &str, state: &State) -> String {
     }}]};
     let request=json!({"research_kind":"cli_pipeline_started","origin":"web_robustness","attempt_id":format!("{:032x}",rand::random::<u128>()),
         "web_request":val,"config":spec.config,"seed":spec.seed,"periods_per_year":pyp_for(&series.bars)});
-    let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,
+    let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,"source":series.source,
         "normalization":series.normalization,"bars":series.bars,"source_context":spec.context});
     let specification=json!({"pipeline":pipeline,"generator":GeneratorConfig::default()});
     let started=match retained_engine_identity(state).and_then(|engine|state.archive.save(engine,dataset,specification,request,json!({"status":"execution_not_recorded"}))) {
@@ -2332,7 +2349,7 @@ fn assistant_json(body: &str, state: &State) -> String {
     let cfg = llm_config();
     let engine=match retained_engine_identity(state) {Ok(engine)=>engine,Err(error)=>return json!({"error":error}).to_string()};
     let mut a = sqx_assistant::Assistant::new(cfg, &series.symbol, series.bars.clone(), inst, pyp).with_backtest_config(simulation)
-        .with_trial_archive(state.archive.clone(),engine,json!({"timeframe":series.timeframe,"calendar":series.calendar,"data_quality":quality}));
+        .with_trial_archive(state.archive.clone(),engine,json!({"timeframe":series.timeframe,"calendar":series.calendar,"source":series.source,"data_quality":quality}));
     let answer=a.run(&question);
     let mut response=match &answer {
         Ok(answer) => json!({ "answer": answer,"research_context":a.research_context(),"data_quality":quality,"candidate_evaluations":a.candidate_evaluations(),"detail_evaluations":a.detail_evaluations() }),
@@ -2348,7 +2365,7 @@ fn assistant_json(body: &str, state: &State) -> String {
 }
 
 fn archive_assistant_candidates(state:&State,series:&SymbolSeries,context:serde_json::Value,quality:serde_json::Value,candidates:&[serde_json::Value],details:&[serde_json::Value],executions:&[serde_json::Value],completed:bool)->Result<serde_json::Value,String>{
-    let dataset=json!(ArchivedDataset{symbol:series.symbol.clone(),timeframe:series.timeframe,instrument:instrument_for(&series.symbol),calendar:series.calendar.clone(),normalization:series.normalization.clone(),bars:series.bars.clone()});
+    let dataset=json!(ArchivedDataset{symbol:series.symbol.clone(),timeframe:series.timeframe,instrument:instrument_for(&series.symbol),calendar:series.calendar.clone(),source:series.source.clone(),normalization:series.normalization.clone(),bars:series.bars.clone()});
     let request=json!({"research_kind":"assistant_candidates","research_context":context,"data_quality":quality});
     // Provider prose, prompts and configuration are deliberately not archive inputs.
     let result=json!({"candidate_evaluations":candidates,"detail_evaluations":details,"trial_executions":executions,"session_completed":completed,"scope":"Generation and details summaries with full executed trial results. Per-trial checkpoints preserve inputs/results; provider-conversation resume and independent validation are unavailable."});
@@ -2380,6 +2397,8 @@ struct ArchivedDataset {
     instrument: Instrument,
     #[serde(default)]
     calendar: Option<sqx_data::quality::MarketCalendar>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    source: Option<sqx_data::calendar::CalendarBinding>,
     #[serde(default)]
     normalization: Option<sqx_data::normalization::Bundle>,
     bars: Vec<Bar>,
@@ -2413,7 +2432,7 @@ fn archived_backtest_json(body: &str, state: &State) -> String {
         request["compare_paths"]=json!(value.get("compare_paths").and_then(|v|v.as_bool()).unwrap_or(false));
         let mut report:serde_json::Value=serde_json::from_str(&backtest_series_json(&request.to_string(),&series,&instrument)).map_err(|e|e.to_string())?;
         if report.get("error").is_some(){return Ok(report);}
-        let dataset=json!(ArchivedDataset{symbol:series.symbol,timeframe:series.timeframe,instrument,calendar:series.calendar,normalization:series.normalization,bars:series.bars});
+        let dataset=json!(ArchivedDataset{symbol:series.symbol,timeframe:series.timeframe,instrument,calendar:series.calendar,source:series.source,normalization:series.normalization,bars:series.bars});
         let engine=retained_engine_identity(state)?;
         let id=state.archive.save(engine.clone(),dataset,json!(strategy),request,report.clone())?;
         let stored=state.archive.load(&id)?;
@@ -2487,7 +2506,7 @@ fn evolution_json(action:&str,body:&str,state:&State)->String {
                 let quality=research_data_quality(&series,&value,sqx_data::quality::now_ms()).map_err(|e|e.to_string())?;
                 let config=config_for_series(&value,&series)?;let generator=gen_config_from(&value)?;let instrument=instrument_for(&series.symbol);
                 let initial=sqx_optimizer::EvolutionState::new(input.seed,&generator,&input.ga,sqx_optimizer::Fitness::ProfitFactor,&series.bars,&instrument,&config,pyp_for(&series.bars))?;
-                let context=json!({"source":"web","seed":input.seed,"timeframe":series.timeframe,"calendar":series.calendar,"data_quality":quality,"allow_data_gaps":value.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false)});
+                let context=json!({"source":"web","seed":input.seed,"timeframe":series.timeframe,"calendar":series.calendar,"data_source":series.source,"data_quality":quality,"allow_data_gaps":value.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false)});
                 let id=jobs.create_with_normalization(&retained_engine_identity(state)?,&input.request_key,&initial,context,series.normalization.clone())?;
                 Ok(json!({"status":jobs.status(&id)?,"data_quality":quality,"interpretation":"Frozen exploratory search over all supplied data; not an untouched final test."}))
             },
@@ -2584,7 +2603,7 @@ fn research_replay_json(body:&str,state:&State)->String{
             return Err("AI candidate summaries are archived for inspection and backup; deterministic replay is not implemented for this record type.".into());
         }
         let data:ArchivedDataset=serde_json::from_value(bundle.dataset).map_err(|e|e.to_string())?;
-        let series=SymbolSeries{symbol:data.symbol,timeframe:data.timeframe,calendar:data.calendar,normalization:data.normalization,bars:data.bars};
+        let series=SymbolSeries{symbol:data.symbol,timeframe:data.timeframe,calendar:data.calendar,source:data.source,normalization:data.normalization,bars:data.bars};
         let normalization=normalization_status(&series);
         if normalization["status"]=="invalid" {return Err(normalization["error"].as_str().unwrap_or("Invalid normalization evidence").into());}
         let actual:serde_json::Value=if bundle.run.request["research_kind"]=="pipeline" {
@@ -2669,7 +2688,7 @@ fn backtest_series_json(body: &str, series: &SymbolSeries, inst: &Instrument) ->
             "stop_out_ratio": cfg.account.stop_out_ratio,
             "long_financing_per_lot": cfg.account.long_financing_per_lot,
             "short_financing_per_lot": cfg.account.short_financing_per_lot,
-            "symbol": series.symbol, "timeframe": series.timeframe, "calendar":series.calendar,
+            "symbol": series.symbol, "timeframe": series.timeframe, "calendar":series.calendar,"source":series.source,
             "bars": series.bars.len(), "data_fingerprint": bars_fingerprint(&series.bars),
             "first_time": series.bars.first().map(|b| b.time),
             "last_time": series.bars.last().map(|b| b.time),
@@ -2756,7 +2775,7 @@ fn generate_json(body: &str, state: &State) -> String {
     if let Err(error)=gen.validate(){return json!({"error":error}).to_string();}
     let pipeline=sqx_pipeline::Pipeline{name:"Dashboard quick search".into(),tasks:vec![sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::Generate{count,min_trades:5}}]};
     let request=json!({"research_kind":"cli_pipeline_started","origin":"web_generation","attempt_id":format!("{:032x}",rand::random::<u128>()),"web_request":val,"config":cfg,"seed":req.seed,"periods_per_year":pyp});
-    let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,"normalization":series.normalization,"bars":series.bars,"source_context":research_context});
+    let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,"source":series.source,"normalization":series.normalization,"bars":series.bars,"source_context":research_context});
     let started=match retained_engine_identity(state).and_then(|engine|state.archive.save(engine,dataset,json!({"pipeline":pipeline,"generator":gen}),request,json!({"status":"execution_not_recorded"}))){Ok(id)=>id,Err(error)=>return json!({"error":format!("Generation could not be archived: {error}")}).to_string()};
     drop(creation_guard);
     let recovered=match sqx_project::pipeline_archive::recover(&state.archive,&started,true){Ok(result)=>result,Err(error)=>return json!({"error":format!("Generation stopped: {error}. Inspect Saved research before retrying."),"archive":{"started_run_id":started}}).to_string()};
@@ -2810,7 +2829,7 @@ fn portfolio_json(body: &str, state: &State) -> String {
         strategies,selection:sqx_portfolio::SearchConfig{min_trades:5,shortlist_limit:req.top,min_subset:req.min_k,max_subset:req.max_k},
     }}]};
     let request=json!({"research_kind":"cli_pipeline_started","origin":"web_portfolio","attempt_id":format!("{:032x}",rand::random::<u128>()),"web_request":val,"config":cfg,"seed":req.seed,"periods_per_year":pyp});
-    let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,"normalization":series.normalization,"bars":series.bars,"source_context":research_context});
+    let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,"source":series.source,"normalization":series.normalization,"bars":series.bars,"source_context":research_context});
     let specification=json!({"pipeline":pipeline,"generator":gen});
     let started=match retained_engine_identity(state).and_then(|engine|state.archive.save(engine,dataset,specification,request,json!({"status":"execution_not_recorded"}))){
         Ok(id)=>id,Err(error)=>return json!({"error":format!("Portfolio could not be archived: {error}")}).to_string()
@@ -2881,7 +2900,7 @@ fn experiment_json(action:&str,body:&str,state:&State)->String {
                 min_development_trades:minimum("min_development_trades")?,min_holdout_trades:minimum("min_holdout_trades")?,
                 periods_per_year:pyp_for(&series.bars[..split]),prior_exposure_disclosed:disclosure};
             let data=ExperimentData{instrument:instrument_for(&series.symbol),bars:series.bars,
-                provenance:json!({"symbol":series.symbol,"timeframe":series.timeframe,"calendar":series.calendar,"quality":quality,"normalization":series.normalization})};
+                provenance:json!({"symbol":series.symbol,"timeframe":series.timeframe,"calendar":series.calendar,"source":series.source,"quality":quality,"normalization":series.normalization})};
             let id=store.create(&data,plan)?;
             return store.status(&id);
         }
