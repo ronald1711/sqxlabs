@@ -445,12 +445,16 @@ document.addEventListener('click',e=>{
 window.addEventListener('unhandledrejection',e=>{announce('An operation could not finish. '+(e.reason.message || e.reason));});
 loadInfo();loadCatalog();refreshHome();
 
-// Selection follows strategy content rather than row position or sort order.
+// Selection follows the complete recorded row, including its source and metrics.
+// A refreshed result for the same rules must never reuse a stale selection.
+function candidateSelectionKey(row) { return JSON.stringify(row); }
 const selectedStrategies=new Map();
 const originalRenderResults=renderResults;
 renderResults=function() {
-  const available=new Set(RESULTS.map(row=>JSON.stringify(row.strategy)));
-  for(const key of selectedStrategies.keys()) if(!available.has(key)) selectedStrategies.delete(key);
+  const available=new Set(RESULTS.map(candidateSelectionKey));
+  let selectionChanged=false;
+  for(const key of selectedStrategies.keys()) if(!available.has(key)){selectedStrategies.delete(key);selectionChanged=true;}
+  if(selectionChanged)$('comparison').textContent='A selected result changed or is no longer available. Select the current candidates and compare again.';
   originalRenderResults();
   $('res-overview').textContent='Select candidates to compare or combine. Validation evidence is not recorded for historical rows.';
   $('res-portfolio').textContent=`Build portfolio (${selectedStrategies.size} selected)`;
@@ -459,7 +463,7 @@ renderResults=function() {
     if (!index) cell.textContent='Select';
     else {
       const open=row.querySelector('[data-ri]');if (!open)return;
-      const item=RESULTS[Number(open.dataset.ri)],key=JSON.stringify(item.strategy);
+      const item=RESULTS[Number(open.dataset.ri)],key=candidateSelectionKey(item);
       const input=document.createElement('input');input.type='checkbox';input.checked=selectedStrategies.has(key);input.setAttribute('aria-label','Select '+item.name);
       input.onchange=()=>{if(input.checked)selectedStrategies.set(key,copy(item));else selectedStrategies.delete(key);$('res-portfolio').textContent=`Build portfolio (${selectedStrategies.size} selected)`;};cell.append(input);
     }
