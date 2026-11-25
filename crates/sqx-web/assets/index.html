@@ -1488,9 +1488,9 @@ function applyEurResearchProfile(){
   const costs={baseline:[2,0],spread:[3,0],stress:[4,1]}[scenario];
   if(!costs)throw Error('Unknown EUR research scenario');
   const values={'set-deposit':'10000','set-currency':'EUR','set-leverage':'30','set-spread':String(costs[0]),'set-slippage':String(costs[1]),'set-commission':'0','set-long-financing':'0','set-short-financing':'0'};
-  for(const [id,value] of Object.entries(values)){const field=document.getElementById(id);field.value=value;field.dispatchEvent(new Event('change',{bubbles:true}));}
+  for(const [id,value] of Object.entries(values)){const field=document.getElementById(id);field.value=value;field.dispatchEvent(new Event('input',{bubbles:true}));field.dispatchEvent(new Event('change',{bubbles:true}));}
   eurProfileApplied={id:'eurusd-eur-provisional-v1',scenario,status:'research_assumptions_not_execution_validated',applied_values:values};
-  document.getElementById('eur-profile-status').textContent='Provisional EUR profile applied. Select EURUSD for this reference scope. Costs remain editable; commission and financing are currently excluded. Other execution, volume and stop-out settings remain as shown. For EURUSD/EUR, conversion uses the available execution or valuation price. Historical conversion data may be needed for other markets.';
+  document.getElementById('eur-profile-status').textContent='Provisional EUR profile applied. Select EURUSD for this reference scope. The preset starts with zero commission and financing; your current editable settings determine the costs. Other execution, volume and stop-out settings remain as shown. For EURUSD/EUR, conversion uses the available execution or valuation price. Historical conversion data may be needed for other markets.';
 }
 document.getElementById('eur-profile-apply').onclick=applyEurResearchProfile;
 
