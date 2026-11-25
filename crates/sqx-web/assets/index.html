@@ -467,6 +467,25 @@
       </div>
     </section>
     <section id="tab-settings" class="tab">
+      <div class="card" id="connections-panel">
+        <h2>Connections</h2>
+        <p>Manage data and AI connections here. Configuration does not prove that a service is reachable.</p>
+        <div class="row"><button class="secondary" data-go="data">Market data / QuestDB</button><button class="secondary" data-go="settings" data-focus="ai-provider-controls">AI provider settings</button><button id="connections-check" class="secondary">Check local configuration</button></div>
+        <p id="connections-status" role="status">Not checked. This check contacts only your local SqxLabs server; it does not send a prompt or place orders.</p>
+        <details><summary>MCP connections</summary>
+          <p><b>SqxLabs as an MCP server:</b> another AI application can start the sqx-mcp executable and communicate over standard input/output. Configure it in that AI application's MCP settings, using an absolute executable path and a persistent working directory.</p>
+          <p>For a source checkout, the documented launch command is <code>cargo run -q -p sqx-mcp</code>, from the repository directory. <code>SQX_MCP_RESEARCH_DIR</code> sets the research archive location. Starting it can expose research tools to that client; it is not started by this page.</p>
+          <p><b>External MCP servers inside SqxLabs:</b> not supported yet. The AI provider URL is a model API endpoint, not an MCP server address.</p>
+        </details>
+      </div>
+      <div class="card" id="diagnostics-panel" style="margin-top:16px">
+        <h2>Diagnostics</h2>
+        <p>Recent browser error categories, retained on this browser (up to 100). Raw messages, keys, prompts, strategies and account values are excluded. Detailed errors remain beside the operation that failed. This is not the complete server log.</p>
+        <div class="row"><button id="diagnostics-refresh" class="secondary">Refresh errors</button><button id="diagnostics-download" class="secondary">Download diagnostic report</button><button id="diagnostics-clear" class="secondary">Clear browser error history</button></div>
+        <p id="diagnostics-storage" role="status"></p><pre id="diagnostics-events" style="max-height:240px;overflow:auto;white-space:pre-wrap"></pre>
+        <p>The command-line <code>doctor</code> provides basic installation checks. Saved research contains execution evidence and recovery actions; passing these checks is not proof of strategy correctness.</p>
+      </div>
+
       <div class="card">
         <h2>Settings</h2>
         <div class="row">
@@ -1834,6 +1853,7 @@ if (themeBtn) themeBtn.onclick = function() {
 
 
 </script>
+<script src="/diagnostics.js"></script>
 <script src="/operation-status.js"></script>
 <script src="/workspace.js"></script>
 </body>
