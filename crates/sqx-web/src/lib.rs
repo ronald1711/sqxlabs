@@ -735,6 +735,9 @@ mod tests {
         let request=json!({"symbol":"EURUSD","count":4,"seed":123,"allow_data_gaps":true,"request_key":"quick-search-recovery"});
         let response:serde_json::Value=serde_json::from_str(&generate_json(&request.to_string(),&state)).unwrap();assert!(response.get("error").is_none(),"{response}");assert!(response["results"].as_array().unwrap().is_empty());
         let id=response["archive"]["started_run_id"].as_str().unwrap();let completion=response["archive"]["run_id"].as_str().unwrap();let done=state.archive.load(completion).unwrap();let start=state.archive.load(id).unwrap();
+        assert_eq!(response["research_context"]["config"],start.run.request["config"]);
+        assert_eq!(response["research_context"],start.dataset["source_context"]);
+        assert_eq!(response["research_context"]["symbol"],"EURUSD");
         let builds=done.run.result["report"]["builds"].as_array().unwrap();assert_eq!(builds.len(),4);
         let mut rng=rand::rngs::StdRng::seed_from_u64(123);let generator:GeneratorConfig=serde_json::from_value(start.strategy["generator"].clone()).unwrap();
         for (i,row) in builds.iter().enumerate(){assert_eq!(row["evaluation"]["strategy"],json!(random_strategy(&mut rng,&format!("s{i:04}"),&generator)));assert_eq!(row["selected"],false);assert_eq!(row["execution"]["equity"].as_array().unwrap().len(),40);}
@@ -1659,10 +1662,13 @@ fn pipeline_json(body: &str, state: &State) -> String {
         None => return json!({ "error": "no data" }).to_string(),
     };
     let quality=match research_data_quality(&series,&val,sqx_data::quality::now_ms()) {Ok(quality)=>quality,Err(error)=>return error.to_string()};
-    let research_context=json!({"data_quality":quality,"data_gaps_acknowledged":val.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false),"scope":"Exploratory research; candidate selection and data reuse require separate final-test validation."});
+    let mut research_context=json!({"data_quality":quality,"data_gaps_acknowledged":val.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false),"scope":"Exploratory research; candidate selection and data reuse require separate final-test validation."});
     let inst = instrument_for(&series.symbol);
     let pyp = pyp_for(&series.bars);
     let cfg = match config_for_series(&val,&series){Ok(config)=>config,Err(error)=>return json!({"error":error}).to_string()};
+    research_context["config"]=json!(cfg);
+    research_context["symbol"]=json!(series.symbol);
+    research_context["timeframe"]=json!(series.timeframe);
     if let Err(error)=sqx_backtest::validate_backtest_inputs(&series.bars,&inst,&cfg){return json!({"error":error}).to_string();}
     let count=input.count;
     let keep=input.keep;
@@ -2719,9 +2725,12 @@ fn generate_json(body: &str, state: &State) -> String {
     };
 
     let quality=match research_data_quality(&series,&val,sqx_data::quality::now_ms()) {Ok(quality)=>quality,Err(error)=>return error.to_string()};
-    let research_context=json!({"data_quality":quality,"data_gaps_acknowledged":val.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false),"scope":"Exploratory research; candidate selection and data reuse require separate final-test validation."});
+    let mut research_context=json!({"data_quality":quality,"data_gaps_acknowledged":val.get("allow_data_gaps").and_then(|v|v.as_bool()).unwrap_or(false),"scope":"Exploratory research; candidate selection and data reuse require separate final-test validation."});
     let inst = instrument_for(&series.symbol);
     let cfg = match config_for_series(&val,&series){Ok(config)=>config,Err(error)=>return json!({"error":error}).to_string()};
+    research_context["config"]=json!(cfg);
+    research_context["symbol"]=json!(series.symbol);
+    research_context["timeframe"]=json!(series.timeframe);
     if let Err(error)=sqx_backtest::validate_backtest_inputs(&series.bars,&inst,&cfg){return json!({"error":error}).to_string();}
     let pyp = pyp_for(&series.bars);
     let count = req.count;
