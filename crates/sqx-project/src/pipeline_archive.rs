@@ -89,7 +89,7 @@ pub fn import(archive:&Archive,value:Value)->Result<Value,String>{
     }else{None};
     let _request_guard=request_key.map(|key|stress_request_lock(archive,key)).transpose()?;
     let _guard=lock_validated(archive,id)?; // ID was verified by restore/load above.
-    let existing=archive.list()?;
+    let existing=archive.unvalidated_run_ids()?;
     let mut existing_reader=archive.record_session();
     for record_id in &existing {
         let record=PortableRecord{run_id:record_id.clone(),run:existing_reader.load_run(record_id)?};
@@ -132,7 +132,7 @@ fn load(archive:&Archive,id:&str)->Result<State,String>{
         return Err("Expected a pipeline start record".into());
     }
     let mut events=BTreeMap::new();let mut completion=None;let mut reader=archive.record_session();
-    for record_id in archive.list()?{
+    for record_id in archive.unvalidated_run_ids()?{
         let run=reader.load_run(&record_id)?;
         let record=PortableRecord{run_id:record_id,run};
         if record.run.request["started_run_id"]!=id {continue;}
@@ -233,6 +233,38 @@ pub fn recover(archive:&Archive,id:&str,resume:bool)->Result<Recovery,String>{
 #[cfg(test)]
 mod backup_tests {
     use super::*;
+    #[test]
+    fn scans_reject_unrelated_corruption_before_import_publication(){
+        let dir=std::env::temp_dir().join(format!("sqx-scan-integrity-{:032x}",rand::random::<u128>()));
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {fn drop(&mut self){let _=std::fs::remove_dir_all(&self.0);}}
+        let _cleanup=Cleanup(dir.clone());
+        let source=Archive::new(dir.join("source"));
+        let id=source.save("a".repeat(64),json!({"bars":[]}),json!({}),
+            json!({"research_kind":"cli_pipeline_started","config":{},"seed":42}),
+            json!({"status":"execution_not_recorded"})).unwrap();
+        let backup=export(&source,&id).unwrap();
+        for kind in ["runs","datasets","strategies"] {
+            let target=Archive::new(dir.join(kind));
+            let unrelated=target.save("b".repeat(64),json!([9]),json!({"other":true}),json!({}),json!({})).unwrap();
+            let bundle=target.load(&unrelated).unwrap();
+            let blob=match kind {"runs"=>&unrelated,"datasets"=>&bundle.run.dataset_id,_=>&bundle.run.strategy_id};
+            let path=target.root().join(kind).join(format!("{blob}.json"));
+            let original=std::fs::read(&path).unwrap();
+            // A valid listing on an earlier request must not mask later corruption.
+            assert_eq!(target.list().unwrap(),vec![unrelated.clone()]);
+            std::fs::write(&path,b"corrupt").unwrap();
+            assert!(target.list().is_err());
+            assert!(import(&target,backup.clone()).unwrap_err().contains("integrity failure"));
+            assert!(!target.root().join("runs").join(format!("{id}.json")).exists());
+            std::fs::write(&path,&original).unwrap();
+            import(&target,backup.clone()).unwrap();
+            std::fs::write(&path,b"corrupt").unwrap();
+            assert!(summary(&target,&id).unwrap_err().contains("integrity failure"));
+            assert!(export(&target,&id).unwrap_err().contains("integrity failure"));
+        }
+    }
+
     #[test]
     fn restored_stress_request_ids_are_unique_before_publication(){
         let dir=std::env::temp_dir().join(format!("sqx-request-restore-{:032x}",rand::random::<u128>()));
