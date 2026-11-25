@@ -475,6 +475,12 @@
         <select id="set-intrabar"><option value="adverse_first">Adverse extreme first (side-aware)</option><option value="favorable_first">Favorable extreme first (side-aware)</option><option value="high_first">Open → high → low → close</option><option value="low_first">Open → low → high → close</option></select>
         <p class="muted">Candles do not reveal the actual price sequence. Reports flag candles where the two OHLC paths differ. These scenarios are not mathematical worst/best bounds.</p>
         <label><input type="checkbox" id="set-compare-paths"> Compare all four complete backtest scenarios (additional computation)</label>
+        <h3>Provisional research profile</h3>
+        <p>EURUSD / EUR · €10,000 · maximum leverage 1:30. Costs below are research assumptions, not verified broker fees. Zero commission and financing mean those costs are excluded.</p>
+        <label for="eur-profile-scenario">Cost scenario</label>
+        <select id="eur-profile-scenario"><option value="baseline">Baseline: 2 pips spread, no extra slippage</option><option value="spread">Higher spread: 3 pips</option><option value="stress">Stress: 4 pips spread + 1 pip slippage per fill</option></select>
+        <button id="eur-profile-apply" type="button">Apply provisional EUR profile</button>
+        <p id="eur-profile-status" role="status">Apply this profile to the current settings, then adjust any value manually. Existing saved studies retain their original settings. This does not validate execution or change the selected market.</p>
         <h3>Account and broker assumptions</h3>
         <div class="row">
           <label for="set-currency">Account currency</label><input id="set-currency" value="USD" maxlength="3" size="4">
@@ -1517,9 +1523,21 @@ if (resPortfolio) resPortfolio.onclick = async function() {
   if (typeof drawChart === "function") drawChart(d.equity, "res-portfolio-chart");
 };
 
+let eurProfileApplied=null;
+function applyEurResearchProfile(){
+  const scenario=document.getElementById('eur-profile-scenario').value;
+  const costs={baseline:[2,0],spread:[3,0],stress:[4,1]}[scenario];
+  if(!costs)throw Error('Unknown EUR research scenario');
+  const values={'set-deposit':'10000','set-currency':'EUR','set-leverage':'30','set-spread':String(costs[0]),'set-slippage':String(costs[1]),'set-commission':'0','set-long-financing':'0','set-short-financing':'0'};
+  for(const [id,value] of Object.entries(values)){const field=document.getElementById(id);field.value=value;field.dispatchEvent(new Event('input',{bubbles:true}));field.dispatchEvent(new Event('change',{bubbles:true}));}
+  eurProfileApplied={id:'eurusd-eur-provisional-v1',scenario,status:'research_assumptions_not_execution_validated',applied_values:values};
+  document.getElementById('eur-profile-status').textContent='Provisional EUR profile applied. Select EURUSD for this reference scope. The preset starts with zero commission and financing; your current editable settings determine the costs. Other execution, volume and stop-out settings remain as shown. For EURUSD/EUR, conversion uses the available execution or valuation price. Historical conversion data may be needed for other markets.';
+}
+document.getElementById('eur-profile-apply').onclick=applyEurResearchProfile;
+
 function settings() {
   const g=function(id,defaultValue){const el=document.getElementById(id);if(!el)return defaultValue;const text=el.value.trim(),value=Number(text);if(!text||!Number.isFinite(value))throw new Error('Enter a finite number for '+(el.labels?.[0]?.textContent.trim()||id)+'.');return value;};
-  return { deposit: g("set-deposit", 10000), spread: g("set-spread", 0), slippage: g("set-slippage", 0), commission: g("set-commission", 0), intrabar_policy: document.getElementById("set-intrabar").value, compare_paths: document.getElementById("set-compare-paths").checked, allow_data_gaps: document.getElementById("set-allow-gaps").checked, account: {
+  return { research_profile: typeof eurProfileApplied!=="undefined" && eurProfileApplied ? {id:eurProfileApplied.id,scenario:eurProfileApplied.scenario,status:eurProfileApplied.status,modified:Object.entries( eurProfileApplied.applied_values).some(([id,value])=>document.getElementById(id).value!==value)} : null, deposit: g("set-deposit", 10000), spread: g("set-spread", 0), slippage: g("set-slippage", 0), commission: g("set-commission", 0), intrabar_policy: document.getElementById("set-intrabar").value, compare_paths: document.getElementById("set-compare-paths").checked, allow_data_gaps: document.getElementById("set-allow-gaps").checked, account: {
     currency: document.getElementById("set-currency").value.trim().toUpperCase(),
     max_leverage: g("set-leverage", NaN), stop_out_ratio: g("set-stopout", NaN),
     min_lots: g("set-min-lots", NaN), lot_step: g("set-lot-step", NaN), max_lots: g("set-max-lots", NaN),
