@@ -1159,6 +1159,7 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("GET", "/workspace.js") => ("200 OK", "text/javascript; charset=utf-8", include_str!("../assets/workspace.js").to_string()),
         ("GET", "/api/mcp/config") => ("200 OK", "application/json", mcp_settings::route("read","{}")),
         ("POST", "/api/mcp/config") => ("200 OK", "application/json", mcp_settings::route("save",body)),
+        ("POST", "/api/mcp/logs") => ("200 OK", "application/json", mcp_settings::route("logs",body)),
         ("POST", "/api/mcp/probe") => ("200 OK", "application/json", mcp_settings::route("probe",body)),
         ("GET", "/api/indicators") => ("200 OK", "application/json", indicators_json()),
         ("GET", "/api/catalog") => ("200 OK", "application/json", catalog_json()),

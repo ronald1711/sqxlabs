@@ -501,6 +501,16 @@
         <p>Recent browser error categories, retained on this browser (up to 100). Raw messages, keys, prompts, strategies and account values are excluded. Detailed errors remain beside the operation that failed. This is not the complete server log.</p>
         <div class="row"><button id="diagnostics-refresh" class="secondary">Refresh errors</button><button id="diagnostics-download" class="secondary">Download diagnostic report</button><button id="diagnostics-clear" class="secondary">Clear browser error history</button></div>
         <p id="diagnostics-storage" role="status"></p><pre id="diagnostics-events" style="max-height:240px;overflow:auto;white-space:pre-wrap"></pre>
+        <h3>MCP server logs</h3>
+        <p>Requires a saved MCP profile. Reports contain event metadata only; missing records and running/client status remain explicitly qualified.</p>
+        <div class="search-fields">
+          <label>Since (UTC)<input id="mcp-log-since" type="datetime-local"></label>
+          <label>Tool name (optional)<input id="mcp-log-tool" type="text" placeholder="backtest"></label>
+          <label>Session ID (optional)<input id="mcp-log-session" type="text"></label>
+          <label>Result<select id="mcp-log-status"><option value="">All</option value="completed">Completed</option><option value="tool_error">Tool error</option><option value="parse_error">Protocol parse error</option><option value="started">Started</option><option value="stopped">Stopped</option></select></label>
+        </div>
+        <div class="row"><button id="mcp-log-refresh" class="secondary">Read MCP logs</button><button id="mcp-log-download" class="secondary" disabled>Download displayed MCP report</button></div>
+        <p id="mcp-log-notice" role="status">No MCP logs loaded.</p><pre id="mcp-log-events" style="max-height:260px;overflow:auto;white-space:pre-wrap"></pre>
         <p>The command-line <code>doctor</code> provides basic installation checks. Saved research contains execution evidence and recovery actions; passing these checks is not proof of strategy correctness.</p>
       </div>
 

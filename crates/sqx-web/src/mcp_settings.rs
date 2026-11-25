@@ -37,6 +37,7 @@ fn read(root:&Path)->Result<Value,String>{
 pub fn route(action:&str,body:&str)->String{
  let result=(||->Result<Value,String>{let root=storage()?;
  if action=="read"{return read(&root);}
+ if action=="logs"{let (config,_)=current(&root)?;let filter:Value=serde_json::from_str(body).map_err(|_|"Invalid log filters")?;return sqx_project::mcp_logs::report(&config,&filter);}
  let _guard=MUTATION.try_lock().map_err(|_|"Another MCP configuration operation is running")?;
  let body:Value=serde_json::from_str(body).map_err(|_|"Invalid MCP settings request")?;
  match action {

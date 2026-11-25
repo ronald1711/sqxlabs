@@ -4,7 +4,7 @@ struct Temp(std::path::PathBuf);
 impl Drop for Temp {fn drop(&mut self){let _=fs::remove_dir_all(&self.0);}}
 fn root()->Temp{let t=Temp(std::env::temp_dir().join(format!("sqx-mcp-protocol-log-{:032x}",rand::random::<u128>())));fs::create_dir_all(&t.0).unwrap();t}
 fn run(root:&std::path::Path,input:&str,log:&std::path::Path)->std::process::Output {
- let mut child=Command::new(env!("CARGO_BIN_EXE_sqx-mcp")).current_dir(root).env("SQX_MCP_LOG_DIR",log).env("SQX_MCP_RESEARCH_DIR",root.join("research")).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+ let mut child=Command::new(env!("CARGO_BIN_EXE_sqx-mcp")).current_dir(root).env_remove("SQX_MCP_CONFIG").env("SQX_MCP_LOG_DIR",log).env("SQX_MCP_RESEARCH_DIR",root.join("research")).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
  child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();child.wait_with_output().unwrap()
 }
 #[test] fn protocol_is_clean_and_secret_inputs_are_not_logged(){
@@ -35,6 +35,8 @@ fn run(root:&std::path::Path,input:&str,log:&std::path::Path)->std::process::Out
  let path=root.0.join("config.json");fs::write(&path,serde_json::to_vec(&profile).unwrap()).unwrap();
  let result=sqx_project::mcp_probe::probe(&profile,&path,std::time::Duration::from_secs(5)).unwrap();assert_eq!(result["handshake"],"passed");assert_eq!(result["probe_process"],"exited");assert_eq!(result["external_client_connection"],"unknown");assert!(!profile.research_directory.exists());
  let logs=fs::read_to_string(profile.log_directory.join("mcp.jsonl")).unwrap();assert!(!logs.contains("tools/call"));assert!(logs.contains("notifications/initialized"));
+ let report=sqx_project::mcp_logs::report(&profile,&json!({})).unwrap();
+ assert_eq!(report["observed_handshakes"].as_array().unwrap().len(),1);assert_eq!(report["observed_handshakes"][0]["client_kind"],"probe");assert_eq!(report["observed_handshakes"][0]["configuration_id"],profile.identity());assert_eq!(report["process_status"],"unknown");
  let mut altered=profile.clone();altered.log_retention_days=8;assert!(sqx_project::mcp_probe::probe(&altered,&path,std::time::Duration::from_secs(5)).unwrap_err().contains("changed"));
 }
 #[cfg(unix)]

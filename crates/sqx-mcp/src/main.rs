@@ -63,6 +63,7 @@ fn main() {
         let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("");
         let has_id = req.get("id").is_some();
         let tool=req["params"]["name"].as_str();
+        if method=="initialize"{diagnostic.observe_client(req["params"]["clientInfo"]["name"].as_str());}
         diagnostic.event(request_sequence,method,tool,"started",0);
         let mut status="completed";
         match method {
