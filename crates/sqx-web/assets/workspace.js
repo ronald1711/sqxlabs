@@ -130,10 +130,13 @@ getJSON = async function(url) {
   const tracked=url.split('?')[0]==='/api/questdb/symbols';
   const op=tracked?operations.start(operationName(url)):null;
   try{const r=await fetch(url);if(!r.ok)throw new Error(`Request failed (${r.status}). Please retry.`);
-    const data=await r.json();if(op)operations.finish(op,data);return data;
-  }catch(e){if(op)operations.fail(op,e.message);throw e;}
+    const data=await r.json();if(op)operations.finish(op,data);if(data.error)recordDiagnostic('application-error',url);return data;
+  }catch(e){if(op)operations.fail(op,e.message);recordDiagnostic('transport-error',url);throw e;}
 };
 
+const diagnostics=SqxDiagnostics.create({getItem:key=>localStorage.getItem(key),setItem:(key,value)=>localStorage.setItem(key,value)});
+function recordDiagnostic(kind,url){diagnostics.add(kind,SqxDiagnostics.area(url));renderDiagnostics();}
+function renderDiagnostics(){const report=diagnostics.report();$('diagnostics-storage').textContent=report.persistent?'Stored in this browser only.':'Browser storage unavailable; history may disappear on reload.';$('diagnostics-events').textContent=report.events.length?report.events.slice().reverse().map(x=>x.at+' · '+x.area+' · '+x.kind).join('\n'):'No errors recorded in this browser yet.';}
 // Visible operation history survives completion and tab changes.
 const operationPanel=document.createElement('section');
 operationPanel.id='job-status';operationPanel.hidden=true;
@@ -172,6 +175,20 @@ const operations=SqxOperationStatus.create((items)=>{
   });
 });
 
+$('diagnostics-refresh').onclick=renderDiagnostics;
+$('diagnostics-download').onclick=()=>downloadJson('sqxlabs-diagnostics.json',diagnostics.report());
+$('diagnostics-clear').onclick=()=>{if(confirm('Clear error categories stored in this browser? Saved research and server logs are not changed.')){diagnostics.clear();renderDiagnostics();}};
+window.addEventListener('error',()=>recordDiagnostic('browser-error',''));
+window.addEventListener('unhandledrejection',()=>recordDiagnostic('browser-error',''));
+$('connections-check').onclick=async function(){
+ this.disabled=true;$('connections-status').textContent='Checking local configuration…';
+ try{const [data,ai]=await Promise.all([getJSON('/api/datasources'),getJSON('/api/assistant/config')]);
+ if(data.error||ai.error)throw Error('Local configuration unavailable.');
+ $('connections-status').textContent='Local app reachable · '+(data.symbols||[]).length+' loaded data series. AI configuration received (provider reachability not tested). MCP: external client setup required; external servers inside SqxLabs are not supported.';
+ }catch(e){$('connections-status').textContent='Could not read local configuration. Inspect Diagnostics and retry.';}finally{this.disabled=false;}
+};
+renderDiagnostics();
+
 const inflight=new Set();
 postJSON = async function(url,body) {
   const requestKey=url+'\n'+body;
@@ -182,8 +199,8 @@ postJSON = async function(url,body) {
   try {
     const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body});
     if (!r.ok) throw new Error(`Request failed (${r.status}).`);
-    const data=await r.json(); operations.finish(op,data); if (data.error) announce(data.error); return data;
-  } catch(e) { operations.fail(op,e.message); announce('Could not complete the request. '+e.message); return {error:e.message}; }
+    const data=await r.json(); operations.finish(op,data); if (data.error) {recordDiagnostic('application-error',url);announce(data.error);} return data;
+  } catch(e) { operations.fail(op,e.message); recordDiagnostic('transport-error',url); announce('Could not complete the request. '+e.message); return {error:e.message}; }
   finally { inflight.delete(requestKey); if (initiator) initiator.disabled=false; }
 };
 const originalConditionRow=buildConditionRow;
