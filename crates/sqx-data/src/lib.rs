@@ -8,6 +8,7 @@ use sqx_core::{Bar, Tick, Timeframe};
 
 mod questdb;
 pub mod quality;
+pub mod calendar;
 
 pub use questdb::{QuestdbClient, QuestdbConfig};
 
