@@ -1151,6 +1151,7 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
     }
     match (method, path) {
         ("GET", "/") | ("GET", "/index.html") => ("200 OK", "text/html; charset=utf-8", INDEX.to_string()),
+        ("GET", "/operation-status.js") => ("200 OK", "text/javascript; charset=utf-8", include_str!("../assets/operation-status.js").to_string()),
         ("GET", "/workspace.js") => ("200 OK", "text/javascript; charset=utf-8", include_str!("../assets/workspace.js").to_string()),
         ("GET", "/api/indicators") => ("200 OK", "application/json", indicators_json()),
         ("GET", "/api/catalog") => ("200 OK", "application/json", catalog_json()),

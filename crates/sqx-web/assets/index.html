@@ -98,7 +98,10 @@
   #paper-workspace select, #paper-workspace input[type="file"] { box-sizing:border-box; min-width:0; max-width:100%; width:100%; }
   summary { cursor:pointer; padding:10px 0; font-weight:600; }
   .card + .card { margin-top:18px; }
-  #job-status { position:fixed; bottom:16px; right:18px; background:var(--panel); border:1px solid var(--acc); padding:12px 18px; border-radius:10px; z-index:10; max-width:90vw; }
+  #job-status { position:fixed; bottom:16px; right:18px; background:var(--panel); border:1px solid var(--acc); padding:12px 18px; border-radius:10px; z-index:10; width:320px; max-width:calc(100vw - 36px); max-height:32vh; overflow:auto; box-shadow:0 4px 20px #0004; }
+  .operation-row { padding:8px 0; border-top:1px solid var(--border); overflow-wrap:anywhere; }
+  .operation-row progress { width:100%; accent-color:var(--acc); }
+  .operation-row[data-state="error"] { border-left:3px solid #ef6666; padding-left:8px; }
   .cond-row select { max-width:100%; min-height:36px; }
   .indicator-search { width:100% !important; margin:0 0 8px; }
   @media(max-width:1050px) { .editor-columns { grid-template-columns:1fr; } .journey,.metrics-grid { grid-template-columns:repeat(2,1fr); } }
@@ -1831,6 +1834,7 @@ if (themeBtn) themeBtn.onclick = function() {
 
 
 </script>
+<script src="/operation-status.js"></script>
 <script src="/workspace.js"></script>
 </body>
 </html>
