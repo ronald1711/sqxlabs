@@ -450,6 +450,112 @@ mod tests {
         assert_eq!(classify_report_error("window 1 is too short"), Decision::InsufficientEvidence);
         assert_eq!(classify_report_error("some engine failure"), Decision::TechnicalError);
     }
+
+    #[test]
+    fn technical_error_dominates_insufficient_evidence_across_windows() {
+        // One window ran out of evidence, the other failed technically: the
+        // technical failure decides the gate, never the data shortage.
+        assert_eq!(
+            aggregate_decision(
+                &[],
+                [Decision::InsufficientEvidence, Decision::TechnicalError],
+            ),
+            Decision::TechnicalError
+        );
+        // An engine-level execution error counts as technical as well.
+        assert_eq!(
+            aggregate_decision(
+                &["window 1, out-of-sample (frozen): engine failure".into()],
+                [Decision::InsufficientEvidence],
+            ),
+            Decision::TechnicalError
+        );
+        // A data/evidence shortage reported by the engine stays insufficient.
+        assert_eq!(
+            aggregate_decision(
+                &["account exhausted; remaining windows not traded".into()],
+                [Decision::Passed],
+            ),
+            Decision::InsufficientEvidence
+        );
+        // Without errors, the worst window decision wins and all-passed stays passed.
+        assert_eq!(
+            aggregate_decision(&[], [Decision::Passed, Decision::InsufficientEvidence]),
+            Decision::InsufficientEvidence
+        );
+        assert_eq!(
+            aggregate_decision(&[], [Decision::Passed, Decision::Rejected]),
+            Decision::Rejected
+        );
+        assert_eq!(
+            aggregate_decision(&[], [Decision::Passed, Decision::Passed]),
+            Decision::Passed
+        );
+    }
+
+    #[test]
+    fn joint_threshold_boundary_ignores_summation_noise_only() {
+        // Summing per-window nets lands a few units in the last place off an
+        // exact boundary; that must still count as reaching the threshold.
+        assert!(meets_threshold(49.999999999998934, 50.0));
+        assert!(meets_threshold(50.0, 50.0));
+        assert!(meets_threshold(50.00000000000036, 50.0));
+        // A real shortfall is rejected, even a small one.
+        assert!(!meets_threshold(49.9, 50.0));
+        assert!(!meets_threshold(50.0, 50.01));
+        assert!(!meets_threshold(f64::NAN, 0.0));
+    }
+
+    #[test]
+    fn window_execution_failure_dominates_a_missing_outcome() {
+        let spec = WalkForward {
+            windows: 2,
+            oos_fraction: 0.30,
+            min_is_trades: 2,
+            min_oos_trades_per_window: 2,
+            min_total_oos_net_profit: 0.0,
+        };
+        let window = |errors: Vec<String>, eligible: bool, reason: Option<&str>| CollectedWindow {
+            index: 0,
+            is_start: 0,
+            is_end: 56,
+            oos_start: 56,
+            oos_end: 80,
+            starting_equity: 1_000.0,
+            is_trades: Some(5.0),
+            is_net_profit: Some(3.0),
+            is_profit_factor: Some(1.2),
+            is_eligible: eligible,
+            is_exclusion_reason: reason.map(str::to_string),
+            is_errors: errors,
+            oos_ran: false,
+            oos_execution: None,
+        };
+        // A failed in-sample execution is technical, even though no
+        // out-of-sample outcome exists either.
+        let (is_decision, oos_decision, decision, _, _, _, _, _) = decide_window(
+            &window(vec!["window 0, training candidate 0: boom".into()], false, None),
+            &spec,
+            525_600.0,
+            56,
+            80,
+        );
+        assert_eq!(is_decision, Decision::TechnicalError);
+        assert_eq!(oos_decision, Decision::NotRun);
+        assert_eq!(decision, Decision::TechnicalError);
+        // Without a technical failure, an ineligible run is only missing evidence.
+        let (is_decision, oos_decision, decision, _, _, _, _, reason) = decide_window(
+            &window(Vec::new(), false, Some("insufficient_in_sample_trades")),
+            &spec,
+            525_600.0,
+            56,
+            80,
+        );
+        assert_eq!(is_decision, Decision::InsufficientEvidence);
+        assert_eq!(oos_decision, Decision::NotRun);
+        assert_eq!(decision, Decision::InsufficientEvidence);
+        assert_eq!(reason, "insufficient_in_sample_trades");
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -631,6 +737,34 @@ fn severity(decision: &Decision) -> u8 {
 
 fn worse(a: Decision, b: Decision) -> Decision {
     if severity(&b) > severity(&a) { b } else { a }
+}
+
+/// Aggregate engine errors and per-window decisions into the gate decision.
+/// A technical failure in any window or engine error dominates; a missing or
+/// insufficiently traded window is insufficient evidence; only then may the
+/// joint out-of-sample total decide.
+fn aggregate_decision(
+    report_errors: &[String],
+    window_decisions: impl IntoIterator<Item = Decision>,
+) -> Decision {
+    let mut decision = Decision::Passed;
+    for error in report_errors {
+        decision = worse(decision, classify_report_error(error));
+    }
+    for window in window_decisions {
+        decision = worse(decision, window);
+    }
+    decision
+}
+
+/// Compare the summed per-window out-of-sample net to the joint threshold.
+/// Summing per-window account-currency results introduces float noise of a few
+/// units in the last place, so an exact boundary must still count as reached:
+/// without this a study showing "50.00 ≥ 50.00" could be rejected. The margin is
+/// far below a cent and does not mask any economically meaningful shortfall.
+fn meets_threshold(measured: f64, threshold: f64) -> bool {
+    measured.is_finite()
+        && measured >= threshold - 1e-9 * (1.0 + measured.abs().max(threshold.abs()))
 }
 
 /// Mirrors the optimizer split exactly so planned rows agree with the emitted
@@ -852,13 +986,10 @@ fn run_walk_forward(
     let all_valid = windows.len() == spec.windows
         && all_oos_nets.len() == spec.windows
         && windows.iter().all(|window| window.decision == Decision::Passed);
-    let mut decision = Decision::Passed;
-    for error in &report_errors {
-        decision = worse(decision, classify_report_error(error));
-    }
-    for window in &windows {
-        decision = worse(decision, window.decision.clone());
-    }
+    let mut decision = aggregate_decision(
+        &report_errors,
+        windows.iter().map(|window| window.decision.clone()),
+    );
     let joint_total = all_oos_nets.iter().sum::<f64>();
     if all_valid && decision == Decision::Passed {
         // Cross-check the summed per-window nets against the carried capital:
@@ -871,7 +1002,7 @@ fn run_walk_forward(
         });
         if !reconciles {
             decision = Decision::TechnicalError;
-        } else if joint_total < spec.min_total_oos_net_profit {
+        } else if !meets_threshold(joint_total, spec.min_total_oos_net_profit) {
             decision = Decision::Rejected;
         }
     }

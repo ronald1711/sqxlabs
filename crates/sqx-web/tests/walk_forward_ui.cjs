@@ -109,5 +109,21 @@ vm.runInContext(code,ctx);
   assert.ok(reopened.includes('Walk-forward stabiliteit · fixed_candidate_segmented_v1 v1'),'reopened study must show the archived walk-forward panel');
   assert.ok(reopened.includes('-20.00')&&reopened.includes('70.00')&&reopened.includes('drempel ≥ 50.00'),'reopened study must show the same per-window details');
 
-  console.log('Walk-forward UI passed: toggle, per-window IS/OOS net + bounds/times + local thresholds + reason, five statuses, null (not zero) measurements, no red reject on a losing window, and identical re-read on reopen.');
+  // --- 5. A study archived before the gate existed stays readable as-is. ---
+  const legacyCandidate={candidate_index:4,name:'Legacy Candidate',passed:true,errors:[],
+    checks:[
+      {metric:'trades',decision:'passed',measured:20,threshold:20,comparison:'at_least'},
+      {metric:'net_profit',decision:'passed',measured:120,threshold:0,comparison:'at_least'},
+      {metric:'profit_factor',decision:'passed',measured:1.4,threshold:1,comparison:'at_least'},
+      {metric:'drawdown_pct',decision:'passed',measured:3.2,threshold:10,comparison:'at_most'}
+    ]};
+  let legacyBox={prepend:s=>{rendered=s;}};
+  ctx.showSearchAssessments(legacyBox,[legacyCandidate],'study-legacy');
+  const legacyText=descendants(rendered).map(node=>node.textContent).filter(Boolean).join('\n');
+  assert.ok(legacyText.includes('Legacy Candidate'),'legacy assessment must still render its candidate');
+  assert.ok(legacyText.includes('Geslaagd'),'legacy assessment keeps its passed status');
+  assert.ok(!legacyText.includes('Walk-forward stabiliteit'),'a study recorded before the gate must not show a walk-forward panel');
+  assert.ok(!legacyText.includes('Gezamenlijke out-of-sample nettowinst'),'no fabricated walk-forward threshold for an old study');
+
+  console.log('Walk-forward UI passed: toggle, per-window IS/OOS net + bounds/times + local thresholds + reason, five statuses, null (not zero) measurements, no red reject on a losing window, identical re-read on reopen, and legacy studies without the gate.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

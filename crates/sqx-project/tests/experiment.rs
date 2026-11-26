@@ -490,3 +490,182 @@ fn mcp_generation_phases_disclose_exposure_without_inventing_backtest_or_trial_c
     let audit=restored.status(&id).unwrap()["current_exposure_audit"].clone();assert_eq!(audit["classification"],"known_reuse_or_disclosed_exposure");
     assert_eq!(audit["carried_commitment_evidence"]["same_market_archived_mcp_generation_records"],4);
 }
+
+// --- Walk-forward gate inside the development/holdout protocol -------------
+//
+// Synthetic 160-bar oracle: two eligible in-sample runs, two out-of-sample
+// trades per window, window nets -20 and +70 (joint total 50, threshold 50).
+// Holdout data starts at bar 160 and must never influence the development
+// selection or its walk-forward archive.
+
+fn oracle_candidate() -> Strategy {
+    let mut s=Strategy::new("frozen walk-forward candidate");s.long=true;s.short=false;
+    s.money_management=MoneyManagement::FixedSize{size:0.1};s.exits=vec![ExitType::ExitAfterBars(12)];
+    s.signals.push(Signal::new(SignalKind::LongEntry,vec![Condition::new(Operand::Const(1.0),Comparator::Gt,Operand::Const(0.0))],Join::And));s
+}
+
+fn alternate_candidate() -> Strategy {
+    let mut s=oracle_candidate();s.name="alternate frozen candidate".into();s.exits=vec![ExitType::ExitAfterBars(1)];s
+}
+
+fn oracle_bars() -> Vec<Bar> {
+    let steps: &[(usize,f64)]=&[
+        (7,1.1010),(20,1.0990),(33,1.1000),(46,1.0980),(54,1.1000),
+        (56,1.1013),(63,1.1003),(76,1.0993),
+        (87,1.1003),(100,1.0983),(113,1.0993),(126,1.0973),(134,1.0999),
+        (143,1.1049),(154,1.1069),
+        // Validation region [160,240): an oscillating path so the basic checks
+        // see both winners and losers instead of a non-finite profit factor.
+        (168,1.1072),(176,1.1062),(184,1.1074),(192,1.1064),
+        (200,1.1076),(208,1.1066),(216,1.1078),(224,1.1068),(232,1.1080),
+    ];
+    let mut bars=Vec::with_capacity(320);let mut price=1.1000f64;let mut next=0;
+    for index in 0..320 {
+        while next<steps.len()&&steps[next].0<=index{price=steps[next].1;next+=1;}
+        bars.push(Bar::new(index as i64*60_000,price,price,price,price,1.0));
+    }
+    bars
+}
+
+fn oracle_data()->ExperimentData {
+    ExperimentData{bars:oracle_bars(),instrument:Instrument::fx("EURUSD"),provenance:json!({"source":"synthetic walk-forward oracle","timeframe":"M1"})}
+}
+
+fn walk_forward_requirements()->sqx_project::search_requirements::Requirements {
+    sqx_project::search_requirements::Requirements{
+        min_trades:1,min_net_profit:-1_000_000_000.0,min_profit_factor:0.0,max_drawdown_pct:1e12,
+        spread_stress:None,monte_carlo:None,
+        walk_forward:Some(sqx_project::search_requirements::WalkForward{
+            windows:2,oos_fraction:0.30,min_is_trades:2,min_oos_trades_per_window:2,
+            min_total_oos_net_profit:50.0,
+        }),
+    }
+}
+
+fn walk_forward_plan()->ExperimentPlan {
+    let mut plan=plan();
+    // Development [0,160) carries the walk-forward gate; validation [160,240)
+    // and the reserved final test [240,320) follow it.
+    plan.validation_start=Some(160);
+    plan.holdout_start=240;
+    plan.requirements=Some(walk_forward_requirements());
+    plan.config.initial_deposit=1_000.0;
+    plan.config.bar_duration_ms=Some(60_000);
+    plan.periods_per_year=525_600.0;
+    plan
+}
+
+fn walk_forward_spec()->sqx_project::experiment::SearchSpec {
+    sqx_project::experiment::SearchSpec{seed:11,generator:json!({"fixture":"walk_forward"}),
+        candidates:vec![oracle_candidate(),alternate_candidate()]}
+}
+
+#[test]
+fn walk_forward_search_pauses_resumes_and_reopens_with_identical_evidence(){
+    let temp=Temp::new();let store=Experiments::new(&temp.0);
+    let id=store.create(&oracle_data(),walk_forward_plan()).unwrap();
+    let spec=walk_forward_spec();
+    let job=store.start_search(&id,"test-engine","wf-request",&spec).unwrap();
+    let job_id=job["job_id"].as_u64().unwrap() as usize;
+    // Pause after the first candidate.
+    let first=store.advance_search(&id,"test-engine",job_id).unwrap();
+    assert_eq!(first["state"],"resumable");
+    let frozen_report=first["last_trial"]["report"].clone();
+    let measured=frozen_report["assessment"]["walk_forward"]["oos_total_net_profit"].as_f64().unwrap();
+    assert!((measured-50.0).abs()<1e-6,"joint total {measured} must equal the 50 threshold's realized value");
+    assert_eq!(frozen_report["assessment"]["walk_forward"]["min_total_oos_net_profit"].as_f64().unwrap(),50.0);
+    assert_eq!(frozen_report["assessment"]["checks"].as_array().unwrap()
+        .iter().find(|check|check["metric"]=="walk_forward_total_oos_net_profit").unwrap()["decision"],"passed");
+    // A reopened store resumes the same frozen job without duplicate trials.
+    let resumed=Experiments::new(&temp.0);
+    let second=resumed.advance_search(&id,"test-engine",job_id).unwrap();
+    assert_eq!(second["state"],"complete");
+    assert_eq!(second["completed"],2);
+    assert_eq!(resumed.status(&id).unwrap()["trials_attempted"],2);
+    assert_eq!(resumed.status(&id).unwrap()["jobs"][0]["state"],"complete");
+    // The same run without the pause produces byte-identical evidence.
+    let uninterrupted_root=Temp::new();let uninterrupted=Experiments::new(&uninterrupted_root.0);
+    let expected_id=uninterrupted.create(&oracle_data(),walk_forward_plan()).unwrap();
+    let expected_job=uninterrupted.start_search(&expected_id,"test-engine","wf-request",&spec).unwrap();
+    let expected_job_id=expected_job["job_id"].as_u64().unwrap() as usize;
+    let expected_first=uninterrupted.advance_search(&expected_id,"test-engine",expected_job_id).unwrap();
+    let expected_second=uninterrupted.advance_search(&expected_id,"test-engine",expected_job_id).unwrap();
+    assert_eq!(first["last_trial"],expected_first["last_trial"]);
+    assert_eq!(second["last_trial"],expected_second["last_trial"]);
+    assert_eq!(resumed.status(&id).unwrap()["events"],uninterrupted.status(&expected_id).unwrap()["events"]);
+    // Every archived candidate keeps the per-window archive for later re-reading.
+    let events=resumed.status(&id).unwrap()["events"].clone();
+    let finished:Vec<_>=events.as_array().unwrap().iter()
+        .filter(|event|event["event"]["kind"]=="trial_finished").collect();
+    assert_eq!(finished.len(),2);
+    for event in finished {
+        let assessment=&event["event"]["report"]["assessment"];
+        let walk_forward=&assessment["walk_forward"];
+        assert_eq!(walk_forward["method"],"fixed_candidate_segmented_v1");
+        assert_eq!(walk_forward["windows"].as_array().unwrap().len(),2);
+        let check=assessment["checks"].as_array().unwrap().iter()
+            .find(|check|check["metric"]=="walk_forward_total_oos_net_profit").unwrap();
+        match check["decision"].as_str().unwrap() {
+            "passed" => {
+                let total=walk_forward["oos_total_net_profit"].as_f64().unwrap();
+                assert!((total-50.0).abs()<1e-6,"archived joint total {total} must be 50");
+            }
+            "insufficient_evidence" => assert!(walk_forward["oos_total_net_profit"].is_null(),
+                "missing evidence must never be archived as a fabricated total"),
+            other => panic!("unexpected walk-forward decision {other}"),
+        }
+        for window in walk_forward["windows"].as_array().unwrap(){
+            assert!(window["reason"].as_str().is_some());
+            assert_eq!(window["thresholds"]["min_oos_trades_per_window"],2);
+        }
+    }
+}
+
+#[test]
+fn mutating_only_the_reserved_final_test_leaves_selection_and_dev_results_intact(){
+    let original=oracle_data();
+    let mut mutated=original.clone();
+    // Only the reserved holdout candles change (a rising path instead of flat).
+    for (offset,bar) in mutated.bars[240..].iter_mut().enumerate(){
+        let price=1.2000+offset as f64*0.0010;
+        bar.open=price;bar.high=price+0.0005;bar.low=price-0.0005;bar.close=price+0.0005;
+    }
+    let root_a=Temp::new();let root_b=Temp::new();
+    let a=Experiments::new(&root_a.0);let b=Experiments::new(&root_b.0);
+    let id_a=a.create(&original,walk_forward_plan()).unwrap();
+    let id_b=b.create(&mutated,walk_forward_plan()).unwrap();
+    assert_ne!(id_a,id_b,"mutated holdout data is a distinct dataset");
+    for (store,id) in [(&a,&id_a),(&b,&id_b)] {
+        let job=store.start_search(id,"test-engine","wf-request",&walk_forward_spec()).unwrap();
+        let job_id=job["job_id"].as_u64().unwrap() as usize;
+        store.advance_search(id,"test-engine",job_id).unwrap();
+        store.advance_search(id,"test-engine",job_id).unwrap();
+    }
+    // Candidate selection and every pre-final-test result are identical.
+    assert_eq!(a.status(&id_a).unwrap()["jobs"],b.status(&id_b).unwrap()["jobs"]);
+    let dev_a=a.status(&id_a).unwrap()["events"].clone();
+    let dev_b=b.status(&id_b).unwrap()["events"].clone();
+    let dev_only=|events:&serde_json::Value|events.as_array().unwrap().iter()
+        .filter(|event|event["event"]["kind"]=="trial_finished")
+        .map(|event|event["event"]["report"].clone()).collect::<Vec<_>>();
+    let reports_a=dev_only(&dev_a);let reports_b=dev_only(&dev_b);
+    assert_eq!(reports_a.len(),2);
+    assert_eq!(reports_a,reports_b,"development and walk-forward results must not see the holdout");
+    for report in &reports_a {
+        assert_eq!(report["assessment"]["walk_forward"]["method"],"fixed_candidate_segmented_v1");
+        assert_eq!(report["assessment"]["walk_forward"]["windows"].as_array().unwrap().len(),2);
+    }
+    let total=reports_a[0]["assessment"]["walk_forward"]["oos_total_net_profit"].as_f64().unwrap();
+    assert!((total-50.0).abs()<1e-6,"development walk-forward total {total} must be 50");
+    // The mutation is effective: it changes the reserved final test itself.
+    let final_a=a.reveal(&id_a,"test-engine",0).unwrap();
+    let final_b=b.reveal(&id_b,"test-engine",0).unwrap();
+    assert_eq!(final_a["trial"],final_b["trial"]);
+    assert_ne!(final_a["metrics"]["net_profit"],final_b["metrics"]["net_profit"]);
+    assert_ne!(final_a["execution"]["trades"],final_b["execution"]["trades"]);
+    assert!(final_b["metrics"]["net_profit"].as_f64().unwrap()>0.0);
+    // Pre-final-test history stays unchanged after the reveal in both studies.
+    assert_eq!(dev_only(&a.status(&id_a).unwrap()["events"].clone()),reports_a);
+    assert_eq!(dev_only(&b.status(&id_b).unwrap()["events"].clone()),reports_b);
+}
+
