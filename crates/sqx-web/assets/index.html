@@ -241,6 +241,7 @@
           <div class="row"><button id="experiment-backup" class="secondary">Download experiment backup</button><label for="experiment-restore">Restore experiment backup</label><input id="experiment-restore" type="file" accept=".json,application/json"></div>
           <p id="experiment-context" class="muted"></p>
           <div class="row"><div id="experiment-jobs" aria-live="polite"></div><button id="experiment-trial">Test current strategy on development data</button><label>Candidates<input id="experiment-count" type="number" min="1" max="2000" value="20"></label><label>Seed<input id="experiment-seed" type="number" min="0" value="42"></label><button id="experiment-search">Start saved search</button><button id="experiment-stop" hidden>Pause after current candidate</button></div>
+          <p class="muted">Elke nieuwe opgeslagen zoekopdracht legt de huidige zoekruimte uit Discover vast, inclusief positiegrootte, stopafstanden en long/short.</p>
           <div id="experiment-status" role="status"></div><div id="experiment-trials"></div><div id="experiment-final"></div>
         </details>
         <details open><summary>Saved research · survives restarts</summary>

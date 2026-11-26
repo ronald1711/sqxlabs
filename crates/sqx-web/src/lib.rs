@@ -363,8 +363,12 @@ mod tests {
         let created:serde_json::Value=serde_json::from_str(&experiment_json("create",&request.to_string(),&state)).unwrap();
         let id=created["experiment_id"].as_str().expect("experiment must be created");
         assert_eq!(created["plan"]["config"]["initial_deposit"],4321.0);
+        let generator = GeneratorConfig {
+            min_conditions: 1, max_conditions: 1, fixed_size: 0.02,
+            long: false, short: true, ..GeneratorConfig::default()
+        };
         state.store.write().unwrap().series.clear();
-        let result:serde_json::Value=serde_json::from_str(&experiment_json("search",&json!({"experiment_id":id,"count":3,"seed":42,"deposit":99999}).to_string(),&state)).unwrap();
+        let result:serde_json::Value=serde_json::from_str(&experiment_json("search",&json!({"experiment_id":id,"count":3,"seed":42,"generator":generator,"deposit":99999}).to_string(),&state)).unwrap();
         assert_eq!(result["status"]["trials_attempted"],3);
         for trial in result["trials"].as_array().unwrap() {
             assert_eq!(trial["report"]["execution"]["initial_deposit"],4321.0);
@@ -372,8 +376,10 @@ mod tests {
         }
         let attempt=&result["status"]["events"].as_array().unwrap().iter().find(|e|e["event"]["kind"]=="trial_started").unwrap()["event"];
         assert_eq!(attempt["context"]["seed"],42);
-        assert!(attempt["context"]["generator"].is_object());
-        let again:serde_json::Value=serde_json::from_str(&experiment_json("search",&json!({"experiment_id":id,"count":3,"seed":42}).to_string(),&state)).unwrap();
+        assert_eq!(attempt["context"]["generator"],json!(generator));
+        assert_eq!(attempt["strategy"]["long"],false);
+        assert_eq!(attempt["strategy"]["short"],true);
+        let again:serde_json::Value=serde_json::from_str(&experiment_json("search",&json!({"experiment_id":id,"count":3,"seed":42,"generator":generator}).to_string(),&state)).unwrap();
         assert_eq!(again["status"]["trials_attempted"],6,"repeated searches count as additional attempts");
         assert_eq!(again["trials"][0]["report"],result["trials"][0]["report"]);
         let backup=experiment_json("backup",&json!({"experiment_id":id}).to_string(),&state);
@@ -2937,7 +2943,13 @@ fn experiment_json(action:&str,body:&str,state:&State)->String {
             "search" | "job_start"=>{
                 let count=value["count"].as_u64().filter(|n|(1..=2000).contains(n)).ok_or("count must be between 1 and 2000")?;
                 let seed=value["seed"].as_u64().ok_or("seed is required")?;
-                let config=GeneratorConfig::default();let engine=engine_identity()?;
+                let config = match value.get("generator") {
+                    Some(generator) => serde_json::from_value::<GeneratorConfig>(generator.clone())
+                        .map_err(|error| format!("Invalid search space: {error}"))?,
+                    None => GeneratorConfig::default(),
+                };
+                config.validate()?;
+                let engine=engine_identity()?;
                 let mut rng=rand::rngs::StdRng::seed_from_u64(seed);
                 let candidates=(0..count).map(|i|random_strategy(&mut rng,&format!("experiment-{seed}-{i}"),&config)).collect();
                 let spec=sqx_project::experiment::SearchSpec{seed,generator:json!(config),candidates};

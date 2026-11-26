@@ -872,7 +872,14 @@ $('experiment-search').onclick=async()=>{
       $('experiment-status').textContent='Recovering the previously requested search with its original seed and candidate count…';
     }else{
       if(!Number.isSafeInteger(count)||count<1||count>2000||!Number.isSafeInteger(seed)||seed<0)throw new Error('Choose 1–2000 candidates and a non-negative integer seed.');
-      request={experiment_id:id,count,seed,request_key:crypto.randomUUID()};
+      const use=genSettings();
+      const generator={
+        min_conditions:use.min_conditions,max_conditions:use.max_conditions,
+        sl_points:[use.sl_min,use.sl_max],pt_points:[use.pt_min,use.pt_max],
+        fixed_size:use.size,long:use.long,short:use.short,
+        param_ranges:use.param_ranges.map(range=>[range.indicator,range.param,range.min,range.max])
+      };
+      request={experiment_id:id,count,seed,generator,request_key:crypto.randomUUID()};
       // Persist before sending: a lost response must not create another search on retry.
       sessionStorage.setItem(pendingKey,JSON.stringify(request));
     }
