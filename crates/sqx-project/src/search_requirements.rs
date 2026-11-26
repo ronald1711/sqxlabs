@@ -93,21 +93,27 @@ pub struct WalkForwardAssessment {
     /// planned window has fully comparable evidence.
     pub oos_total_net_profit: Option<f64>,
     pub windows: Vec<WalkForwardWindowAssessment>,
+    /// Engine-level failures and reconciliation diagnostics that dominate the
+    /// gate decision but do not belong to a single window. Preserved verbatim
+    /// so a reopened archive still shows the decisive technical cause.
+    pub errors: Vec<String>,
 }
 
-/// Half-open index bounds `[is_start, is_end)` and `[oos_start, oos_end)`.
-/// Bar times are recorded as explicit inclusive first/last timestamps.
+/// Half-open index bounds `[is_start, is_end)` and `[oos_start, oos_end)` and
+/// their inclusive first/last bar times. A window that was never executed
+/// (invalid sizes, a too-short segment, or an empty in/out-of-sample range)
+/// records null bounds and times rather than a fabricated or out-of-range bar.
 #[derive(Debug, Clone, Serialize)]
 pub struct WalkForwardWindowAssessment {
     pub index: usize,
-    pub is_start: usize,
-    pub is_end: usize,
-    pub is_first_bar_time: i64,
-    pub is_last_bar_time: i64,
-    pub oos_start: usize,
-    pub oos_end: usize,
-    pub oos_first_bar_time: i64,
-    pub oos_last_bar_time: i64,
+    pub is_start: Option<usize>,
+    pub is_end: Option<usize>,
+    pub is_first_bar_time: Option<i64>,
+    pub is_last_bar_time: Option<i64>,
+    pub oos_start: Option<usize>,
+    pub oos_end: Option<usize>,
+    pub oos_first_bar_time: Option<i64>,
+    pub oos_last_bar_time: Option<i64>,
     pub starting_equity: f64,
     pub oos_final_equity: Option<f64>,
     pub is_trades: Option<f64>,
@@ -494,16 +500,28 @@ mod tests {
     }
 
     #[test]
-    fn joint_threshold_boundary_ignores_summation_noise_only() {
-        // Summing per-window nets lands a few units in the last place off an
-        // exact boundary; that must still count as reaching the threshold.
-        assert!(meets_threshold(49.999999999998934, 50.0));
+    fn joint_threshold_allows_only_float_rounding_at_the_boundary() {
+        // Summing per-window nets can land a few ulps off an exact boundary;
+        // that must still count as reaching the threshold.
         assert!(meets_threshold(50.0, 50.0));
-        assert!(meets_threshold(50.00000000000036, 50.0));
-        // A real shortfall is rejected, even a small one.
+        assert!(meets_threshold(50.0 - 4.0 * f64::EPSILON * 50.0, 50.0));
+        assert!(meets_threshold(50.0 + f64::EPSILON * 50.0, 50.0));
+        // The real per-window oracle sum lands ~1e-12 below its nominal 50.00;
+        // that summation noise must still count as reaching the threshold.
+        assert!(meets_threshold(49.999999999998934, 50.0));
+        // A real shortfall, however small, is rejected.
         assert!(!meets_threshold(49.9, 50.0));
+        assert!(!meets_threshold(50.0 - 1e-6, 50.0));
         assert!(!meets_threshold(50.0, 50.01));
         assert!(!meets_threshold(f64::NAN, 0.0));
+        assert!(!meets_threshold(f64::INFINITY, 0.0));
+        // Large magnitudes: the tolerance is a fixed multiple of the float ulp,
+        // so a half-currency shortfall at a billion-currency threshold rejects
+        // (the former 1e-9 relative margin would have let it pass).
+        assert!(meets_threshold(1_000_000_000.0, 1_000_000_000.0));
+        assert!(meets_threshold(1_000_000_000.0 - 1e-6, 1_000_000_000.0));
+        assert!(!meets_threshold(1_000_000_000.0 - 0.5, 1_000_000_000.0));
+        assert!(!meets_threshold(999_999_999.5, 1_000_000_000.0));
     }
 
     #[test]
@@ -533,7 +551,7 @@ mod tests {
         };
         // A failed in-sample execution is technical, even though no
         // out-of-sample outcome exists either.
-        let (is_decision, oos_decision, decision, _, _, _, _, _) = decide_window(
+        let (is_decision, oos_decision, decision, _, _, _, errors, _) = decide_window(
             &window(vec!["window 0, training candidate 0: boom".into()], false, None),
             &spec,
             525_600.0,
@@ -543,6 +561,8 @@ mod tests {
         assert_eq!(is_decision, Decision::TechnicalError);
         assert_eq!(oos_decision, Decision::NotRun);
         assert_eq!(decision, Decision::TechnicalError);
+        // The in-sample cause is preserved in the archived window errors.
+        assert_eq!(errors, vec!["window 0, training candidate 0: boom".to_string()]);
         // Without a technical failure, an ineligible run is only missing evidence.
         let (is_decision, oos_decision, decision, _, _, _, _, reason) = decide_window(
             &window(Vec::new(), false, Some("insufficient_in_sample_trades")),
@@ -698,6 +718,7 @@ impl Requirements {
                         );
                         check.decision = decision;
                         check.measured = measured;
+                        errors.extend(assessment.errors.iter().cloned());
                         errors.extend(
                             assessment
                                 .windows
@@ -758,13 +779,26 @@ fn aggregate_decision(
 }
 
 /// Compare the summed per-window out-of-sample net to the joint threshold.
-/// Summing per-window account-currency results introduces float noise of a few
-/// units in the last place, so an exact boundary must still count as reached:
-/// without this a study showing "50.00 ≥ 50.00" could be rejected. The margin is
-/// far below a cent and does not mask any economically meaningful shortfall.
+/// Summing up to `windows` per-window account-currency floats loses a few
+/// hundred units in the last place, so an exact boundary must still count as
+/// reached: without this a study showing "50.00 ≥ 50.00" could be rejected.
+/// The allowance is bounded to a fixed count of ulps at the operands' magnitude
+/// (at most ~8192 ulps) rather than a relative fraction: it grows only with
+/// float precision, so at a billion-currency threshold it stays around a tenth
+/// of a cent and cannot mask a meaningful shortfall — a 0.5-currency gap there
+/// is millions of ulps wide and still rejects.
 fn meets_threshold(measured: f64, threshold: f64) -> bool {
-    measured.is_finite()
-        && measured >= threshold - 1e-9 * (1.0 + measured.abs().max(threshold.abs()))
+    if !measured.is_finite() || !threshold.is_finite() {
+        return false;
+    }
+    if measured >= threshold {
+        return true;
+    }
+    let scale = measured.abs().max(threshold.abs());
+    // 4096 · ulp covers the observed summation noise of at most ten rounded
+    // per-window values with a large margin, while staying far below a cent
+    // for any realistic account balance.
+    measured >= threshold - 4096.0 * f64::EPSILON * scale
 }
 
 /// Mirrors the optimizer split exactly so planned rows agree with the emitted
@@ -912,21 +946,21 @@ fn run_walk_forward(
     for (index, &(is_start, split, oos_end)) in planned.iter().enumerate() {
         match collected.iter().find(|window| window.index == index) {
             Some(executed) => {
-                let (is_decision, oos_decision, window_decision, oos_final_equity, oos_trades, oos_net, oos_errors, reason) =
+                let (is_decision, oos_decision, window_decision, oos_final_equity, oos_trades, oos_net, errors, reason) =
                     decide_window(executed, spec, periods_per_year, split, oos_end);
                 if let Some(net) = oos_net {
                     all_oos_nets.push(net);
                 }
                 windows.push(WalkForwardWindowAssessment {
                     index,
-                    is_start: executed.is_start,
-                    is_end: executed.is_end,
-                    is_first_bar_time: bars[executed.is_start].time,
-                    is_last_bar_time: bars[executed.is_end - 1].time,
-                    oos_start: executed.oos_start,
-                    oos_end: executed.oos_end,
-                    oos_first_bar_time: bars[executed.oos_start].time,
-                    oos_last_bar_time: bars[executed.oos_end - 1].time,
+                    is_start: Some(executed.is_start),
+                    is_end: Some(executed.is_end),
+                    is_first_bar_time: Some(bars[executed.is_start].time),
+                    is_last_bar_time: Some(bars[executed.is_end - 1].time),
+                    oos_start: Some(executed.oos_start),
+                    oos_end: Some(executed.oos_end),
+                    oos_first_bar_time: Some(bars[executed.oos_start].time),
+                    oos_last_bar_time: Some(bars[executed.oos_end - 1].time),
                     starting_equity: executed.starting_equity,
                     oos_final_equity,
                     is_trades: executed.is_trades,
@@ -941,26 +975,51 @@ fn run_walk_forward(
                     oos_decision,
                     decision: window_decision,
                     reason,
-                    errors: oos_errors,
+                    errors,
                 });
             }
             None => {
-                let (reason, is_too_short) = missing_window_reason(&report_errors, is_start, split, oos_end);
+                let sizes_invalid = report_errors
+                    .iter()
+                    .any(|error| error.starts_with("invalid walk-forward sizes"));
+                let (reason, is_too_short) =
+                    missing_window_reason(&report_errors, is_start, split, oos_end);
                 let reason = if is_too_short {
                     format!("window {index} is too short")
                 } else {
                     reason
                 };
+                // Invalid sizes make the planned split meaningless (it can land
+                // on the window end or beyond the bar range), so no bounds or
+                // times are claimed. Otherwise the bounds are well-defined and
+                // only the bar times are read back defensively.
+                let (is_start_bound, is_end_bound, oos_start_bound, oos_end_bound) =
+                    if sizes_invalid {
+                        (None, None, None, None)
+                    } else {
+                        (Some(is_start), Some(split), Some(split), Some(oos_end))
+                    };
+                let (is_first_bar_time, is_last_bar_time, oos_first_bar_time, oos_last_bar_time) =
+                    if sizes_invalid {
+                        (None, None, None, None)
+                    } else {
+                        (
+                            bars.get(is_start).map(|bar| bar.time),
+                            split.checked_sub(1).and_then(|index| bars.get(index)).map(|bar| bar.time),
+                            bars.get(split).map(|bar| bar.time),
+                            oos_end.checked_sub(1).and_then(|index| bars.get(index)).map(|bar| bar.time),
+                        )
+                    };
                 windows.push(WalkForwardWindowAssessment {
                     index,
-                    is_start,
-                    is_end: split,
-                    is_first_bar_time: bars[is_start].time,
-                    is_last_bar_time: bars[split - 1].time,
-                    oos_start: split,
-                    oos_end,
-                    oos_first_bar_time: bars[split].time,
-                    oos_last_bar_time: bars[oos_end - 1].time,
+                    is_start: is_start_bound,
+                    is_end: is_end_bound,
+                    is_first_bar_time,
+                    is_last_bar_time,
+                    oos_start: oos_start_bound,
+                    oos_end: oos_end_bound,
+                    oos_first_bar_time,
+                    oos_last_bar_time,
                     starting_equity: 0.0,
                     oos_final_equity: None,
                     is_trades: None,
@@ -990,6 +1049,7 @@ fn run_walk_forward(
         &report_errors,
         windows.iter().map(|window| window.decision.clone()),
     );
+    let mut assessment_errors = report_errors.clone();
     let joint_total = all_oos_nets.iter().sum::<f64>();
     if all_valid && decision == Decision::Passed {
         // Cross-check the summed per-window nets against the carried capital:
@@ -1002,6 +1062,8 @@ fn run_walk_forward(
         });
         if !reconciles {
             decision = Decision::TechnicalError;
+            assessment_errors
+                .push("walk-forward net profit does not reconcile with carried capital".into());
         } else if !meets_threshold(joint_total, spec.min_total_oos_net_profit) {
             decision = Decision::Rejected;
         }
@@ -1024,6 +1086,7 @@ fn run_walk_forward(
         min_total_oos_net_profit: spec.min_total_oos_net_profit,
         oos_total_net_profit: measured,
         windows,
+        errors: assessment_errors,
     };
     (assessment, decision, measured)
 }
@@ -1034,13 +1097,14 @@ fn missing_window_reason(
     split: usize,
     oos_end: usize,
 ) -> (String, bool) {
-    let is_too_short = split - is_start < 50 || oos_end - split < 10;
-    if report_errors.iter().any(|e| e.starts_with("account exhausted")) {
-        ("account exhausted; remaining windows not traded".into(), false)
-    } else if is_too_short {
-        ("window is too short".into(), true)
-    } else if report_errors.iter().any(|e| e.starts_with("invalid walk-forward sizes")) {
+    // Invalid sizes invalidate the whole plan before any window, so they take
+    // precedence over a per-window "too short" reading of the same bounds.
+    if report_errors.iter().any(|e| e.starts_with("invalid walk-forward sizes")) {
         ("invalid walk-forward sizes, OOS fraction or evidence thresholds".into(), false)
+    } else if split.saturating_sub(is_start) < 50 || oos_end.saturating_sub(split) < 10 {
+        ("window is too short".into(), true)
+    } else if report_errors.iter().any(|e| e.starts_with("account exhausted")) {
+        ("account exhausted; remaining windows not traded".into(), false)
     } else {
         ("window not executed".into(), false)
     }
@@ -1144,6 +1208,11 @@ fn decide_window(
         (_, Decision::InsufficientEvidence) => Decision::InsufficientEvidence,
         _ => Decision::Passed,
     };
+    // Preserve both in-sample and out-of-sample failure causes: an in-sample
+    // execution error already makes the window technical, but without this it
+    // vanished from the archived window errors.
+    let mut errors = executed.is_errors.clone();
+    errors.extend(oos_errors);
     (
         is_decision,
         oos_decision,
@@ -1151,7 +1220,7 @@ fn decide_window(
         oos_final_equity,
         oos_trades,
         oos_net,
-        oos_errors,
+        errors,
         reason,
     )
 }

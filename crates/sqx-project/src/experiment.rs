@@ -625,4 +625,38 @@ mod tests {
         assert_eq!(reopened.status(&id).unwrap()["state"],"revealed");
         fs::remove_dir_all(root).unwrap();
     }
+    #[test]
+    fn walk_forward_and_legacy_plans_roundtrip_through_backup_and_restore() {
+        let root=std::env::temp_dir().join(format!("sqx-wf-backup-{}",std::process::id()));
+        let store=Experiments::new(&root);
+        let data=ExperimentData{bars:(0..10).map(|i|Bar::new(i*60000,1.0,1.1,0.9,1.0,1.0)).collect(),instrument:Instrument::fx("EURUSD"),provenance:json!({})};
+        let wf_requirements=crate::search_requirements::Requirements{
+            min_trades:1,min_net_profit:0.0,min_profit_factor:0.0,max_drawdown_pct:1e12,
+            spread_stress:None,monte_carlo:None,
+            walk_forward:Some(crate::search_requirements::WalkForward{windows:2,oos_fraction:0.30,min_is_trades:2,min_oos_trades_per_window:2,min_total_oos_net_profit:0.0}),
+        };
+        let wf_plan=ExperimentPlan{schema:1,engine_id:"fixture".into(),dataset_id:String::new(),validation_start:Some(2),requirements:Some(wf_requirements),holdout_start:5,config:BacktestConfig::default(),min_development_trades:1,min_holdout_trades:1,periods_per_year:100.0,prior_exposure_disclosed:true};
+        let wf_id=store.create(&data,wf_plan).unwrap();
+        let wf_backup=store.backup(&wf_id).unwrap();
+        // A plan recorded before the walk-forward gate existed (requirements
+        // present, no walk_forward) still opens and round-trips.
+        let legacy_requirements=crate::search_requirements::Requirements{
+            min_trades:1,min_net_profit:0.0,min_profit_factor:0.0,max_drawdown_pct:1e12,
+            spread_stress:None,monte_carlo:None,walk_forward:None,
+        };
+        let legacy_plan=ExperimentPlan{schema:1,engine_id:"fixture".into(),dataset_id:String::new(),validation_start:Some(2),requirements:Some(legacy_requirements),holdout_start:5,config:BacktestConfig::default(),min_development_trades:1,min_holdout_trades:1,periods_per_year:100.0,prior_exposure_disclosed:true};
+        let legacy_id=store.create(&data,legacy_plan).unwrap();
+        let legacy_backup=store.backup(&legacy_id).unwrap();
+        let restored=Experiments::new(&root.join("restored"));
+        assert_eq!(restored.restore(&wf_backup).unwrap(),wf_id);
+        assert_eq!(restored.restore(&legacy_backup).unwrap(),legacy_id);
+        let wf_again=restored.plan(&wf_id).unwrap();
+        assert_eq!(wf_again.requirements.as_ref().unwrap().walk_forward.as_ref().unwrap().windows,2);
+        let legacy_again=restored.plan(&legacy_id).unwrap();
+        assert!(legacy_again.requirements.as_ref().unwrap().walk_forward.is_none(),"a legacy plan must reopen without a walk-forward gate");
+        // Both studies reopen through status() after restore.
+        assert_eq!(restored.status(&wf_id).unwrap()["state"],"development");
+        assert_eq!(restored.status(&legacy_id).unwrap()["state"],"development");
+        fs::remove_dir_all(root).unwrap();
+    }
 }

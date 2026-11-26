@@ -238,3 +238,86 @@ fn archive_records_inclusive_bar_times_and_capital() {
         assert!(window["oos_trades"].as_u64().unwrap() >= 2);
     }
 }
+
+#[test]
+fn short_data_archives_missing_windows_without_panicking() {
+    // Ten bars over ten windows makes the split round onto the window end and
+    // the last window's out-of-sample start equal bars.len() — an out-of-bounds
+    // bar index under the old code. Fewer bars than windows makes the planned
+    // split zero (the split-1 underflow). The optimizer rejects such sizes, so
+    // the archive must record missing windows with null bounds/times and a
+    // preserved diagnosis, never panic.
+    let strategy = always_long();
+    for bar_count in [5usize, 10] {
+        let deltas: Vec<f64> = (0..bar_count)
+            .map(|i| if i % 2 == 0 { 0.0010 } else { -0.0010 })
+            .collect();
+        let bars = bars_with_deltas(&deltas);
+        let spec = WalkForward {
+            windows: 10,
+            oos_fraction: 0.30,
+            min_is_trades: 2,
+            min_oos_trades_per_window: 2,
+            min_total_oos_net_profit: 0.0,
+        };
+        let assessment = assess(&bars, &strategy, spec, -1e9);
+        assert_eq!(wf_check(&assessment)["decision"], "insufficient_evidence");
+        assert_eq!(assessment["passed"], false);
+        let windows = assessment["walk_forward"]["windows"].as_array().unwrap();
+        assert_eq!(windows.len(), 10);
+        for window in windows {
+            assert!(window["is_start"].is_null(), "window bounds must be missing, not fabricated: {window}");
+            assert!(window["is_end"].is_null());
+            assert!(window["oos_start"].is_null());
+            assert!(window["oos_end"].is_null());
+            assert!(window["is_first_bar_time"].is_null());
+            assert!(window["is_last_bar_time"].is_null());
+            assert!(window["oos_first_bar_time"].is_null());
+            assert!(window["oos_last_bar_time"].is_null());
+            assert_eq!(window["decision"], "insufficient_evidence");
+            assert!(window["reason"].as_str().unwrap().contains("invalid walk-forward sizes"));
+        }
+        // The optimizer's diagnosis is preserved at both the assessment and the
+        // study level, never silently dropped from the saved errors.
+        let detail_errors = assessment["walk_forward"]["errors"].as_array().unwrap();
+        assert!(detail_errors.iter().any(|e| e.as_str().unwrap().contains("invalid walk-forward sizes")));
+        let study_errors = assessment["errors"].as_array().unwrap();
+        assert!(study_errors.iter().any(|e| e.as_str().unwrap().contains("invalid walk-forward sizes")));
+    }
+}
+
+#[test]
+fn too_short_windows_keep_concrete_bounds_with_an_explicit_reason() {
+    // 120 bars over 2 windows yields a 60-bar window whose 42-bar in-sample
+    // half is too short (split 0..42 < 50). The sizes are otherwise valid, so
+    // each missing window keeps its concrete bounds and reports "too short",
+    // unlike the null bounds reserved for invalid sizes.
+    let deltas: Vec<f64> = (0..120).map(|i| if i < 60 { 0.0010 } else { -0.0010 }).collect();
+    let bars = bars_with_deltas(&deltas);
+    let strategy = always_long();
+    let spec = WalkForward {
+        windows: 2,
+        oos_fraction: 0.30,
+        min_is_trades: 2,
+        min_oos_trades_per_window: 2,
+        min_total_oos_net_profit: 0.0,
+    };
+    let assessment = assess(&bars, &strategy, spec, -1e9);
+    assert_eq!(wf_check(&assessment)["decision"], "insufficient_evidence");
+    let windows = assessment["walk_forward"]["windows"].as_array().unwrap();
+    assert_eq!(windows.len(), 2);
+    for (i, window) in windows.iter().enumerate() {
+        let start = i * 60;
+        assert_eq!(window["is_start"].as_u64().unwrap() as usize, start);
+        assert_eq!(window["is_end"].as_u64().unwrap() as usize, start + 42);
+        assert_eq!(window["oos_start"].as_u64().unwrap() as usize, start + 42);
+        assert_eq!(window["oos_end"].as_u64().unwrap() as usize, start + 60);
+        assert_eq!(window["decision"], "insufficient_evidence");
+        assert!(window["reason"].as_str().unwrap().contains("too short"), "{window}");
+        // Concrete bounds also carry their inclusive bar times.
+        assert!(window["is_first_bar_time"].is_number());
+        assert!(window["is_last_bar_time"].is_number());
+        assert!(window["oos_first_bar_time"].is_number());
+        assert!(window["oos_last_bar_time"].is_number());
+    }
+}
