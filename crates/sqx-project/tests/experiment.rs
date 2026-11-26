@@ -668,3 +668,88 @@ fn mutating_only_the_reserved_final_test_leaves_selection_and_dev_results_intact
     assert_eq!(dev_only(&a.status(&id_a).unwrap()["events"].clone()),reports_a);
     assert_eq!(dev_only(&b.status(&id_b).unwrap()["events"].clone()),reports_b);
 }
+
+#[test]
+fn walk_forward_result_backup_restores_full_windows_and_errors() {
+    let source=Temp::new();let store=Experiments::new(&source.0);
+    let id=store.create(&oracle_data(),walk_forward_plan()).unwrap();
+    let spec=walk_forward_spec();
+    let job=store.start_search(&id,"test-engine","wf-backup",&spec).unwrap();
+    let job_id=job["job_id"].as_u64().unwrap() as usize;
+    store.advance_search(&id,"test-engine",job_id).unwrap();
+    store.advance_search(&id,"test-engine",job_id).unwrap();
+    // Cross-store backup/restore through the actual JSON interchange format.
+    let backup=store.backup(&id).unwrap();
+    let backup:sqx_project::experiment::ExperimentBackup=
+        serde_json::from_str(&serde_json::to_string(&backup).unwrap()).unwrap();
+    let destination=Temp::new();let restored=Experiments::new(&destination.0);
+    assert_eq!(restored.restore(&backup).unwrap(),id);
+    // Read back the full per-window archive and error arrays from the restored
+    // study, not just the pass/fail verdict.
+    let events=restored.status(&id).unwrap()["events"].clone();
+    let finished:Vec<_>=events.as_array().unwrap().iter()
+        .filter(|e|e["event"]["kind"]=="trial_finished").collect();
+    assert_eq!(finished.len(),2);
+    let mut passed_windows=0;
+    for event in &finished {
+        let wf=&event["event"]["report"]["assessment"]["walk_forward"];
+        assert_eq!(wf["method"],"fixed_candidate_segmented_v1");
+        assert_eq!(wf["planned_windows"],2);
+        assert!(wf["errors"].is_array(),"the walk-forward archive must keep its error list");
+        let windows=wf["windows"].as_array().unwrap();
+        assert_eq!(windows.len(),2);
+        for window in windows {
+            // Concrete bounds, inclusive times, carried capital and per-window
+            // in-sample trade evidence all survive the archive round-trip.
+            assert!(window["is_start"].is_number() && window["oos_end"].is_number());
+            assert!(window["is_first_bar_time"].is_number() && window["oos_last_bar_time"].is_number());
+            assert!(window["starting_equity"].is_number());
+            assert!(window["is_trades"].is_number());
+            assert!(window["decision"].as_str().is_some());
+            assert!(window["reason"].as_str().is_some());
+            assert!(window["errors"].is_array(),"per-window errors must be archived: {window}");
+            assert_eq!(window["thresholds"]["min_oos_trades_per_window"],2);
+            if window["decision"]=="passed" {
+                // Fully executed windows archive their out-of-sample evidence.
+                assert!(window["oos_trades"].is_number());
+                assert!(window["oos_net_profit"].is_number());
+                passed_windows+=1;
+            } else {
+                // A never-run out-of-sample stays explicitly null, never a
+                // fabricated zero trade count.
+                assert!(window["oos_trades"].is_null(),"not-run OOS must stay null: {window}");
+            }
+        }
+    }
+    assert!(passed_windows>=2,"the frozen oracle must archive fully passed windows");
+    // The restored study is byte-identical to the source store.
+    assert_eq!(store.status(&id).unwrap(),restored.status(&id).unwrap());
+}
+
+#[test]
+fn pre_walk_forward_backup_without_the_field_still_restores_with_integrity() {
+    use sqx_project::archive::content_id;
+    let source=Temp::new();let store=Experiments::new(&source.0);
+    // Start from a real walk-forward plan so the wire form contains the field,
+    // then delete it to reproduce an archive written before the feature existed.
+    let id=store.create(&oracle_data(),walk_forward_plan()).unwrap();
+    let backup=store.backup(&id).unwrap();
+    let mut wire=serde_json::to_value(&backup).unwrap();
+    let requirements=wire["plan"]["requirements"].as_object_mut().unwrap();
+    assert!(requirements.contains_key("walk_forward"));
+    requirements.remove("walk_forward");
+    // Re-derive the content-addressed identities so integrity still holds for
+    // the field-absent plan; the data and history are untouched.
+    let mut pre_wf:sqx_project::experiment::ExperimentBackup=
+        serde_json::from_value(wire).unwrap();
+    pre_wf.plan.dataset_id=content_id(&serde_json::to_vec(&pre_wf.data).unwrap());
+    pre_wf.experiment_id=content_id(&serde_json::to_vec(&pre_wf.plan).unwrap());
+    pre_wf.checksum=pre_wf.integrity_id().unwrap();
+    let destination=Temp::new();let restored=Experiments::new(&destination.0);
+    assert_eq!(restored.restore(&pre_wf).unwrap(),pre_wf.experiment_id);
+    // The pre-walk-forward study reopens without a walk-forward gate, and a
+    // fresh backup round-trips the field-absent requirements unchanged.
+    let reopened=restored.backup(&pre_wf.experiment_id).unwrap();
+    assert!(reopened.plan.requirements.as_ref().unwrap().walk_forward.is_none());
+    assert_eq!(restored.status(&pre_wf.experiment_id).unwrap()["state"],"development");
+}

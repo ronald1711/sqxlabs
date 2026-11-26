@@ -4,6 +4,7 @@
 use serde_json::json;
 use sqx_backtest::BacktestConfig;
 use sqx_core::{Bar, Instrument};
+use sqx_metrics::Metrics;
 use sqx_optimizer::BatchEvaluation;
 use sqx_pipeline::BuildEvaluation;
 use sqx_project::search_requirements::{Requirements, WalkForward};
@@ -116,6 +117,83 @@ fn walk_forward_spec() -> WalkForward {
 
 fn wf_check(assessment: &serde_json::Value) -> &serde_json::Value {
     &assessment["checks"].as_array().unwrap()[4]
+}
+
+/// A candidate whose basic gates pass on hand-crafted metrics so the optional
+/// walk-forward gate actually runs — letting a test provoke a real window-level
+/// or engine-level failure instead of the mandatory gates short-circuiting first.
+fn build_with_metrics(strategy: &Strategy, bars: &[Bar], metrics: Metrics) -> BuildEvaluation {
+    let execution = sqx_backtest::backtest(strategy, bars, &Instrument::fx("EURUSD"), &BacktestConfig::default());
+    BuildEvaluation {
+        execution,
+        step: 0,
+        candidate_index: 0,
+        selected: false,
+        evaluation: BatchEvaluation {
+            strategy: strategy.clone(),
+            metrics,
+            errors: Vec::new(),
+        },
+    }
+}
+
+fn passing_metrics() -> Metrics {
+    Metrics {
+        number_of_trades: 10.0,
+        net_profit: 100.0,
+        profit_factor: 2.0,
+        max_drawdown_pct: 5.0,
+        ..Metrics::default()
+    }
+}
+
+/// A strategy whose only entry signal names an indicator with no computation
+/// implementation: the engine rejects it during signal validation, so every
+/// in-sample window fails technically and the cause must be archived.
+fn unsupported_indicator_strategy() -> Strategy {
+    let mut strategy = Strategy::new("broken indicator candidate");
+    strategy.long = true;
+    strategy.short = false;
+    strategy.money_management = MoneyManagement::FixedSize { size: 0.1 };
+    strategy.exits = vec![ExitType::ExitAfterBars(1)];
+    strategy.signals.push(Signal::new(
+        SignalKind::LongEntry,
+        vec![Condition::new(
+            Operand::Indicator("NoSuchIndicator".into(), vec![]),
+            Comparator::Gt,
+            Operand::Const(0.0),
+        )],
+        Join::And,
+    ));
+    strategy
+}
+
+fn assess_build(bars: &[Bar], build: &BuildEvaluation, walk_forward: WalkForward) -> serde_json::Value {
+    let requirements = Requirements {
+        min_trades: 1,
+        min_net_profit: -1e9,
+        min_profit_factor: 0.0,
+        max_drawdown_pct: 1e12,
+        spread_stress: None,
+        monte_carlo: None,
+        walk_forward: Some(walk_forward),
+    };
+    let assessments = requirements.assess_builds(
+        std::slice::from_ref(build),
+        bars,
+        &Instrument::fx("EURUSD"),
+        &BacktestConfig::default(),
+        PYP,
+        42,
+    );
+    serde_json::to_value(&assessments[0]).unwrap()
+}
+
+/// Serialize the assessment to its archived JSON form and reopen it as a fresh
+/// document (the shape the web layer and recovery view consume) to prove the
+/// decisive technical cause survives the store round-trip.
+fn reopen(assessment: &serde_json::Value) -> serde_json::Value {
+    serde_json::from_str(&serde_json::to_string(assessment).unwrap()).unwrap()
 }
 
 #[test]
@@ -320,4 +398,111 @@ fn too_short_windows_keep_concrete_bounds_with_an_explicit_reason() {
         assert!(window["oos_first_bar_time"].is_number());
         assert!(window["oos_last_bar_time"].is_number());
     }
+}
+
+#[test]
+fn in_sample_technical_error_survives_archive_and_reopen() {
+    let bars = fixture_bars();
+    let strategy = unsupported_indicator_strategy();
+    let build = build_with_metrics(&strategy, &bars, passing_metrics());
+    let assessment = assess_build(&bars, &build, walk_forward_spec());
+    // The mandatory gates passed on the supplied metrics, so the walk-forward
+    // gate ran and the engine's real in-sample compile failure decided it.
+    assert_eq!(wf_check(&assessment)["decision"], "technical_error");
+    assert_eq!(assessment["passed"], false);
+    let detail = &assessment["walk_forward"];
+    let cause = "Unknown indicator NoSuchIndicator";
+    // The decisive cause is preserved verbatim at the window level ...
+    for window in detail["windows"].as_array().unwrap() {
+        assert_eq!(window["decision"], "technical_error");
+        assert!(
+            window["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e.as_str().unwrap().contains(cause)),
+            "window errors must keep the in-sample cause: {window}"
+        );
+    }
+    // ... and at both the walk-forward archive and the study errors level.
+    assert!(
+        detail["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e.as_str().unwrap().contains("training candidate 0")),
+        "the walk-forward archive must name the failing candidate"
+    );
+    assert!(
+        assessment["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e.as_str().unwrap().contains(cause)),
+        "the study errors must retain the decisive in-sample cause"
+    );
+    // Reopen the archived JSON as a fresh store object: nothing is dropped.
+    let reopened = reopen(&assessment);
+    assert_eq!(wf_check(&reopened)["decision"], "technical_error");
+    assert!(
+        reopened["walk_forward"]["windows"][0]["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e.as_str().unwrap().contains(cause))
+    );
+    assert!(
+        reopened["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e.as_str().unwrap().contains(cause))
+    );
+}
+
+#[test]
+fn optimizer_technical_error_survives_archive_and_reopen() {
+    // A non-increasing timestamp is a genuine input-validation failure the
+    // optimizer reports before any window executes.
+    let mut bars = fixture_bars();
+    bars[50].time = bars[49].time;
+    let strategy = always_long();
+    let build = build_with_metrics(&strategy, &bars, passing_metrics());
+    let assessment = assess_build(&bars, &build, walk_forward_spec());
+    assert_eq!(wf_check(&assessment)["decision"], "technical_error");
+    assert_eq!(assessment["passed"], false);
+    let cause = "invalid or non-increasing bar at index 50";
+    assert!(
+        assessment["walk_forward"]["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e.as_str().unwrap().contains(cause)),
+        "{assessment}"
+    );
+    assert!(
+        assessment["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e.as_str().unwrap().contains(cause))
+    );
+    // Windows were planned but never executed; the engine cause dominates and
+    // stays visible after reopening the archived JSON as a fresh document.
+    let reopened = reopen(&assessment);
+    assert_eq!(wf_check(&reopened)["decision"], "technical_error");
+    assert!(
+        reopened["walk_forward"]["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e.as_str().unwrap().contains(cause))
+    );
+    assert!(
+        reopened["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e.as_str().unwrap().contains(cause))
+    );
 }
