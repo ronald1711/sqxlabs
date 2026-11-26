@@ -134,6 +134,20 @@ vm.runInContext(code,ctx);
   ctx.showSearchAssessments(preciseBox,[preciseCandidate],undefined);
   assert.ok(preciseText().includes('Gezamenlijke out-of-sample nettowinst gemeten: onbeschikbaar · drempel ≥ 0.004'),'a missing measured total must read onbeschikbaar, never 0:\n'+preciseText());
 
+  // --- 2c. A never-started window shows 'onbeschikbaar' for starting capital, never 0.00;
+  // a legacy archive with a recorded numeric 0.00 stays readable as-is. ---
+  const freshTexts=()=>descendants(rendered).map(node=>node.textContent).filter(Boolean);
+  const missingEquity=JSON.parse(JSON.stringify(wfCandidate));
+  missingEquity.walk_forward.windows[1]={...missingEquity.walk_forward.windows[1],starting_equity:null,decision:'insufficient_evidence',reason:'account exhausted; remaining windows not traded'};
+  let missingEqBox={prepend:s=>{rendered=s;}};
+  ctx.showSearchAssessments(missingEqBox,[missingEquity],undefined);
+  assert.ok(freshTexts().some(x=>String(x).includes('onbeschikbaar')),'a null starting capital must read onbeschikbaar, never 0.00');
+  assert.ok(freshTexts().some(x=>String(x).includes('10000.00')),'the started window keeps its factual capital');
+  const legacyEquity=JSON.parse(JSON.stringify(wfCandidate));
+  legacyEquity.walk_forward.windows[1]={...legacyEquity.walk_forward.windows[1],starting_equity:0};
+  ctx.showSearchAssessments(missingEqBox,[legacyEquity],undefined);
+  assert.ok(freshTexts().some(x=>String(x).includes('0.00')),'a legacy numeric 0.00 starting capital must stay readable');
+
   // --- 3. Five statuses are all displayable. ---
   const statusCandidate=decision=>({candidate_index:1,name:'Status '+decision,passed:decision==='passed',errors:[],checks:[{metric:'walk_forward_total_oos_net_profit',decision,measured:decision==='passed'||decision==='rejected'?1:null,threshold:0,comparison:'at_least'}],walk_forward:null});
   let statusBox={prepend:s=>{rendered=s;}};

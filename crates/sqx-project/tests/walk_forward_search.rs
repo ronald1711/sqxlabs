@@ -66,7 +66,11 @@ fn fixture_bars() -> Vec<Bar> {
 }
 
 fn build(strategy: &Strategy, bars: &[Bar]) -> BuildEvaluation {
-    let execution = sqx_backtest::backtest(strategy, bars, &Instrument::fx("EURUSD"), &BacktestConfig::default());
+    build_with_config(strategy, bars, &BacktestConfig::default())
+}
+
+fn build_with_config(strategy: &Strategy, bars: &[Bar], config: &BacktestConfig) -> BuildEvaluation {
+    let execution = sqx_backtest::backtest(strategy, bars, &Instrument::fx("EURUSD"), config);
     let metrics = sqx_metrics::compute(&execution, bars.len(), PYP);
     BuildEvaluation {
         execution,
@@ -168,6 +172,40 @@ fn unsupported_indicator_strategy() -> Strategy {
     strategy
 }
 
+/// A long-only, one-bar candidate sized to blow through a tiny deposit: one
+/// losing out-of-sample trade drains the account so the later windows never start.
+fn draining_long() -> Strategy {
+    let mut strategy = Strategy::new("draining walk-forward candidate");
+    strategy.long = true;
+    strategy.short = false;
+    strategy.money_management = MoneyManagement::FixedSize { size: 1.0 };
+    strategy.exits = vec![ExitType::ExitAfterBars(1)];
+    strategy.signals.push(Signal::new(
+        SignalKind::LongEntry,
+        vec![Condition::new(
+            Operand::Const(1.0),
+            Comparator::Gt,
+            Operand::Const(0.0),
+        )],
+        Join::And,
+    ));
+    strategy
+}
+
+/// A $10 deposit, a very high leverage ceiling and no stop-out: one losing
+/// one-lot trade takes the balance negative and exhausts the account.
+fn draining_config() -> BacktestConfig {
+    BacktestConfig {
+        initial_deposit: 10.0,
+        account: sqx_backtest::AccountConfig {
+            max_leverage: 20_000.0,
+            stop_out_ratio: 0.0,
+            ..sqx_backtest::AccountConfig::default()
+        },
+        ..BacktestConfig::default()
+    }
+}
+
 fn assess_build(bars: &[Bar], build: &BuildEvaluation, walk_forward: WalkForward) -> serde_json::Value {
     let requirements = Requirements {
         min_trades: 1,
@@ -262,6 +300,12 @@ fn missing_required_window_is_insufficient_evidence_and_never_selectable() {
     assert_eq!(windows.len(), 2);
     assert!(windows.iter().all(|window| window["oos_net_profit"].is_null()));
     assert!(windows.iter().all(|window| window["reason"].as_str().is_some()));
+    // A window that never started has no starting capital: null, never 0.00.
+    assert!(windows.iter().all(|window| window["starting_equity"].is_null()));
+    // The null starting capital survives an archive round-trip.
+    let reopened = reopen(&assessment);
+    let reopened_windows = reopened["walk_forward"]["windows"].as_array().unwrap();
+    assert!(reopened_windows.iter().all(|window| window["starting_equity"].is_null()));
 }
 
 #[test]
@@ -352,6 +396,7 @@ fn short_data_archives_missing_windows_without_panicking() {
             assert!(window["is_last_bar_time"].is_null());
             assert!(window["oos_first_bar_time"].is_null());
             assert!(window["oos_last_bar_time"].is_null());
+            assert!(window["starting_equity"].is_null(), "missing window must not fabricate starting capital: {window}");
             assert_eq!(window["decision"], "insufficient_evidence");
             assert!(window["reason"].as_str().unwrap().contains("invalid walk-forward sizes"));
         }
@@ -362,6 +407,74 @@ fn short_data_archives_missing_windows_without_panicking() {
         let study_errors = assessment["errors"].as_array().unwrap();
         assert!(study_errors.iter().any(|e| e.as_str().unwrap().contains("invalid walk-forward sizes")));
     }
+}
+
+#[test]
+fn account_exhaustion_archives_remaining_windows_without_starting_capital() {
+    // Window 0 runs and its out-of-sample loss drains the $10 deposit below
+    // zero, so the optimizer stops before window 1 starts. The started window
+    // keeps its factual carried capital; the never-started window records null
+    // instead of a fabricated 0.00, and that null survives an archive round-trip.
+    let mut deltas = vec![0.0f64; 160];
+    for i in 0..160 {
+        deltas[i] = match i {
+            0..28 => 0.0001,   // IS0 rising
+            28..56 => -0.0001, // IS0 falling (finite profit factor -> eligible)
+            56..80 => -0.0005, // OOS0 steep decline drains the deposit
+            _ => 0.0001,       // later bars are never traded
+        };
+    }
+    let bars = bars_with_deltas(&deltas);
+    let strategy = draining_long();
+    let config = draining_config();
+    let build = build_with_config(&strategy, &bars, &config);
+    let requirements = Requirements {
+        min_trades: 1,
+        min_net_profit: -1e9,
+        min_profit_factor: 0.0,
+        max_drawdown_pct: 1e12,
+        spread_stress: None,
+        monte_carlo: None,
+        walk_forward: Some(walk_forward_spec()),
+    };
+    let assessments = requirements.assess_builds(
+        std::slice::from_ref(&build),
+        &bars,
+        &Instrument::fx("EURUSD"),
+        &config,
+        PYP,
+        42,
+    );
+    let assessment = serde_json::to_value(&assessments[0]).unwrap();
+    assert_eq!(wf_check(&assessment)["decision"], "insufficient_evidence");
+    assert_eq!(assessment["passed"], false);
+    let detail = &assessment["walk_forward"];
+    // The decisive cause is the exhaustion of the carried account.
+    assert!(
+        detail["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e.as_str().unwrap().contains("account exhausted")),
+        "{assessment}"
+    );
+    let windows = detail["windows"].as_array().unwrap();
+    assert_eq!(windows.len(), 2);
+    // Window 0 really started: its factual carried capital is preserved.
+    assert!(windows[0]["starting_equity"].is_number(), "{windows:?}");
+    assert_eq!(windows[0]["starting_equity"].as_f64().unwrap(), 10.0);
+    assert!(windows[0]["oos_final_equity"].is_number());
+    // Window 1 never started: no starting capital may be fabricated.
+    assert!(windows[1]["starting_equity"].is_null(), "{windows:?}");
+    assert_eq!(
+        windows[1]["reason"],
+        "account exhausted; remaining windows not traded"
+    );
+    // The null starting capital survives an archive round-trip.
+    let reopened = reopen(&assessment);
+    let reopened_windows = reopened["walk_forward"]["windows"].as_array().unwrap();
+    assert!(reopened_windows[0]["starting_equity"].is_number());
+    assert!(reopened_windows[1]["starting_equity"].is_null());
 }
 
 #[test]

@@ -30,7 +30,7 @@ Per kandidaat zie je één van vijf uitkomsten:
 - **Technische fout**: een venster of de motor faalde technisch. Deze uitkomst gaat vóór onvoldoende bewijs.
 - **Niet uitgevoerd**: een eerdere eis is niet gehaald, dus de toets is nooit gestart. Er is dan ook geen vensterarchief.
 
-Open **Walk-forward stabiliteit** in de kandidaatdetails voor het archief: per venster de trainings- en testgrenzen (halfopen indices met de inclusieve bar-tijden), het doorgeschoven startkapitaal, de in-sample- en out-of-sample-trades, het nettoresultaat en de profit factor, de lokale bewijsdrempels, het vensterbesluit en de reden. Daaronder staat de gezamenlijke out-of-sample nettowinst tegenover de drempel. Een verliesvenster in een geslaagde rij is een gewone meting en krijgt geen rood afkeurmerk.
+Open **Walk-forward stabiliteit** in de kandidaatdetails voor het archief. Boven de tabel staat de gezamenlijke out-of-sample nettowinst tegenover de drempel. Per venster volgen de trainings- en testgrenzen (halfopen indices met de inclusieve bar-tijden), het doorgeschoven startkapitaal (alleen wanneer het venster daadwerkelijk is gestart; anders 'onbeschikbaar'), de in-sample- en out-of-sample-trades en -nettoresultaat, de in-sample profit factor, de lokale bewijsdrempels, het vensterbesluit en de reden. Een verliesvenster in een geslaagde rij is een gewone meting en krijgt geen rood afkeurmerk.
 
 Het vensterarchief en de bevroren instellingen worden bij de studie opgeslagen. Bij pauzeren en hervatten wordt dezelfde zoekopdracht met dezelfde instellingen voortgezet, en bij heropenen leest de app hetzelfde archief zonder de berekening opnieuw te doen. Studies van vóór deze toets blijven ongewijzigd leesbaar; zij hebben geen walk-forward-controle en geen vensterarchief.
 

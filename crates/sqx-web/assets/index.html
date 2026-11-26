@@ -1037,7 +1037,7 @@ function showSearchAssessments(box, assessments, studyId){
         [window.index],
         ['['+window.is_start+'–'+window.is_end+') '+barTime(window.is_first_bar_time)+'–'+barTime(window.is_last_bar_time)],
         ['['+window.oos_start+'–'+window.oos_end+') '+barTime(window.oos_first_bar_time)+'–'+barTime(window.oos_last_bar_time)],
-        [fmt(window.starting_equity,2)],
+        [window.starting_equity==null?'onbeschikbaar':fmt(window.starting_equity,2)],
         [fmt(window.is_trades,0)],
         [fmt(window.is_net_profit,2)],
         [fmt(window.is_profit_factor,2)],

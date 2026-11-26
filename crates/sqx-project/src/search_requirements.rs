@@ -114,7 +114,10 @@ pub struct WalkForwardWindowAssessment {
     pub oos_end: Option<usize>,
     pub oos_first_bar_time: Option<i64>,
     pub oos_last_bar_time: Option<i64>,
-    pub starting_equity: f64,
+    /// Capital actually carried into this window. Present only when the window
+    /// was started; a window that never ran (invalid sizes, too short, or the
+    /// account was already exhausted) records null, never a fabricated 0.0.
+    pub starting_equity: Option<f64>,
     pub oos_final_equity: Option<f64>,
     pub is_trades: Option<f64>,
     pub is_net_profit: Option<f64>,
@@ -961,7 +964,7 @@ fn run_walk_forward(
                     oos_end: Some(executed.oos_end),
                     oos_first_bar_time: Some(bars[executed.oos_start].time),
                     oos_last_bar_time: Some(bars[executed.oos_end - 1].time),
-                    starting_equity: executed.starting_equity,
+                    starting_equity: Some(executed.starting_equity),
                     oos_final_equity,
                     is_trades: executed.is_trades,
                     is_net_profit: executed.is_net_profit,
@@ -1020,7 +1023,7 @@ fn run_walk_forward(
                     oos_end: oos_end_bound,
                     oos_first_bar_time,
                     oos_last_bar_time,
-                    starting_equity: 0.0,
+                    starting_equity: None,
                     oos_final_equity: None,
                     is_trades: None,
                     is_net_profit: None,
@@ -1054,9 +1057,9 @@ fn run_walk_forward(
     if all_valid && decision == Decision::Passed {
         // Cross-check the summed per-window nets against the carried capital:
         // last out-of-sample equity minus the first deposit. No return sum.
-        let first_starting = windows.first().map(|window| window.starting_equity).unwrap_or(0.0);
+        let first_starting = windows.first().and_then(|window| window.starting_equity);
         let last_final = windows.last().and_then(|window| window.oos_final_equity);
-        let reconciles = last_final.is_some_and(|last| {
+        let reconciles = first_starting.zip(last_final).is_some_and(|(first_starting, last)| {
             joint_total.is_finite()
                 && (joint_total - (last - first_starting)).abs() <= 1e-6 * (1.0 + last.abs())
         });
