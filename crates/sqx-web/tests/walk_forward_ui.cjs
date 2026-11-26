@@ -134,19 +134,48 @@ vm.runInContext(code,ctx);
   ctx.showSearchAssessments(preciseBox,[preciseCandidate],undefined);
   assert.ok(preciseText().includes('Gezamenlijke out-of-sample nettowinst gemeten: onbeschikbaar · drempel ≥ 0.004'),'a missing measured total must read onbeschikbaar, never 0:\n'+preciseText());
 
-  // --- 2c. A never-started window shows 'onbeschikbaar' for starting capital, never 0.00;
-  // a legacy archive with a recorded numeric 0.00 stays readable as-is. ---
-  const freshTexts=()=>descendants(rendered).map(node=>node.textContent).filter(Boolean);
+  // --- 2c. The starting-capital cell of each window is asserted individually. A substring search of
+  // the whole panel cannot tell window 1's value apart from window 0's 10000.00, so '0.00' would
+  // match a panel that never rendered the legacy cell at all. A never-started window shows
+  // 'onbeschikbaar', never 0.00; a legacy archive with a recorded numeric 0.00 stays readable as-is
+  // — before and after reopening the study. ---
+  const windowRows=()=>descendants(rendered).filter(node=>node.tag==='tr'
+    &&node.children.length===12&&node.children.every(cell=>cell.tag==='td'));
+  const startingCapital=index=>{
+    const rows=windowRows();
+    assert.equal(rows.length,2,'each walked window must render exactly one row, got '+rows.length);
+    return rows[index].children[3].textContent;
+  };
+  const assertStartingCapital=(expected,when)=>{
+    expected.forEach((value,index)=>assert.equal(startingCapital(index),value,
+      when+': starting capital of window '+index+' must be exactly '+JSON.stringify(value)));
+  };
+  const panelText=()=>descendants(rendered).map(node=>node.textContent).filter(Boolean).join('\n');
+  const reopen=candidate=>{
+    const box={prepend:s=>{rendered=s;}};
+    ctx.showSearchAssessments(box,[candidate],'study-1');
+  };
   const missingEquity=JSON.parse(JSON.stringify(wfCandidate));
   missingEquity.walk_forward.windows[1]={...missingEquity.walk_forward.windows[1],starting_equity:null,decision:'insufficient_evidence',reason:'account exhausted; remaining windows not traded'};
-  let missingEqBox={prepend:s=>{rendered=s;}};
-  ctx.showSearchAssessments(missingEqBox,[missingEquity],undefined);
-  assert.ok(freshTexts().some(x=>String(x).includes('onbeschikbaar')),'a null starting capital must read onbeschikbaar, never 0.00');
-  assert.ok(freshTexts().some(x=>String(x).includes('10000.00')),'the started window keeps its factual capital');
+  reopen(missingEquity);
+  assertStartingCapital(['10000.00','onbeschikbaar'],'never-started window');
+  // Negative control: this panel still contains '0.00' through window 0's 10000.00, so the former
+  // whole-panel substring check accepts it while only the exact fourth cell rejects it. The control
+  // fails differently from a stale fixture, so it proves the cell assertion has discriminating power.
+  assert.ok(panelText().includes('0.00'),'control: the broad 0.00 substring is present via window 0\'s 10000.00');
+  assert.throws(()=>assertStartingCapital(['10000.00','0.00'],'negative control'),
+    /starting capital of window 1 must be exactly "0\.00"/,
+    'a legacy cell that renders as onbeschikbaar must not ride along on 10000.00 from window 0');
+  // Reopening the archived study repeats the same exact cell values.
+  reopen(missingEquity);
+  assertStartingCapital(['10000.00','onbeschikbaar'],'never-started window after reopen');
+  // Only the second row's fourth cell differs from the previous fixture; window 0 keeps 10000.00.
   const legacyEquity=JSON.parse(JSON.stringify(wfCandidate));
   legacyEquity.walk_forward.windows[1]={...legacyEquity.walk_forward.windows[1],starting_equity:0};
-  ctx.showSearchAssessments(missingEqBox,[legacyEquity],undefined);
-  assert.ok(freshTexts().some(x=>String(x).includes('0.00')),'a legacy numeric 0.00 starting capital must stay readable');
+  reopen(legacyEquity);
+  assertStartingCapital(['10000.00','0.00'],'legacy numeric zero');
+  reopen(legacyEquity);
+  assertStartingCapital(['10000.00','0.00'],'legacy numeric zero after reopen');
 
   // --- 3. Five statuses are all displayable. ---
   const statusCandidate=decision=>({candidate_index:1,name:'Status '+decision,passed:decision==='passed',errors:[],checks:[{metric:'walk_forward_total_oos_net_profit',decision,measured:decision==='passed'||decision==='rejected'?1:null,threshold:0,comparison:'at_least'}],walk_forward:null});
@@ -188,5 +217,5 @@ vm.runInContext(code,ctx);
   assert.ok(!legacyText.includes('Walk-forward stabiliteit'),'a study recorded before the gate must not show a walk-forward panel');
   assert.ok(!legacyText.includes('Gezamenlijke out-of-sample nettowinst'),'no fabricated walk-forward threshold for an old study');
 
-  console.log('Walk-forward UI passed: toggle, per-window IS/OOS net + bounds/times + local thresholds + reason, five statuses, null (not zero) measurements, no red reject on a losing window, identical re-read on reopen, and legacy studies without the gate.');
+  console.log('Walk-forward UI passed: toggle, per-window IS/OOS net + bounds/times + local thresholds + reason, exact starting-capital cell (null=onbeschikbaar, legacy 0=0.00) before and after reopen, five statuses, null (not zero) measurements, no red reject on a losing window, identical re-read on reopen, and legacy studies without the gate.');
 })().catch(error=>{console.error(error);process.exitCode=1;});
