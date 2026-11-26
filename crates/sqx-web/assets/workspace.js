@@ -814,15 +814,19 @@ async function showExperiment() {
   for(const item of state.events.filter(e=>e.event.kind==='trial_started')) {
     const attempt=item.event,finished=state.events.find(e=>e.event.kind==='trial_finished'&&e.event.trial===attempt.trial);
     const row=document.createElement('p');
-    row.textContent='Candidate '+attempt.trial+' · '+attempt.strategy.name+' · '+(finished?'Net '+fmt(finished.event.report.metrics.net_profit,2)+' · '+finished.event.report.metrics.trades+' trades · '+(finished.event.report.evidence_sufficient?'trade threshold met':'insufficient evidence / invalid execution'):'interrupted before recording a result');
+    row.textContent='Candidate '+attempt.trial+' · '+attempt.strategy.name+' · '+(finished?'Net '+fmt(finished.event.report.metrics.net_profit,2)+' · '+finished.event.report.metrics.trades+' trades · '+(finished.event.report.evidence_sufficient?'Gereed voor eindtest':'Eindtest vergrendeld · bekijk de toetsresultaten'):'interrupted before recording a result');
     const validation=finished?.event.report.validation;
     if(validation){
-      row.textContent+=' · Validatie: netto '+fmt(validation.metrics.net_profit,2)+' · '+validation.metrics.trades+' trades · '+(validation.evidence_sufficient?'tradegrens gehaald':'onvoldoende bewijs of uitvoeringsfout');
+      row.textContent+=' · Validatie: netto '+fmt(validation.metrics.net_profit,2)+' · '+validation.metrics.trades+' trades · '+(validation.evidence_sufficient?'validatie-eisen gehaald':'validatie-eisen niet gehaald · bekijk de details');
     }
     const open=document.createElement('button');open.className='secondary';open.textContent='Open rules';open.onclick=()=>setStrategy(attempt.strategy,'Opened frozen experiment candidate');row.append(document.createTextNode(' '),open);
     if(state.state==='development'&&finished&&finished.event.report.evidence_sufficient) {
       const reveal=document.createElement('button');reveal.textContent='Commit candidate & reveal final test';
-      reveal.onclick=()=>experimentAction('reveal',{trial:attempt.trial});row.append(document.createTextNode(' '),reveal);
+      reveal.onclick=()=>{
+        if(window.confirm('Kandidaat '+attempt.trial+' vastleggen voor de eindtest? Hiermee sluit je de ontwikkelfase van deze studie af.')){
+          return experimentAction('reveal',{trial:attempt.trial});
+        }
+      };row.append(document.createTextNode(' '),reveal);
     }
     if(finished){
       const currency=state.plan.config.account.currency;
