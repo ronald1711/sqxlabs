@@ -34,17 +34,28 @@ const nodes={};
 for(const id of ['experiment-trials','experiment-final','experiment-jobs','experiment-context','experiment-select','experiment-trial','experiment-search','experiment-status'])nodes[id]=makeElement('div');
 nodes['experiment-select'].value='exp-1';
 let statusCalls=[];
+// Every read deserializes its own copy of the stored payload. A reopen can therefore never see an
+// object graph that a previous render or the test fixture mutated, and each case below is answered
+// with an independently parsed archive.
+const servedStates=[];
 const fmt=(v,d)=>(v==null||Number.isNaN(v))?'-':(v===Infinity?'inf':Number(v).toFixed(d));
 const ctx=vm.createContext({
   document:{getElementById:id=>nodes[id],createElement:makeElement,createTextNode:text=>({textContent:String(text),children:[]})},
   $:id=>nodes[id],
   fmt,
-  getJSON:async url=>{statusCalls.push(url);return ctx.currentState;},
+  getJSON:async url=>{
+    statusCalls.push(url);
+    const stored=ctx.archivePayloadText!==undefined?ctx.archivePayloadText:ctx.currentState;
+    const state=stored==null?null:JSON.parse(typeof stored==='string'?stored:JSON.stringify(stored));
+    servedStates.push(state);
+    return state;
+  },
   setStrategy(){},drawChart(){},console,
   activeSearch:null,searchStarting:false,
   window:{confirm:()=>true}
 });
 ctx.currentState=null;
+ctx.archivePayloadText=undefined;
 vm.runInContext(exactCode,ctx);
 vm.runInContext(assessmentsCode,ctx);
 vm.runInContext(experimentCode,ctx);
@@ -130,6 +141,29 @@ function status({requirements={min_trades:1,min_net_profit:-1000000,min_profit_f
 
 const frozenSettings='Walk-forward: 2 vensters · out-of-sample aandeel 0.30 · minimaal 1 trainingstrades en 1 testtrades per venster · gezamenlijke out-of-sample nettowinstdrempel ≥ -100000.00 USD';
 const snapshot=()=>textOf(nodes['experiment-trials'])+'\n'+textOf(nodes['experiment-final']);
+
+// The reopen route answers with the stored archive as JSON: every read deserializes its own copy.
+// A test can therefore mutate the saved payload without touching the in-memory fixture, exactly as a
+// lossy or corrupted archive would.
+const serveArchivedState=state=>{ctx.archivePayloadText=typeof state==='string'?state:JSON.stringify(state);};
+const lastServedWindows=()=>{
+  const last=servedStates[servedStates.length-1];
+  const finished=last&&last.events.find(entry=>entry.event.kind==='trial_finished');
+  return finished&&finished.event.report.assessment.walk_forward;
+};
+const windowRows=panel=>descendants(panel).filter(node=>node.tag==='tr'
+  &&node.children.length===12&&node.children.every(cell=>cell.tag==='td'));
+const startingCapitalCell=(panel,index)=>{
+  const rows=windowRows(panel);
+  assert.equal(rows.length,2,'each walked window must render exactly one row, got '+rows.length);
+  const row=rows.find(candidate=>String(candidate.children[0].textContent)===String(index));
+  assert.ok(row,'the reopened panel must render window '+index);
+  return row.children[3].textContent;
+};
+const assertStartingCapital=(panel,expected,when)=>{
+  expected.forEach((value,index)=>assert.equal(startingCapitalCell(panel,index),value,
+    when+': starting capital of window '+index+' must be exactly '+JSON.stringify(value)));
+};
 
 (async()=>{
   // --- 1. Reopening a saved final-test study shows the frozen settings and both window archives. ---
@@ -218,5 +252,66 @@ const snapshot=()=>textOf(nodes['experiment-trials'])+'\n'+textOf(nodes['experim
   assert.ok(!legacy.includes('Walk-forward:'),'a legacy study must not invent frozen walk-forward settings');
   assert.equal(panels().length,0,'a legacy study must not show a walk-forward window panel');
 
-  console.log('Walk-forward experiment archive passed: showExperiment renders frozen plan.requirements.walk_forward and the saved per-window archive, unchanged on reopen, without final-test data, and no panel for legacy/unrequested/skipped gates.');
+  // --- 8. The exact starting-capital cell of window 1 survives the real reopen route. showExperiment
+  // re-reads /api/experiments/status, and every answer is an independently parsed stored archive, so
+  // these assertions can only pass when the saved value itself is rendered. ---
+  const neverStarted=walkForward(1);
+  neverStarted.windows[1]={...neverStarted.windows[1],starting_equity:null,decision:'insufficient_evidence',reason:'account exhausted; remaining windows not traded'};
+  const neverStartedStudy=status({trials:[{trial:1,archive:neverStarted}]});
+  serveArchivedState(neverStartedStudy);
+  const readsBefore=statusCalls.length;
+  await ctx.showExperiment();
+  assert.deepStrictEqual(statusCalls.slice(readsBefore),['/api/experiments/status?id=exp-1'],'the reopen route must read the saved study once instead of re-rendering a candidate');
+  const reopenedNull=panels()[0];
+  assert.ok(reopenedNull,'the reopened study must show the archived window panel');
+  assertStartingCapital(reopenedNull,['10000.00','onbeschikbaar'],'reopen route: never-started window');
+  // Negative control on the same reopened panel: window 0 still renders 10000.00, so only the exact
+  // fourth cell of window 1 can reject the fabricated 0.00.
+  assert.ok(textOf(reopenedNull).includes('10000.00'),'control: window 0 keeps its recorded 10000.00 on the reopened panel');
+  assert.throws(()=>assertStartingCapital(reopenedNull,['10000.00','0.00'],'reopen negative control'),
+    /starting capital of window 1 must be exactly "0\.00"/,
+    'a 0.00 elsewhere on the panel must not satisfy window 1 after reopen');
+  // Every reopen deserializes its own copy of the archive instead of sharing one rendered object.
+  await ctx.showExperiment();
+  const firstRead=lastServedWindows();
+  await ctx.showExperiment();
+  const secondRead=lastServedWindows();
+  assert.equal(statusCalls.length,readsBefore+3,'each reopen must issue exactly one saved-study read');
+  assert.notEqual(firstRead,secondRead,'every reopen must deserialize its own archive instead of sharing one object');
+  assert.notEqual(firstRead,neverStarted,'the reopen route must not render the test fixture object');
+  assert.notEqual(secondRead,neverStarted,'the reopen route must not render the test fixture object');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(firstRead)),JSON.parse(JSON.stringify(secondRead)),'both reopened copies must keep the same recorded values');
+  assertStartingCapital(panels()[0],['10000.00','onbeschikbaar'],'second reopen: never-started window');
+
+  // A legacy archive that really stored a numeric 0 keeps reading 0.00 through the same route.
+  const legacyZero=walkForward(1);
+  legacyZero.windows[1]={...legacyZero.windows[1],starting_equity:0};
+  serveArchivedState(status({trials:[{trial:1,archive:legacyZero}]}));
+  const zeroReadsBefore=statusCalls.length;
+  await ctx.showExperiment();
+  assert.deepStrictEqual(statusCalls.slice(zeroReadsBefore),['/api/experiments/status?id=exp-1'],'the legacy value must also come from a fresh saved-study read');
+  const reopenedZero=panels()[0];
+  assert.notEqual(reopenedZero,reopenedNull,'reopening must render a new panel, not reuse the previous one');
+  assertStartingCapital(reopenedZero,['10000.00','0.00'],'reopen route: legacy numeric zero');
+
+  // Mutation of the stored value only: the archive served on reopen records 0 where the intact archive
+  // read null. The initial render above passed against the intact archive; after this reopen the
+  // exact-cell assertion must fail instead of inheriting either the fixture or the earlier object.
+  const mutated=JSON.parse(JSON.stringify(neverStartedStudy));
+  mutated.events.find(entry=>entry.event.kind==='trial_finished').event.report.assessment.walk_forward.windows[1].starting_equity=0;
+  serveArchivedState(mutated);
+  const mutationReadsBefore=statusCalls.length;
+  await ctx.showExperiment();
+  assert.deepStrictEqual(statusCalls.slice(mutationReadsBefore),['/api/experiments/status?id=exp-1'],'the mutated value must come from the stored archive read');
+  const mutatedPanel=panels()[0];
+  assert.equal(startingCapitalCell(mutatedPanel,1),'0.00','the reopen route must render the mutated stored value');
+  assert.throws(()=>assertStartingCapital(mutatedPanel,['10000.00','onbeschikbaar'],'mutated stored archive'),
+    /starting capital of window 1 must be exactly "onbeschikbaar"/,
+    'a null recorded as 0 in the stored archive must fail after reopen');
+  // Only the stored value changed: the earlier render and the in-memory fixture are untouched.
+  assert.equal(startingCapitalCell(reopenedNull,1),'onbeschikbaar','the initial render still shows the intact archive');
+  assert.equal(neverStarted.windows[1].starting_equity,null,'the in-memory fixture itself stays untouched');
+  ctx.archivePayloadText=undefined;
+
+  console.log('Walk-forward experiment archive passed: showExperiment renders frozen plan.requirements.walk_forward and the saved per-window archive, re-reads an independently deserialized archive on every reopen with the exact window-1 starting-capital cell (null=onbeschikbaar, legacy 0=0.00), fails on a mutated stored value while the initial render stays intact, without final-test data, and no panel for legacy/unrequested/skipped gates.');
 })().catch(error=>{console.error(error);process.exitCode=1;});
