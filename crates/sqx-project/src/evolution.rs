@@ -312,7 +312,7 @@ mod tests {
   let bars:Vec<_>=(0..100).map(|i|Bar::new(i*60000,1.0,1.1,0.9,1.0,1.0)).collect();let instrument=Instrument::fx("EURUSD");let config=BacktestConfig::default();
   let state=EvolutionState::new(42,&GeneratorConfig::default(),&GeneticConfig::default(),Fitness::NetProfit,&bars,&instrument,&config,252.0).unwrap();let jobs=EvolutionJobs::new(&root);let id=jobs.create("engine","claim",&state).unwrap();
   let experiments=Experiments::new(&root);let data=ExperimentData{bars,instrument,provenance:json!({"source":"synthetic fixture"})};
-  let plan=ExperimentPlan{schema:1,engine_id:"engine".into(),dataset_id:String::new(),holdout_start:70,config,min_development_trades:1,min_holdout_trades:1,periods_per_year:252.0,prior_exposure_disclosed:false};
+  let plan=ExperimentPlan{schema:1,engine_id:"engine".into(),dataset_id:String::new(),validation_start:None,requirements:None,holdout_start:70,config,min_development_trades:1,min_holdout_trades:1,periods_per_year:252.0,prior_exposure_disclosed:false};
   let experiment=experiments.create(&data,plan).unwrap();assert_eq!(experiments.status(&experiment).unwrap()["current_exposure_audit"]["classification"],"no_known_registry_overlap");
   // Simulate process loss immediately after the durable claim, before evaluation.
   jobs.claim(&id,0,None,&state).unwrap();jobs.claim(&id,0,None,&state).unwrap();
@@ -334,7 +334,7 @@ mod tests {
   let id=jobs.create_with_context("engine","claim",&state,json!({"timeframe":"H1"})).unwrap();jobs.claim(&id,0,None,&state).unwrap();
   let data=ExperimentData{bars:(0..100).map(|i|Bar::new(i*60000,1.0,1.0,1.0,1.0,1.0)).collect(),instrument,provenance:json!({"timeframe":"M1"})};
   let mut config=BacktestConfig::default();config.bar_duration_ms=Some(60000);
-  let plan=ExperimentPlan{schema:1,engine_id:"engine".into(),dataset_id:String::new(),holdout_start:70,config,min_development_trades:1,min_holdout_trades:1,periods_per_year:525600.0,prior_exposure_disclosed:false};
+  let plan=ExperimentPlan{schema:1,engine_id:"engine".into(),dataset_id:String::new(),validation_start:None,requirements:None,holdout_start:70,config,min_development_trades:1,min_holdout_trades:1,periods_per_year:525600.0,prior_exposure_disclosed:false};
   let experiments=Experiments::new(&root);let experiment=experiments.create(&data,plan).unwrap();let audit=experiments.status(&experiment).unwrap()["current_exposure_audit"].clone();
   assert_eq!(audit["classification"],"known_reuse_or_disclosed_exposure");assert_eq!(audit["known_overlaps"][0]["end"],7199999);assert_eq!(audit["observation_extent_complete"],true);
   std::fs::remove_dir_all(root).unwrap();

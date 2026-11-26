@@ -13,7 +13,7 @@ fn strategy()->Strategy {
     s.signals.push(Signal::new(SignalKind::LongEntry,vec![Condition::new(Operand::Price(PriceField::Close,0),Comparator::Gt,Operand::Const(0.0))],Join::And));s
 }
 fn data()->ExperimentData {ExperimentData{bars:(0..100).map(|i|Bar::new(i*60000,1.0,1.02,0.98,1.001,1.0)).collect(),instrument:Instrument::fx("EURUSD"),provenance:json!({"source":"fixture"})}}
-fn plan()->ExperimentPlan {ExperimentPlan{schema:1,engine_id:"test-engine".into(),dataset_id:String::new(),holdout_start:70,config:BacktestConfig::default(),min_development_trades:1,min_holdout_trades:1,periods_per_year:100.0,prior_exposure_disclosed:false}}
+fn plan()->ExperimentPlan {ExperimentPlan{schema:1,engine_id:"test-engine".into(),dataset_id:String::new(),validation_start:None,requirements:None,holdout_start:70,config:BacktestConfig::default(),min_development_trades:1,min_holdout_trades:1,periods_per_year:100.0,prior_exposure_disclosed:false}}
 #[test]
 fn development_is_independent_of_holdout_and_final_choice_survives_restart(){
     let temp=Temp::new();let store=Experiments::new(&temp.0);let original=data();

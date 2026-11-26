@@ -30,6 +30,10 @@ pub struct ExperimentPlan {
     pub schema: u32,
     pub engine_id: String,
     pub dataset_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_start: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requirements: Option<crate::search_requirements::Requirements>,
     pub holdout_start: usize,
     pub config: BacktestConfig,
     pub min_development_trades: usize,
@@ -96,6 +100,8 @@ impl Experiments {
         sqx_backtest::validate_backtest_inputs(&data.bars,&data.instrument,&plan.config)?;
         crate::observation::range(&data.bars,plan.config.bar_duration_ms,&data.provenance["timeframe"])?;
         if plan.schema != 1 || plan.engine_id.is_empty() || plan.holdout_start < 2 || plan.holdout_start >= data.bars.len()
+            || plan.validation_start.is_some_and(|index| index < 2 || index >= plan.holdout_start)
+            || plan.requirements.as_ref().is_some_and(|requirements| requirements.validate().is_err() || plan.validation_start.is_none())
             || plan.min_development_trades == 0 || plan.min_holdout_trades == 0
             || !plan.periods_per_year.is_finite() || plan.periods_per_year <= 0.0 {
             return Err("invalid experiment split, engine identity or evidence thresholds".into());
@@ -151,8 +157,7 @@ impl Experiments {
         let data=self.data(&plan)?;
         let trial=ledger.events.iter().filter(|e|e.1.payload["kind"]=="trial_started").count();
         ledger.append(json!({"kind":"trial_started","trial":trial,"strategy":strategy,"context":context}))?;
-        let result=backtest(strategy,&data.bars[..plan.holdout_start],&data.instrument,&plan.config);
-        let report=report(&result,plan.holdout_start,plan.periods_per_year,plan.min_development_trades);
+        let report=development_report(strategy,&data,&plan,0,trial);
         ledger.append(json!({"kind":"trial_finished","trial":trial,"report":report}))?;
         Ok(json!({"trial":trial,"report":report}))
     }
@@ -197,8 +202,7 @@ impl Experiments {
             trial
         };
         let data=self.data(&plan)?;
-        let result=backtest(strategy,&data.bars[..plan.holdout_start],&data.instrument,&plan.config);
-        let report=report(&result,plan.holdout_start,plan.periods_per_year,plan.min_development_trades);
+        let report=development_report(strategy,&data,&plan,spec.seed,trial);
         ledger.append(json!({"kind":"trial_finished","trial":trial,"report":report}))?;
         let mut result=job_summary(&ledger,job_id)?;result["last_trial"]=json!({"trial":trial,"report":report});Ok(result)
     }
@@ -386,6 +390,8 @@ impl Experiments {
         sqx_backtest::validate_backtest_inputs(&backup.data.bars,&backup.data.instrument,&backup.plan.config)?;
         crate::observation::range(&backup.data.bars,backup.plan.config.bar_duration_ms,&backup.data.provenance["timeframe"])?;
         if backup.plan.schema!=1 || backup.plan.holdout_start<2 || backup.plan.holdout_start>=backup.data.bars.len()
+            || backup.plan.validation_start.is_some_and(|index| index < 2 || index >= backup.plan.holdout_start)
+            || backup.plan.requirements.as_ref().is_some_and(|requirements| requirements.validate().is_err() || backup.plan.validation_start.is_none())
             || backup.plan.min_development_trades==0 || backup.plan.min_holdout_trades==0
             || !backup.plan.periods_per_year.is_finite() || backup.plan.periods_per_year<=0.0 || backup.plan.engine_id.is_empty() {
             return Err("invalid experiment backup plan".into());
@@ -505,6 +511,55 @@ fn validate_history(events:&[(String,Event)])->Result<(),String>{
         }
     }Ok(())
 }
+fn development_report(strategy: &Strategy, data: &ExperimentData, plan: &ExperimentPlan, seed: u64, trial: usize) -> Value {
+    let development_end = plan.validation_start.unwrap_or(plan.holdout_start);
+    let result = backtest(strategy, &data.bars[..development_end], &data.instrument, &plan.config);
+    let mut outcome = report(&result, development_end, plan.periods_per_year, plan.min_development_trades);
+    if let Some(requirements) = &plan.requirements {
+        let mut errors = result.errors.clone();
+        if let Err(error) = sqx_metrics::validate_observations(&result) {
+            errors.push(error);
+        }
+        let build = sqx_pipeline::BuildEvaluation {
+            step: 0,
+            candidate_index: trial,
+            selected: false,
+            evaluation: sqx_optimizer::BatchEvaluation {
+                strategy: strategy.clone(),
+                metrics: sqx_metrics::compute(&result, development_end, plan.periods_per_year),
+                errors,
+            },
+            execution: result,
+        };
+        let mut assessments = requirements.assess_builds(
+            &[build], &data.bars[..development_end], &data.instrument,
+            &plan.config, plan.periods_per_year, seed,
+        );
+        let assessment = assessments.remove(0);
+        outcome["evidence_sufficient"] = json!(outcome["evidence_sufficient"] == true && assessment.passed);
+        outcome["assessment"] = json!(assessment);
+    }
+    if let Some(validation_start) = plan.validation_start {
+        let validation = backtest_window(
+            strategy, &data.bars[..plan.holdout_start], validation_start, &data.instrument, &plan.config,
+        );
+        let mut validation_report = report(&validation, plan.holdout_start - validation_start, plan.periods_per_year, plan.min_development_trades);
+        if let Some(requirements) = &plan.requirements {
+            let metrics = sqx_metrics::compute(&validation, plan.holdout_start - validation_start, plan.periods_per_year);
+            let checks = requirements.assess(&metrics, !validation.errors.is_empty()
+                || sqx_metrics::validate_observations(&validation).is_err());
+            validation_report["evidence_sufficient"] = json!(validation_report["evidence_sufficient"] == true
+                && checks.iter().all(|check| check.decision == crate::search_requirements::Decision::Passed));
+            validation_report["checks"] = json!(checks);
+        }
+        outcome["evidence_sufficient"] = json!(
+            outcome["evidence_sufficient"] == true && validation_report["evidence_sufficient"] == true
+        );
+        outcome["validation"] = validation_report;
+    }
+    outcome
+}
+
 fn report(result:&sqx_backtest::BacktestResult,bars:usize,pyp:f64,minimum:usize)->Value{
     let metrics=sqx_metrics::compute(result,bars,pyp);
     json!({"execution":result,"metrics":{"net_profit":metrics.net_profit,"profit_factor":metrics.profit_factor,
@@ -523,7 +578,7 @@ mod tests {
         let root=std::env::temp_dir().join(format!("sqx-search-resume-{}",std::process::id()));
         let store=Experiments::new(&root);
         let data=ExperimentData{bars:(0..10).map(|i|Bar::new(i*60000,1.0,1.1,0.9,1.0,1.0)).collect(),instrument:Instrument::fx("EURUSD"),provenance:json!({})};
-        let plan=ExperimentPlan{schema:1,engine_id:"fixture".into(),dataset_id:String::new(),holdout_start:5,config:BacktestConfig::default(),min_development_trades:1,min_holdout_trades:1,periods_per_year:100.0,prior_exposure_disclosed:true};
+        let plan=ExperimentPlan{schema:1,engine_id:"fixture".into(),dataset_id:String::new(),validation_start:None,requirements:None,holdout_start:5,config:BacktestConfig::default(),min_development_trades:1,min_holdout_trades:1,periods_per_year:100.0,prior_exposure_disclosed:true};
         let id=store.create(&data,plan).unwrap();let candidate=Strategy::new("frozen candidate");
         let spec=SearchSpec{seed:42,generator:json!({}),candidates:vec![candidate.clone()]};
         let job=store.start_search(&id,"fixture","interrupted",&spec).unwrap();let job_id=job["job_id"].as_u64().unwrap() as usize;
@@ -537,7 +592,7 @@ mod tests {
         let root=std::env::temp_dir().join(format!("sqx-commit-resume-{}",std::process::id()));
         let store=Experiments::new(&root);
         let data=ExperimentData{bars:(0..10).map(|i|Bar::new(i*60000,1.0,1.1,0.9,1.0,1.0)).collect(),instrument:Instrument::fx("EURUSD"),provenance:json!({})};
-        let plan=ExperimentPlan{schema:1,engine_id:"fixture".into(),dataset_id:String::new(),holdout_start:5,config:BacktestConfig::default(),min_development_trades:1,min_holdout_trades:1,periods_per_year:100.0,prior_exposure_disclosed:true};
+        let plan=ExperimentPlan{schema:1,engine_id:"fixture".into(),dataset_id:String::new(),validation_start:None,requirements:None,holdout_start:5,config:BacktestConfig::default(),min_development_trades:1,min_holdout_trades:1,periods_per_year:100.0,prior_exposure_disclosed:true};
         let id=store.create(&data,plan).unwrap();
         // Simulate interruption after the durable commitment but before execution.
         {let mut ledger=store.ledger(&id).unwrap();

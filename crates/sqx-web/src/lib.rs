@@ -2908,12 +2908,19 @@ fn experiment_json(action:&str,body:&str,state:&State)->String {
             }
             let time=value["holdout_start_time"].as_i64().ok_or("holdout_start_time is required")?;
             let split=series.bars.partition_point(|bar|bar.time<time);
+            let validation_start = value.get("validation_start_time").filter(|v| !v.is_null())
+                .map(|v| v.as_i64().ok_or("validation_start_time must be a UTC timestamp")
+                    .map(|time| series.bars.partition_point(|bar| bar.time < time)))
+                .transpose()?;
+            let requirements = serde_json::from_value::<Option<search_requirements::Requirements>>(
+                value["requirements"].clone(),
+            ).map_err(|e| e.to_string())?;
             let minimum=|key:&str|value[key].as_u64().filter(|n|*n>0).map(|n|n as usize).ok_or_else(||format!("{key} must be positive"));
             let disclosure=value["prior_exposure_disclosed"].as_bool().ok_or("Disclose whether these data have already been inspected or tested")?;
             let config=config_for_series(&value,&series)?;
-            let plan=ExperimentPlan{schema:1,engine_id:retained_engine_identity(state)?,dataset_id:String::new(),holdout_start:split,config,
+            let plan=ExperimentPlan{schema:1,engine_id:retained_engine_identity(state)?,dataset_id:String::new(),validation_start,requirements,holdout_start:split,config,
                 min_development_trades:minimum("min_development_trades")?,min_holdout_trades:minimum("min_holdout_trades")?,
-                periods_per_year:pyp_for(&series.bars[..split]),prior_exposure_disclosed:disclosure};
+                periods_per_year:pyp_for(&series.bars[..validation_start.unwrap_or(split)]),prior_exposure_disclosed:disclosure};
             let data=ExperimentData{instrument:instrument_for(&series.symbol),bars:series.bars,
                 provenance:json!({"symbol":series.symbol,"timeframe":series.timeframe,"calendar":series.calendar,"source":series.source,"quality":quality,"normalization":series.normalization})};
             let id=store.create(&data,plan)?;

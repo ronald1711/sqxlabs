@@ -19,14 +19,41 @@ fn frozen_holdout_matches_hand_calculated_long_and_short_fills(){
         impl Drop for Cleanup{fn drop(&mut self){let _=std::fs::remove_dir_all(&self.0);}}
         let _cleanup=Cleanup(path.clone());let store=Experiments::new(&path);
         let mut config=BacktestConfig::default();config.spread_points=1.0;config.commission_per_lot=3.5;
-        let plan=ExperimentPlan{schema:1,engine_id:"hand-reference-engine".into(),dataset_id:String::new(),holdout_start:6,
+        let plan=ExperimentPlan{schema:1,engine_id:"hand-reference-engine".into(),dataset_id:String::new(),validation_start:Some(4),requirements:None,holdout_start:6,
             config,min_development_trades:1,min_holdout_trades:2,periods_per_year:525600.0,prior_exposure_disclosed:false};
         let mut strategy=Strategy::new("frozen SMA3");strategy.long=!short;strategy.short=short;
         strategy.money_management=MoneyManagement::FixedSize{size:0.1};strategy.exits=vec![ExitType::ExitAfterBars(1)];
         strategy.signals.push(Signal::new(if short{SignalKind::ShortEntry}else{SignalKind::LongEntry},vec![Condition::new(
             Operand::Price(PriceField::Close,0),Comparator::Gt,Operand::Indicator("SMA".into(),vec![Param::new("period",3.0)]))],Join::And));
+        let mut gated = plan.clone();
+        gated.requirements = Some(serde_json::from_value(json!({
+            "min_trades": 1, "min_net_profit": 1_000.0,
+            "min_profit_factor": 1.0, "max_drawdown_pct": 5.0
+        })).unwrap());
+        let gated_id = store.create(&data, gated).unwrap();
+        let gated_trial = store.trial(&gated_id, "hand-reference-engine", &strategy).unwrap();
+        assert_eq!(gated_trial["report"]["assessment"]["passed"], false);
+        assert_eq!(gated_trial["report"]["validation"]["checks"][1]["decision"], "rejected");
+        assert!(store.reveal(&gated_id, "hand-reference-engine", 0).is_err());
+        assert_eq!(store.status(&gated_id).unwrap()["state"], "development");
         let id=store.create(&data,plan.clone()).unwrap();
         let development=store.trial(&id,"hand-reference-engine",&strategy).unwrap();
+        let validation = &development["report"]["validation"];
+        let validation_trades = validation["execution"]["trades"].as_array().unwrap();
+        assert_eq!(validation_trades.len(), 1);
+        assert_eq!(validation_trades[0]["open_time"], 4 * 60000);
+        assert_eq!(validation_trades[0]["close_time"], 5 * 60000);
+        near(&validation["metrics"]["net_profit"], if short { -3.35 } else { 0.65 });
+        let mut changed_validation = data.clone();
+        let bar = &mut changed_validation.bars[5];
+        bar.open += 0.001;
+        bar.high += 0.001;
+        bar.low += 0.001;
+        bar.close += 0.001;
+        let validation_id = store.create(&changed_validation, plan.clone()).unwrap();
+        let updated = store.trial(&validation_id, "hand-reference-engine", &strategy).unwrap();
+        assert_eq!(updated["report"]["execution"], development["report"]["execution"]);
+        assert_ne!(updated["report"]["validation"]["metrics"], validation["metrics"]);
         // Mutating only future bars cannot change the registered development result.
         let mut changed=data.clone();for (index,bar) in changed.bars[6..].iter_mut().enumerate(){let delta=(index+1) as f64*0.001;bar.open+=delta;bar.high+=delta;bar.low+=delta;bar.close+=delta;}
         let alternate=store.create(&changed,plan).unwrap();

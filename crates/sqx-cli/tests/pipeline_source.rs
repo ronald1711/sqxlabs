@@ -40,7 +40,7 @@ fn pipeline_binds_seed_and_settings_and_assistant_checks_data_before_provider_ac
     let mut bars:Vec<sqx_core::Bar>=serde_json::from_value(saved.dataset["bars"].clone()).unwrap();
     let mut prior=bars[0];prior.time-=60000;bars.insert(0,prior);
     let input=sqx_project::experiment::ExperimentData{bars,instrument:sqx_core::Instrument::fx("USDJPY"),provenance:json!({"timeframe":"M1"})};
-    let plan=sqx_project::experiment::ExperimentPlan{schema:1,engine_id:saved.run.engine_id.clone(),dataset_id:String::new(),holdout_start:2,config:sqx_backtest::BacktestConfig::default(),min_development_trades:1,min_holdout_trades:1,periods_per_year:525600.0,prior_exposure_disclosed:false};
+    let plan=sqx_project::experiment::ExperimentPlan{schema:1,engine_id:saved.run.engine_id.clone(),dataset_id:String::new(),validation_start:None,requirements:None,holdout_start:2,config:sqx_backtest::BacktestConfig::default(),min_development_trades:1,min_holdout_trades:1,periods_per_year:525600.0,prior_exposure_disclosed:false};
     let experiment=experiments.create(&input,plan).unwrap();
     let audit=experiments.status(&experiment).unwrap()["current_exposure_audit"].clone();
     assert_eq!(audit["classification"],"known_reuse_or_disclosed_exposure");

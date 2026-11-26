@@ -2,25 +2,27 @@
 use serde::{Deserialize, Serialize};
 use sqx_metrics::Metrics;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Requirements {
     pub min_trades: u32,
     pub min_net_profit: f64,
     pub min_profit_factor: f64,
     pub max_drawdown_pct: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub spread_stress: Option<SpreadStress>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub monte_carlo: Option<MonteCarlo>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpreadStress {
     pub extra_spread: f64,
     pub max_profit_drop: f64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MonteCarlo {
     pub runs: usize,
@@ -72,7 +74,7 @@ impl Requirements {
         Ok(())
     }
 
-    fn assess(&self, metrics: &Metrics, execution_failed: bool) -> [Check; 4] {
+    pub(crate) fn assess(&self, metrics: &Metrics, execution_failed: bool) -> [Check; 4] {
         let assess = |metric, value: f64, threshold, minimum| {
             let passed = if minimum {
                 value >= threshold

@@ -721,18 +721,45 @@ async function showExperiment() {
     if(job.state==='resumable'){const resume=document.createElement('button');resume.textContent='Resume saved search';resume.disabled=!!activeSearch;resume.onclick=()=>runSavedSearch(id,job.job_id);row.append(resume);}
     $('experiment-jobs').append(row);
   }
+  const final=state.events.find(e=>e.event.kind==='holdout_finished');
+  const assessedCandidates=[];
   for(const item of state.events.filter(e=>e.event.kind==='trial_started')) {
     const attempt=item.event,finished=state.events.find(e=>e.event.kind==='trial_finished'&&e.event.trial===attempt.trial);
     const row=document.createElement('p');
     row.textContent='Candidate '+attempt.trial+' · '+attempt.strategy.name+' · '+(finished?'Net '+fmt(finished.event.report.metrics.net_profit,2)+' · '+finished.event.report.metrics.trades+' trades · '+(finished.event.report.evidence_sufficient?'trade threshold met':'insufficient evidence / invalid execution'):'interrupted before recording a result');
+    const validation=finished?.event.report.validation;
+    if(validation){
+      row.textContent+=' · Validatie: netto '+fmt(validation.metrics.net_profit,2)+' · '+validation.metrics.trades+' trades · '+(validation.evidence_sufficient?'tradegrens gehaald':'onvoldoende bewijs of uitvoeringsfout');
+    }
     const open=document.createElement('button');open.className='secondary';open.textContent='Open rules';open.onclick=()=>setStrategy(attempt.strategy,'Opened frozen experiment candidate');row.append(document.createTextNode(' '),open);
     if(state.state==='development'&&finished&&finished.event.report.evidence_sufficient) {
       const reveal=document.createElement('button');reveal.textContent='Commit candidate & reveal final test';
       reveal.onclick=()=>experimentAction('reveal',{trial:attempt.trial});row.append(document.createTextNode(' '),reveal);
     }
     $('experiment-trials').append(row);
+    const assessment=finished?.event.report.assessment;
+    if(assessment){
+      const checks=assessment.checks.map(check=>({...check,period:'Ontwikkeling'}));
+      for(const check of validation?.checks||[])checks.push({...check,period:'Validatie'});
+      const finalReport=final?.event.report;
+      if(finalReport?.trial===attempt.trial){
+        for(const [metric,value] of Object.entries(finalReport.metrics)){
+          checks.push({
+            metric:metric==='max_drawdown_pct'?'drawdown_pct':metric,
+            measured:value,period:'Eindtest',decision:'recorded'
+          });
+        }
+      }
+      assessedCandidates.push({
+        candidate_index:attempt.trial,
+        name:attempt.strategy.name+' (#'+attempt.trial+')',
+        passed:finished.event.report.evidence_sufficient,
+        checks,
+        errors:[...assessment.errors,...(validation?.execution.errors||[])]
+      });
+    }
   }
-  const final=state.events.find(e=>e.event.kind==='holdout_finished');
+  if(assessedCandidates.length)showSearchAssessments($('experiment-trials'),assessedCandidates);
   if(final){const report=final.event.report;const result=document.createElement('p');const committedAudit=report.exposure_at_commitment;result.textContent=('Exposure at commitment: '+exposureLabel(committedAudit))+'Final test · Candidate '+report.trial+' · Net '+fmt(report.metrics.net_profit,2)+' · Drawdown '+fmt(report.metrics.max_drawdown_pct,2)+'% · '+report.metrics.trades+' trades · '+(report.evidence_sufficient?'trade threshold met':'insufficient evidence / invalid execution')+'. '+report.interpretation;$('experiment-final').append(result);}
   else if(state.state==='committed') {const commit=state.events.find(e=>e.event.kind==='holdout_committed');const resume=document.createElement('button');resume.textContent='Resume committed final test';resume.onclick=()=>experimentAction('reveal',{trial:commit.event.trial});$('experiment-final').append(resume);}
 }
@@ -751,8 +778,11 @@ async function experimentAction(action,extra) {
 $('experiment-create').onclick=async()=>{
   try {
     const date=$('experiment-start').value,disclosure=$('experiment-exposure').value;
+    const validationDate=$('experiment-validation-start').value;
+    const requirements=$('experiment-use-requirements').checked?readSearchRequirements():undefined;
+    if(requirements && !validationDate)throw new Error('Kies een validatiestart voor een studie met toetseisen.');
     if(!date||!disclosure)throw new Error('Choose a final-test start and disclose prior data exposure.');
-    const result=await postJSON('/api/experiments/create',JSON.stringify(Object.assign({},settings(),{symbol:selectedSymbol(),holdout_start_time:Date.parse(date+'Z'),min_development_trades:Number($('experiment-min-dev').value),min_holdout_trades:Number($('experiment-min-final').value),prior_exposure_disclosed:disclosure==='true'})));
+    const result=await postJSON('/api/experiments/create',JSON.stringify(Object.assign({},settings(),{symbol:selectedSymbol(),holdout_start_time:Date.parse(date+'Z'),validation_start_time:validationDate?Date.parse(validationDate+'Z'):null,requirements,min_development_trades:Number($('experiment-min-dev').value),min_holdout_trades:Number($('experiment-min-final').value),prior_exposure_disclosed:disclosure==='true'})));
     if(result.error)throw new Error(result.error);await refreshExperiments(result.experiment_id);$('experiment-status').textContent='Dataset, costs, split and thresholds frozen. Later changes in Settings do not alter this experiment.';
   }catch(e){$('experiment-status').textContent=e.message;}
 };

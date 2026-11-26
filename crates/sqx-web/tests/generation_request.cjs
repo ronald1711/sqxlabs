@@ -40,7 +40,7 @@ vm.createContext(context);vm.runInContext(code,context);
    candidate_index:id,name,passed:false,errors:[],
    checks:[{metric:'net_profit',decision:'rejected',measured:value,threshold:0,comparison:'at_least'}]
  });
- reply=()=>({results:[],archive:{started_run_id:'comparison-study'},assessments:[candidate(1,'Alpha',-100),candidate(2,'Beta',-200)],research_context:{}});
+ reply=()=>({results:[],archive:{started_run_id:'comparison-study'},assessments:[candidate(1,'Alpha',-100),{...candidate(2,'Beta',-200),checks:[...candidate(2,'Beta',-200).checks,{period:'Validatie',metric:'net_profit',decision:'passed',measured:10,threshold:0,comparison:'at_least'}]}],research_context:{}});
  await context.runGeneration();
  const descendants=node=>[node,...node.children.flatMap(descendants)];
  const compare=descendants(rendered).find(node=>node.tag==='button');
@@ -51,7 +51,7 @@ vm.createContext(context);vm.runInContext(code,context);
  compare.onclick();
  const comparison=descendants(rendered).find(node=>node.tag==='table');
  const compared=descendants(comparison).map(node=>node.textContent);
- for(const expected of ['Alpha','Beta','-100 · Afgewezen','-200 · Afgewezen','Niet uitgevoerd']){
+ for(const expected of ['Alpha','Beta','-100 · Afgewezen','-200 · Afgewezen','Niet uitgevoerd','Validatie · Nettoresultaat','10 · Geslaagd']){
    assert(compared.includes(expected),expected);
  }
  selections[0].checked=false;selections[0].onchange();
