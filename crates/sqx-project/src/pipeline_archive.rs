@@ -168,11 +168,54 @@ fn load(archive:&Archive,id:&str)->Result<State,String>{
 /// Compact structural status; does not run the engine or return full event payloads.
 pub fn summary(archive:&Archive,id:&str)->Result<Value,String>{
     let _guard=lock(archive,id)?;let state=load(archive,id)?;
+    let search_summary = state.completion.as_ref()
+        .and_then(|record| record.run.result["search_assessments"].as_array())
+        .map(|assessments| json!({
+            "evaluated": assessments.len(),
+            "passed": assessments.iter().filter(|candidate| candidate["passed"] == true).count(),
+        }));
     Ok(json!({"started_run_id":id,"engine_id":state.root.run.engine_id,
         "status":if state.completion.is_some(){"completion_recorded"}else{"incomplete"},
         "completion_id":state.completion.as_ref().map(|r|&r.run_id),"event_count":state.events.len(),
         "execution_valid":state.completion.as_ref().map(|r|r.run.result["report"]["errors"].as_array().is_some_and(|e|e.is_empty())),
+        "search_summary":search_summary,
         "execution_replayed":false,"scope":"Ordered archive links checked; calculations have not been replayed and are not independently validated."}))
+}
+
+/// Read completed search decisions without returning trial executions or replaying the engine.
+pub fn search_assessments(archive: &Archive, id: &str) -> Result<Value, String> {
+    let _guard = lock(archive, id)?;
+    let state = load(archive, id)?;
+    let completion = state.completion.ok_or("Search is incomplete")?;
+    let assessments = completion.run.result.get("search_assessments")
+        .filter(|value| value.is_array()).ok_or("This study has no recorded search assessments")?;
+    Ok(json!({
+        "started_run_id": id,
+        "completion_id": completion.run_id,
+        "symbol": state.root.dataset["symbol"],
+        "timeframe": state.root.dataset["timeframe"],
+        "assessments": assessments,
+    }))
+}
+
+/// Return only the fields needed to inspect one completed exploratory candidate.
+pub fn search_candidate(archive: &Archive, id: &str, index: usize) -> Result<Value, String> {
+    let _guard = lock(archive, id)?;
+    let state = load(archive, id)?;
+    if state.root.run.request["origin"] != "web_generation" {
+        return Err("This study is not an exploratory search".into());
+    }
+    let completion = state.completion.ok_or("Search is incomplete")?;
+    let builds = completion.run.result["report"]["builds"].as_array().ok_or("Missing candidate reports")?;
+    let build = builds.iter().find(|build| build["candidate_index"].as_u64() == Some(index as u64))
+        .ok_or("Candidate not found in this study")?;
+    Ok(json!({
+        "started_run_id": id,
+        "candidate_index": index,
+        "currency": state.root.run.request["config"]["account"]["currency"],
+        "strategy": build["evaluation"]["strategy"],
+        "execution": {"trades":build["execution"]["trades"], "equity":build["execution"]["equity"]},
+    }))
 }
 
 pub fn inspect(archive:&Archive,id:&str)->Result<Value,String>{
@@ -184,10 +227,11 @@ pub fn inspect(archive:&Archive,id:&str)->Result<Value,String>{
     Ok(json!({"started_run_id":id,"status":if state.completion.is_some(){"completion_recorded"}else{"incomplete"},
         "completion_id":state.completion.as_ref().map(|r|&r.run_id),"event_count":state.events.len(),
         "events":events,
+        "search_assessments":state.completion.as_ref().and_then(|r|r.run.result.get("search_assessments")),
         "execution_replayed":false,"scope":"Hash/input identities and ordered prefix links checked; inspection alone does not verify recorded calculations or correctness."}))
 }
 
-pub struct Recovery {pub report:sqx_pipeline::PipelineReport,pub completion_id:String,pub replayed:usize,pub appended:usize}
+pub struct Recovery {pub search_assessments:Option<Vec<crate::search_requirements::Assessment>>,pub report:sqx_pipeline::PipelineReport,pub completion_id:String,pub replayed:usize,pub appended:usize}
 
 pub fn recover(archive:&Archive,id:&str,resume:bool)->Result<Recovery,String>{
     let _guard=lock(archive,id)?;
@@ -203,6 +247,17 @@ pub fn recover(archive:&Archive,id:&str,resume:bool)->Result<Recovery,String>{
     let generator:sqx_optimizer::GeneratorConfig=serde_json::from_value(root.strategy["generator"].clone()).map_err(|e|e.to_string())?;
     let seed=root.run.request["seed"].as_u64().ok_or("Missing pipeline seed")?;
     let pyp=root.run.request["periods_per_year"].as_f64().filter(|n|n.is_finite() && *n>0.0).ok_or("Invalid periods per year")?;
+    let requirements = if root.run.request["origin"] == "web_generation" {
+        root.run.request["web_request"].get("requirements")
+            .filter(|value| !value.is_null())
+            .map(|value| serde_json::from_value::<crate::search_requirements::Requirements>(value.clone()))
+            .transpose().map_err(|error| error.to_string())?
+    } else {
+        None
+    };
+    if let Some(requirements) = &requirements {
+        requirements.validate()?;
+    }
     let mut ids=Vec::new();let mut appended=0;let mut reader=archive.record_session();
     let report=sqx_pipeline::run_observed(&pipeline,&bars,&instrument,&config,pyp,&generator,seed,&mut |event|{
         let value=serde_json::to_value(event).map_err(|e|e.to_string())?;
@@ -219,15 +274,20 @@ pub fn recover(archive:&Archive,id:&str,resume:bool)->Result<Recovery,String>{
         ids.push(event_id);Ok(())
     })?;
     if ids.len()<state.events.len(){return Err("Replay ended before the saved prefix".into());}
-    let result=json!({"report":report,"event_ids":ids,"scope":SCOPE});
+    let search_assessments = requirements.map(|requirements| requirements.assess_builds(&report.builds, &bars, &instrument, &config, pyp, seed));
+    let mut result=json!({"report":report,"event_ids":ids,"scope":SCOPE});
+    if let Some(assessments) = &search_assessments {
+        result["search_assessments"] = serde_json::to_value(assessments).map_err(|error| error.to_string())?;
+    }
     let completion_id=if let Some(done)=state.completion{
         // Scope prose may evolve; calculations and event references must match.
-        if done.run.result["report"]!=result["report"] || done.run.result["event_ids"]!=result["event_ids"]{
+        if done.run.result["report"]!=result["report"] || done.run.result["event_ids"]!=result["event_ids"]
+            || done.run.result["search_assessments"]!=result["search_assessments"]{
             return Err("Pipeline final report differs on replay".into());
         }
         done.run_id
     }else{reader.save_run(&RunRecord{schema:1,engine_id:root.run.engine_id.clone(),dataset_id:root.run.dataset_id.clone(),strategy_id:root.run.strategy_id.clone(),request:completion_request(root),result})?};
-    Ok(Recovery{report,completion_id,replayed:state.events.len(),appended})
+    Ok(Recovery{search_assessments,report,completion_id,replayed:state.events.len(),appended})
 }
 
 #[cfg(test)]

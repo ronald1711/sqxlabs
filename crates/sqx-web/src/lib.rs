@@ -20,6 +20,7 @@ use sqx_strategy::{render as render_pseudocode, Strategy};
 
 mod mcp_settings;
 mod calendar_settings;
+use sqx_project::search_requirements;
 
 const INDEX: &str = include_str!("../assets/index.html");
 
@@ -362,8 +363,12 @@ mod tests {
         let created:serde_json::Value=serde_json::from_str(&experiment_json("create",&request.to_string(),&state)).unwrap();
         let id=created["experiment_id"].as_str().expect("experiment must be created");
         assert_eq!(created["plan"]["config"]["initial_deposit"],4321.0);
+        let generator = GeneratorConfig {
+            min_conditions: 1, max_conditions: 1, fixed_size: 0.02,
+            long: false, short: true, ..GeneratorConfig::default()
+        };
         state.store.write().unwrap().series.clear();
-        let result:serde_json::Value=serde_json::from_str(&experiment_json("search",&json!({"experiment_id":id,"count":3,"seed":42,"deposit":99999}).to_string(),&state)).unwrap();
+        let result:serde_json::Value=serde_json::from_str(&experiment_json("search",&json!({"experiment_id":id,"count":3,"seed":42,"generator":generator,"deposit":99999}).to_string(),&state)).unwrap();
         assert_eq!(result["status"]["trials_attempted"],3);
         for trial in result["trials"].as_array().unwrap() {
             assert_eq!(trial["report"]["execution"]["initial_deposit"],4321.0);
@@ -371,8 +376,10 @@ mod tests {
         }
         let attempt=&result["status"]["events"].as_array().unwrap().iter().find(|e|e["event"]["kind"]=="trial_started").unwrap()["event"];
         assert_eq!(attempt["context"]["seed"],42);
-        assert!(attempt["context"]["generator"].is_object());
-        let again:serde_json::Value=serde_json::from_str(&experiment_json("search",&json!({"experiment_id":id,"count":3,"seed":42}).to_string(),&state)).unwrap();
+        assert_eq!(attempt["context"]["generator"],json!(generator));
+        assert_eq!(attempt["strategy"]["long"],false);
+        assert_eq!(attempt["strategy"]["short"],true);
+        let again:serde_json::Value=serde_json::from_str(&experiment_json("search",&json!({"experiment_id":id,"count":3,"seed":42,"generator":generator}).to_string(),&state)).unwrap();
         assert_eq!(again["status"]["trials_attempted"],6,"repeated searches count as additional attempts");
         assert_eq!(again["trials"][0]["report"],result["trials"][0]["report"]);
         let backup=experiment_json("backup",&json!({"experiment_id":id}).to_string(),&state);
@@ -1195,6 +1202,8 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("GET", "/api/comparison") => ("200 OK", "application/json", comparison_read_json(&query_param(full_path,"id"),state)),
         ("POST", "/api/comparison/import") => ("200 OK", "application/json", comparison_import_json(body,state)),
         ("POST", "/api/comparison/restore") => ("200 OK", "application/json", comparison_restore_json(body,state)),
+        ("GET", "/api/pipeline/search-candidate") => ("200 OK", "application/json", pipeline_action_json("search_candidate",&json!({"run_id":query_param(full_path,"id"),"candidate":query_param(full_path,"candidate")}).to_string(),state)),
+        ("GET", "/api/pipeline/search-assessments") => ("200 OK", "application/json", pipeline_action_json("search_assessments",&json!({"run_id":query_param(full_path,"id")}).to_string(),state)),
         ("GET", "/api/pipeline/status") => ("200 OK", "application/json", pipeline_action_json("status",&json!({"run_id":query_param(full_path,"id")}).to_string(),state)),
         ("GET", "/api/pipeline/backup") => ("200 OK", "application/json", pipeline_action_json("backup",&json!({"run_id":query_param(full_path,"id")}).to_string(),state)),
         ("POST", "/api/pipeline/restore") => ("200 OK", "application/json", pipeline_action_json("restore",body,state)),
@@ -2452,6 +2461,12 @@ fn pipeline_action_json(action:&str,body:&str,state:&State)->String {
                 let mut status=sqx_project::pipeline_archive::summary(&state.archive,id)?;
                 status["engine_matches"]=json!(status["engine_id"]==engine_identity()?);Ok(status)
             },
+            "search_candidate"=>{
+                let index=value["candidate"].as_str().and_then(|index|index.parse::<usize>().ok())
+                    .ok_or("Valid candidate index required")?;
+                sqx_project::pipeline_archive::search_candidate(&state.archive,id,index)
+            },
+            "search_assessments"=>sqx_project::pipeline_archive::search_assessments(&state.archive,id),
             "backup"=>sqx_project::pipeline_archive::export(&state.archive,id),
             "replay"=>{
                 let recovered=sqx_project::pipeline_archive::recover(&state.archive,id,value["resume"]==true)?;
@@ -2708,6 +2723,7 @@ fn generate_json(body: &str, state: &State) -> String {
     #[derive(serde::Deserialize)]
     struct Req {
         count: usize,
+        requirements: Option<search_requirements::Requirements>,
         seed: u64,
         #[serde(default)]
         symbol: String,
@@ -2745,6 +2761,11 @@ fn generate_json(body: &str, state: &State) -> String {
     };
     let val:serde_json::Value=serde_json::from_str(body).expect("request already parsed");
     if !(1..=2000).contains(&req.count){return json!({"error":"count must be between 1 and 2000"}).to_string();}
+    if let Some(requirements) = &req.requirements {
+        if let Err(error) = requirements.validate() {
+            return json!({"error": error}).to_string();
+        }
+    }
     let (creation_guard,existing)=match reserve_web_research_request("web_generation",&val,state){Ok(result)=>result,Err(error)=>return json!({"error":error}).to_string()};
     if let Some(id)=existing{return json!({"recovery_required":true,"message":"This request already has a saved generation study. Inspect Saved research before retrying.","archive":{"started_run_id":id}}).to_string();}
     let series = match find_series(state, &req.symbol) {
@@ -2773,7 +2794,8 @@ fn generate_json(body: &str, state: &State) -> String {
         param_ranges: req.param_ranges.into_iter().map(|r| (r.indicator, r.param, r.min, r.max)).collect(),
     };
     if let Err(error)=gen.validate(){return json!({"error":error}).to_string();}
-    let pipeline=sqx_pipeline::Pipeline{name:"Dashboard quick search".into(),tasks:vec![sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::Generate{count,min_trades:5}}]};
+    let min_trades = req.requirements.as_ref().map_or(5, |requirements| requirements.min_trades as usize);
+    let pipeline=sqx_pipeline::Pipeline{name:"Dashboard quick search".into(),tasks:vec![sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::Generate{count,min_trades}}]};
     let request=json!({"research_kind":"cli_pipeline_started","origin":"web_generation","attempt_id":format!("{:032x}",rand::random::<u128>()),"web_request":val,"config":cfg,"seed":req.seed,"periods_per_year":pyp});
     let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,"source":series.source,"normalization":series.normalization,"bars":series.bars,"source_context":research_context});
     let started=match retained_engine_identity(state).and_then(|engine|state.archive.save(engine,dataset,json!({"pipeline":pipeline,"generator":gen}),request,json!({"status":"execution_not_recorded"}))){Ok(id)=>id,Err(error)=>return json!({"error":format!("Generation could not be archived: {error}")}).to_string()};
@@ -2781,11 +2803,16 @@ fn generate_json(body: &str, state: &State) -> String {
     let recovered=match sqx_project::pipeline_archive::recover(&state.archive,&started,true){Ok(result)=>result,Err(error)=>return json!({"error":format!("Generation stopped: {error}. Inspect Saved research before retrying."),"archive":{"started_run_id":started}}).to_string()};
     let receipt=json!({"started_run_id":started,"run_id":recovered.completion_id});
     if !recovered.report.errors.is_empty(){return json!({"error":recovered.report.errors.join("; "),"research_context":research_context,"archive":receipt}).to_string();}
-    let rows:Vec<_>=recovered.report.databank.iter().take(20).filter_map(|strategy|recovered.report.builds.iter().find(|r|r.evaluation.strategy==*strategy).map(|row|{
+    let assessments = &recovered.search_assessments;
+    let rows:Vec<_>=recovered.report.databank.iter().filter_map(|strategy|recovered.report.builds.iter().find(|r|r.evaluation.strategy==*strategy).map(|row|{
         let m=&row.evaluation.metrics;json!({"name":strategy.name,"research_context":research_context,"profit_factor":m.profit_factor,"net_profit":m.net_profit,"trades":m.number_of_trades,"dd_pct":m.max_drawdown_pct,"strategy":strategy,"source_run_id":receipt["run_id"],"source_started_run_id":started,"source_candidate_index":row.candidate_index})
-    })).collect();
+    })).filter(|row| {
+        assessments.as_ref().is_none_or(|checks| checks.iter().any(|assessment| {
+            row["source_candidate_index"].as_u64() == Some(assessment.candidate_index as u64) && assessment.passed
+        }))
+    }).take(20).collect();
     databank_push(state,&rows);
-    json!({"research_context":research_context,"results":rows,"symbol":series.symbol,"archive":receipt}).to_string()
+    json!({"research_context":research_context,"results":rows,"assessments":assessments,"symbol":series.symbol,"archive":receipt}).to_string()
 }
 
 fn portfolio_json(body: &str, state: &State) -> String {
@@ -2893,12 +2920,19 @@ fn experiment_json(action:&str,body:&str,state:&State)->String {
             }
             let time=value["holdout_start_time"].as_i64().ok_or("holdout_start_time is required")?;
             let split=series.bars.partition_point(|bar|bar.time<time);
+            let validation_start = value.get("validation_start_time").filter(|v| !v.is_null())
+                .map(|v| v.as_i64().ok_or("validation_start_time must be a UTC timestamp")
+                    .map(|time| series.bars.partition_point(|bar| bar.time < time)))
+                .transpose()?;
+            let requirements = serde_json::from_value::<Option<search_requirements::Requirements>>(
+                value["requirements"].clone(),
+            ).map_err(|e| e.to_string())?;
             let minimum=|key:&str|value[key].as_u64().filter(|n|*n>0).map(|n|n as usize).ok_or_else(||format!("{key} must be positive"));
             let disclosure=value["prior_exposure_disclosed"].as_bool().ok_or("Disclose whether these data have already been inspected or tested")?;
             let config=config_for_series(&value,&series)?;
-            let plan=ExperimentPlan{schema:1,engine_id:retained_engine_identity(state)?,dataset_id:String::new(),holdout_start:split,config,
+            let plan=ExperimentPlan{schema:1,engine_id:retained_engine_identity(state)?,dataset_id:String::new(),validation_start,requirements,holdout_start:split,config,
                 min_development_trades:minimum("min_development_trades")?,min_holdout_trades:minimum("min_holdout_trades")?,
-                periods_per_year:pyp_for(&series.bars[..split]),prior_exposure_disclosed:disclosure};
+                periods_per_year:pyp_for(&series.bars[..validation_start.unwrap_or(split)]),prior_exposure_disclosed:disclosure};
             let data=ExperimentData{instrument:instrument_for(&series.symbol),bars:series.bars,
                 provenance:json!({"symbol":series.symbol,"timeframe":series.timeframe,"calendar":series.calendar,"source":series.source,"quality":quality,"normalization":series.normalization})};
             let id=store.create(&data,plan)?;
@@ -2915,7 +2949,13 @@ fn experiment_json(action:&str,body:&str,state:&State)->String {
             "search" | "job_start"=>{
                 let count=value["count"].as_u64().filter(|n|(1..=2000).contains(n)).ok_or("count must be between 1 and 2000")?;
                 let seed=value["seed"].as_u64().ok_or("seed is required")?;
-                let config=GeneratorConfig::default();let engine=engine_identity()?;
+                let config = match value.get("generator") {
+                    Some(generator) => serde_json::from_value::<GeneratorConfig>(generator.clone())
+                        .map_err(|error| format!("Invalid search space: {error}"))?,
+                    None => GeneratorConfig::default(),
+                };
+                config.validate()?;
+                let engine=engine_identity()?;
                 let mut rng=rand::rngs::StdRng::seed_from_u64(seed);
                 let candidates=(0..count).map(|i|random_strategy(&mut rng,&format!("experiment-{seed}-{i}"),&config)).collect();
                 let spec=sqx_project::experiment::SearchSpec{seed,generator:json!(config),candidates};

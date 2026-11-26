@@ -18,3 +18,4 @@ sha2 = "0.10"
 rand.workspace = true
 sqx-pipeline = { path = "../sqx-pipeline" }
 libc = "0.2"
+sqx-robustness = { path = "../sqx-robustness" }

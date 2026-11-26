@@ -635,6 +635,30 @@ async function refreshResearchRuns() {
               if(!['incomplete','completion_recorded'].includes(status.status)||typeof status.engine_matches!=='boolean')throw new Error('Missing pipeline status confirmation.');
               inspected=status;
               metadata.textContent=researchTitle+' '+run.run_id.slice(0,12)+' · '+status.event_count+' saved steps · '+(status.status==='incomplete'?'Incomplete':status.execution_valid===true?'Completion recorded':'Completion recorded with errors')+' · Not independently validated';
+              if(status.search_summary){
+                metadata.textContent+=' · '+status.search_summary.passed+' van '+status.search_summary.evaluated+' kandidaten voldoen aan de ingestelde eisen';
+                const open=document.createElement('button');
+                const results=document.createElement('div');
+                open.type='button';
+                open.textContent='Open toetsresultaten';
+                open.onclick=async()=>{
+                  open.disabled=true;
+                  try{
+                    const saved=await getJSON('/api/pipeline/search-assessments?id='+encodeURIComponent(run.run_id));
+                    if(saved.error)throw new Error(saved.error);
+                    if(saved.started_run_id!==run.run_id || !Array.isArray(saved.assessments)){
+                      throw new Error('Onverwachte studiegegevens ontvangen.');
+                    }
+                    results.replaceChildren();
+                    showSearchAssessments(results,saved.assessments,run.run_id);
+                    const study=document.createElement('p');
+                    study.textContent=[saved.symbol,saved.timeframe,run.run_id.slice(0,12)].filter(Boolean).join(' · ');
+                    results.prepend(study);
+                  }catch(error){results.textContent=error.message;}
+                  finally{open.disabled=false;}
+                };
+                card.append(open,results);
+              }
               replay.textContent=status.engine_matches?(status.status==='incomplete'?'Resume '+researchNoun:'Verify '+researchNoun+' replay'):'Original application build required';
               $('research-status').textContent=status.engine_matches?'Saved links checked. Replay recomputes saved work and compares it before continuing; this can take several minutes.':'Saved links checked. Download and inspection are available, but replay requires the original application build. A backup does not install that build.';
               return;
@@ -678,6 +702,93 @@ function exposureLabel(audit) {
   if (audit.observation_extent_complete!==true) return 'EXPOSURE AUDIT INCOMPLETE — candle durations are missing or unverified in current or retained evidence. ';
   return 'No known overlap in this registry; independence is not proven. ';
 }
+function showFrozenExperimentSettings(state){
+  const details=document.createElement('details');
+  const summary=document.createElement('summary');
+  summary.textContent='Vastgelegde studie-instellingen';
+  details.append(summary);
+  const list=document.createElement('ul');
+  const add=text=>{
+    const item=document.createElement('li');
+    item.textContent=text;
+    list.append(item);
+  };
+  const utc=time=>new Date(time).toISOString();
+  const plan=state.plan;
+  const config=plan.config;
+  const {market}=state;
+  add([market.symbol,market.timeframe,market.calendar||'Kalender niet ingesteld',market.calendar_version].filter(Boolean).join(' · '));
+  add('Ontwikkeling: '+utc(state.development_start_time)+' tot '+utc(state.validation_start_time??state.holdout_start_time));
+  if(state.validation_start_time!=null)add('Validatie: '+utc(state.validation_start_time)+' tot '+utc(state.holdout_start_time));
+  add('Eindtest: '+utc(state.holdout_start_time)+' tot '+utc(state.holdout_end_time));
+  add('Kosten: spread '+config.spread_points+' · slippage '+config.slippage_points+' · commissie '+config.commission_per_lot+' per lot');
+  add('Financiering per lot: long '+config.account.long_financing_per_lot+' · short '+config.account.short_financing_per_lot+' '+config.account.currency);
+  add('Minimaal trades: '+plan.min_development_trades+' in ontwikkeling en, indien ingesteld, validatie · '+plan.min_holdout_trades+' in de eindtest');
+  const req=plan.requirements;
+  if(req){
+    add('Basiseisen: minimaal '+req.min_trades+' trades, netto '+req.min_net_profit+' '+config.account.currency+' en profit factor '+req.min_profit_factor+' · maximaal '+req.max_drawdown_pct+'% drawdown');
+    if(req.spread_stress)add('Spreadtest: '+req.spread_stress.extra_spread+' extra · nettoresultaat daalt maximaal '+req.spread_stress.max_profit_drop+' '+config.account.currency);
+    if(req.monte_carlo)add('Monte Carlo: '+req.monte_carlo.runs+' simulaties · '+fmt(req.monte_carlo.skip_probability*100,2)+'% kans op weglaten van elke trade · minimaal '+req.monte_carlo.min_positive_pct+'% winstgevende simulaties');
+  }
+  add('Dataset: '+plan.dataset_id+' · Engine: '+plan.engine_id);
+  details.append(list);
+  $('experiment-trials').append(details);
+}
+function recordedExecution(period, execution, currency){
+  const details=document.createElement('details');
+  const summary=document.createElement('summary');
+  const trades=execution.trades||[];
+  summary.textContent=period+' · '+trades.length+' opgeslagen trades en equity';
+  details.append(summary);
+  details.addEventListener('toggle',()=>{
+    if(!details.open || details.children.length>1)return;
+    const chart=document.createElement('div');
+    chart.setAttribute('role','img');
+    chart.setAttribute('aria-label','Equitycurve '+period+' in '+currency);
+    if(execution.equity?.length>=2)drawChart(execution.equity,chart);
+    else chart.textContent='Onvoldoende punten voor een equitycurve.';
+    details.append(chart);
+    if(!trades.length)return;
+    const table=document.createElement('table');
+    const header=table.createTHead().insertRow();
+    for(const title of ['Richting','Open (UTC)','Sluiting (UTC)','Openprijs','Sluitprijs','Omvang','Netto ('+currency+')','Exitreden']){
+      const cell=document.createElement('th');
+      cell.scope='col';
+      cell.textContent=title;
+      header.append(cell);
+    }
+    const body=table.createTBody();
+    const previous=document.createElement('button');
+    const next=document.createElement('button');
+    const status=document.createElement('span');
+    status.setAttribute('aria-live','polite');
+    previous.textContent='Vorige trades';
+    next.textContent='Volgende trades';
+    let offset=0;
+    const pageSize=25;
+    const render=()=>{
+      body.replaceChildren();
+      for(const trade of trades.slice(offset,offset+pageSize)){
+        const row=body.insertRow();
+        const utc=value=>new Date(value).toISOString();
+        for(const value of [trade.direction,utc(trade.open_time),utc(trade.close_time),trade.open_price,trade.close_price,trade.size,fmt(trade.pnl,2),trade.exit_reason]){
+          row.insertCell().textContent=value;
+        }
+      }
+      previous.disabled=offset===0;
+      next.disabled=offset+pageSize>=trades.length;
+      status.textContent=(offset+1)+'–'+Math.min(offset+pageSize,trades.length)+' van '+trades.length;
+    };
+    previous.onclick=()=>{offset-=pageSize;render();};
+    next.onclick=()=>{offset+=pageSize;render();};
+    render();
+    const scroll=document.createElement('div');
+    scroll.style.overflowX='auto';
+    scroll.append(table);
+    details.append(scroll,previous,status,next);
+  });
+  return details;
+}
 async function showExperiment() {
   const id=$('experiment-select').value;
   $('experiment-trials').replaceChildren();$('experiment-final').replaceChildren();$('experiment-jobs').replaceChildren();
@@ -686,6 +797,7 @@ async function showExperiment() {
   if(state.error)throw new Error(state.error);
   if($('experiment-select').value!==id)return;
   $('experiment-context').textContent=state.state+' · '+state.trials_attempted+' attempted candidates · Final period '+new Date(state.holdout_start_time).toISOString()+' to '+new Date(state.holdout_end_time).toISOString()+' · Deposit '+state.plan.config.initial_deposit+' '+state.plan.config.account.currency+' · Prior exposure: '+(state.plan.prior_exposure_disclosed?'yes / unsure':'not declared')+'. '+state.scope;
+  showFrozenExperimentSettings(state);
   const audit=state.current_exposure_audit;
   const exposure=document.createElement('div');
   exposure.textContent=exposureLabel(audit)+audit.same_market_experiment_attempts+' experiment attempts on this market; '+audit.same_market_archived_backtest_records+' archived backtest records; '+(audit.same_market_archived_assistant_records||0)+' archived AI records; '+(audit.same_market_archived_mcp_generation_records||0)+' archived MCP generation records (not independent trial counts); '+(audit.same_market_archived_pipeline_records||0)+' archived pipeline reports; '+(audit.same_market_archived_crosscheck_records||0)+' archived crosscheck records (including checkpoints); '+(audit.same_market_archived_robustness_records||0)+' archived stress-test reports; '+(audit.same_market_archived_comparison_records||0)+' saved paper comparisons; '+(audit.same_market_evolution_generation_claims||0)+' claimed evolution generations. '+audit.scope;
@@ -693,22 +805,63 @@ async function showExperiment() {
   for(const overlap of audit.known_overlaps){const line=document.createElement('p');line.textContent=overlap.source+' · '+overlap.id.slice(0,16)+' · '+new Date(overlap.start).toISOString()+' → '+new Date(overlap.end).toISOString();$('experiment-trials').append(line);}
   $('experiment-trial').disabled=state.state!=='development';$('experiment-search').disabled=state.state!=='development'||!!activeSearch||searchStarting;
   for(const job of state.jobs||[]) {
-    const row=document.createElement('p');row.textContent='Search '+job.job_id+' · Seed '+job.seed+' · '+job.completed+'/'+job.total+' saved · '+job.state+' ';
+    const row=document.createElement('p');row.textContent='Search '+job.job_id+' · Seed '+job.seed+' · '+searchProgress(job)+' · '+job.state+' ';
     if(job.state==='resumable'){const resume=document.createElement('button');resume.textContent='Resume saved search';resume.disabled=!!activeSearch;resume.onclick=()=>runSavedSearch(id,job.job_id);row.append(resume);}
     $('experiment-jobs').append(row);
   }
+  const final=state.events.find(e=>e.event.kind==='holdout_finished');
+  const assessedCandidates=[];
   for(const item of state.events.filter(e=>e.event.kind==='trial_started')) {
     const attempt=item.event,finished=state.events.find(e=>e.event.kind==='trial_finished'&&e.event.trial===attempt.trial);
     const row=document.createElement('p');
-    row.textContent='Candidate '+attempt.trial+' · '+attempt.strategy.name+' · '+(finished?'Net '+fmt(finished.event.report.metrics.net_profit,2)+' · '+finished.event.report.metrics.trades+' trades · '+(finished.event.report.evidence_sufficient?'trade threshold met':'insufficient evidence / invalid execution'):'interrupted before recording a result');
+    row.textContent='Candidate '+attempt.trial+' · '+attempt.strategy.name+' · '+(finished?'Net '+fmt(finished.event.report.metrics.net_profit,2)+' · '+finished.event.report.metrics.trades+' trades · '+(finished.event.report.evidence_sufficient?'Gereed voor eindtest':'Eindtest vergrendeld · bekijk de toetsresultaten'):'interrupted before recording a result');
+    const validation=finished?.event.report.validation;
+    if(validation){
+      row.textContent+=' · Validatie: netto '+fmt(validation.metrics.net_profit,2)+' · '+validation.metrics.trades+' trades · '+(validation.evidence_sufficient?'validatie-eisen gehaald':'validatie-eisen niet gehaald · bekijk de details');
+    }
     const open=document.createElement('button');open.className='secondary';open.textContent='Open rules';open.onclick=()=>setStrategy(attempt.strategy,'Opened frozen experiment candidate');row.append(document.createTextNode(' '),open);
     if(state.state==='development'&&finished&&finished.event.report.evidence_sufficient) {
       const reveal=document.createElement('button');reveal.textContent='Commit candidate & reveal final test';
-      reveal.onclick=()=>experimentAction('reveal',{trial:attempt.trial});row.append(document.createTextNode(' '),reveal);
+      reveal.onclick=()=>{
+        if(window.confirm('Kandidaat '+attempt.trial+' vastleggen voor de eindtest? Hiermee sluit je de ontwikkelfase van deze studie af.')){
+          return experimentAction('reveal',{trial:attempt.trial});
+        }
+      };row.append(document.createTextNode(' '),reveal);
     }
-    $('experiment-trials').append(row);
+    if(finished){
+      const currency=state.plan.config.account.currency;
+      const report=finished.event.report;
+      const evidence=document.createElement('div');
+      evidence.append(recordedExecution('Ontwikkeling',report.execution,currency));
+      if(validation)evidence.append(recordedExecution('Validatie',validation.execution,currency));
+      if(final?.event.report.trial===attempt.trial){
+        evidence.append(recordedExecution('Eindtest',final.event.report.execution,currency));
+      }
+      $('experiment-trials').append(row,evidence);
+    }else $('experiment-trials').append(row);
+    const assessment=finished?.event.report.assessment;
+    if(assessment){
+      const checks=assessment.checks.map(check=>({...check,period:'Ontwikkeling'}));
+      for(const check of validation?.checks||[])checks.push({...check,period:'Validatie'});
+      const finalReport=final?.event.report;
+      if(finalReport?.trial===attempt.trial){
+        for(const [metric,value] of Object.entries(finalReport.metrics)){
+          checks.push({
+            metric:metric==='max_drawdown_pct'?'drawdown_pct':metric,
+            measured:value,period:'Eindtest',decision:'recorded'
+          });
+        }
+      }
+      assessedCandidates.push({
+        candidate_index:attempt.trial,
+        name:attempt.strategy.name+' (#'+attempt.trial+')',
+        passed:finished.event.report.evidence_sufficient,
+        checks,
+        errors:[...assessment.errors,...(validation?.execution.errors||[])]
+      });
+    }
   }
-  const final=state.events.find(e=>e.event.kind==='holdout_finished');
+  if(assessedCandidates.length)showSearchAssessments($('experiment-trials'),assessedCandidates);
   if(final){const report=final.event.report;const result=document.createElement('p');const committedAudit=report.exposure_at_commitment;result.textContent=('Exposure at commitment: '+exposureLabel(committedAudit))+'Final test · Candidate '+report.trial+' · Net '+fmt(report.metrics.net_profit,2)+' · Drawdown '+fmt(report.metrics.max_drawdown_pct,2)+'% · '+report.metrics.trades+' trades · '+(report.evidence_sufficient?'trade threshold met':'insufficient evidence / invalid execution')+'. '+report.interpretation;$('experiment-final').append(result);}
   else if(state.state==='committed') {const commit=state.events.find(e=>e.event.kind==='holdout_committed');const resume=document.createElement('button');resume.textContent='Resume committed final test';resume.onclick=()=>experimentAction('reveal',{trial:commit.event.trial});$('experiment-final').append(resume);}
 }
@@ -727,27 +880,49 @@ async function experimentAction(action,extra) {
 $('experiment-create').onclick=async()=>{
   try {
     const date=$('experiment-start').value,disclosure=$('experiment-exposure').value;
+    const validationDate=$('experiment-validation-start').value;
+    const requirements=$('experiment-use-requirements').checked?readSearchRequirements():undefined;
+    if(requirements && !validationDate)throw new Error('Kies een validatiestart voor een studie met toetseisen.');
     if(!date||!disclosure)throw new Error('Choose a final-test start and disclose prior data exposure.');
-    const result=await postJSON('/api/experiments/create',JSON.stringify(Object.assign({},settings(),{symbol:selectedSymbol(),holdout_start_time:Date.parse(date+'Z'),min_development_trades:Number($('experiment-min-dev').value),min_holdout_trades:Number($('experiment-min-final').value),prior_exposure_disclosed:disclosure==='true'})));
+    const result=await postJSON('/api/experiments/create',JSON.stringify(Object.assign({},settings(),{symbol:selectedSymbol(),holdout_start_time:Date.parse(date+'Z'),validation_start_time:validationDate?Date.parse(validationDate+'Z'):null,requirements,min_development_trades:Number($('experiment-min-dev').value),min_holdout_trades:Number($('experiment-min-final').value),prior_exposure_disclosed:disclosure==='true'})));
     if(result.error)throw new Error(result.error);await refreshExperiments(result.experiment_id);$('experiment-status').textContent='Dataset, costs, split and thresholds frozen. Later changes in Settings do not alter this experiment.';
   }catch(e){$('experiment-status').textContent=e.message;}
 };
 $('experiment-trial').onclick=()=>{try{return experimentAction('trial',{strategy:readStrategy()});}catch(e){$('experiment-status').textContent=e.message;}};
+function searchProgress(job){
+  return job.completed+'/'+job.total+' beoordeeld · '+job.passed+' doorgelaten · '+job.rejected+' afgewezen · '+job.incomplete_assessments+' onvolledig';
+}
 async function runSavedSearch(id,jobId) {
   if(activeSearch)return;
   const run={id,jobId,stop:false};activeSearch=run;
   $('experiment-stop').hidden=false;$('experiment-stop').disabled=false;
+  const startedAt=Date.now();
+  let savedProgress='De opgeslagen zoekopdracht wordt geopend';
+  let activeStep='Studie openen';
+  const showProgress=()=>{
+    const seconds=Math.floor((Date.now()-startedAt)/1000);
+    $('experiment-status').textContent=activeStep+' · '+savedProgress+' · '+seconds+' s verstreken';
+  };
+  const timer=setInterval(()=>{if(!run.stop)showProgress();},1000);
   try {
+    showProgress();
     await showExperiment();
     while(!run.stop) {
+      activeStep='Volgende kandidaat toetsen';
+      showProgress();
       const job=await postJSON('/api/experiments/jobs/step',JSON.stringify({experiment_id:id,job_id:jobId}));
       if(job.error)throw new Error(job.error);
-      $('experiment-status').textContent='Search '+jobId+' ('+id.slice(0,8)+'): '+job.completed+'/'+job.total+' candidates saved.';
-      if(job.state==='complete')break;
+      savedProgress=searchProgress(job);
+      if(job.state==='complete'){
+        activeStep='Zoekopdracht afgerond';
+        showProgress();
+        break;
+      }
+      if(job.state!=='resumable')throw new Error('De studie accepteert geen volgende kandidaat.');
     }
     if(run.stop)$('experiment-status').textContent='Search paused after the current candidate. Saved progress can be resumed, also after reopening the app.';
   }catch(e){$('experiment-status').textContent=e.message+' Refresh to see saved progress before resuming.';}
-  finally{activeSearch=null;$('experiment-stop').hidden=true;await showExperiment().catch(()=>{});}
+  finally{clearInterval(timer);activeSearch=null;$('experiment-stop').hidden=true;await showExperiment().catch(()=>{});}
 }
 $('experiment-stop').onclick=()=>{if(activeSearch){activeSearch.stop=true;$('experiment-stop').disabled=true;$('experiment-status').textContent='Finishing and saving the current candidate…';}};
 $('experiment-search').onclick=async()=>{
@@ -766,7 +941,14 @@ $('experiment-search').onclick=async()=>{
       $('experiment-status').textContent='Recovering the previously requested search with its original seed and candidate count…';
     }else{
       if(!Number.isSafeInteger(count)||count<1||count>2000||!Number.isSafeInteger(seed)||seed<0)throw new Error('Choose 1–2000 candidates and a non-negative integer seed.');
-      request={experiment_id:id,count,seed,request_key:crypto.randomUUID()};
+      const use=genSettings();
+      const generator={
+        min_conditions:use.min_conditions,max_conditions:use.max_conditions,
+        sl_points:[use.sl_min,use.sl_max],pt_points:[use.pt_min,use.pt_max],
+        fixed_size:use.size,long:use.long,short:use.short,
+        param_ranges:use.param_ranges.map(range=>[range.indicator,range.param,range.min,range.max])
+      };
+      request={experiment_id:id,count,seed,generator,request_key:crypto.randomUUID()};
       // Persist before sending: a lost response must not create another search on retry.
       sessionStorage.setItem(pendingKey,JSON.stringify(request));
     }

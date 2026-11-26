@@ -3,10 +3,11 @@ use serde_json::{json,Value};
 #[test]
 fn pipeline_binds_seed_and_settings_and_assistant_checks_data_before_provider_access(){
     let root=std::env::temp_dir().join(format!("sqx-cli-pipeline-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));fs::create_dir_all(&root).unwrap();
+    freeze_test_engine(&root);
     let data=root.join("bars.csv");let config=root.join("config.json");
     fs::write(&config,json!({"account":{"currency":"JPY"},"spread_points":7}).to_string()).unwrap();
     fs::write(&data,"timestamp,open,high,low,close,volume\n1700000000,150,151,149,150,1\n1700000060,150,151,149,150,1\n").unwrap();
-    let run=|extra:&[&str]|Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["pipeline","--data"]).arg(&data).args(["--count","2","--keep","1","--archive-dir"]).arg(root.join("archive")).args(extra).output().unwrap();
+    let run=|extra:&[&str]|Command::new(root.join("frozen-cli")).args(["pipeline","--data"]).arg(&data).args(["--count","2","--keep","1","--archive-dir"]).arg(root.join("archive")).args(extra).output().unwrap();
     assert!(!run(&[]).status.success());
     let out=run(&["--symbol","USDJPY","--timeframe","M1","--config",config.to_str().unwrap(),"--seed","731"]);assert!(out.status.success(),"{}",String::from_utf8_lossy(&out.stderr));
     let text=String::from_utf8(out.stdout).unwrap();let context:Value=serde_json::from_str(text.lines().find_map(|s|s.strip_prefix("Research context: ")).unwrap()).unwrap();
@@ -40,12 +41,12 @@ fn pipeline_binds_seed_and_settings_and_assistant_checks_data_before_provider_ac
     let mut bars:Vec<sqx_core::Bar>=serde_json::from_value(saved.dataset["bars"].clone()).unwrap();
     let mut prior=bars[0];prior.time-=60000;bars.insert(0,prior);
     let input=sqx_project::experiment::ExperimentData{bars,instrument:sqx_core::Instrument::fx("USDJPY"),provenance:json!({"timeframe":"M1"})};
-    let plan=sqx_project::experiment::ExperimentPlan{schema:1,engine_id:saved.run.engine_id.clone(),dataset_id:String::new(),holdout_start:2,config:sqx_backtest::BacktestConfig::default(),min_development_trades:1,min_holdout_trades:1,periods_per_year:525600.0,prior_exposure_disclosed:false};
+    let plan=sqx_project::experiment::ExperimentPlan{schema:1,engine_id:saved.run.engine_id.clone(),dataset_id:String::new(),validation_start:None,requirements:None,holdout_start:2,config:sqx_backtest::BacktestConfig::default(),min_development_trades:1,min_holdout_trades:1,periods_per_year:525600.0,prior_exposure_disclosed:false};
     let experiment=experiments.create(&input,plan).unwrap();
     let audit=experiments.status(&experiment).unwrap()["current_exposure_audit"].clone();
     assert_eq!(audit["classification"],"known_reuse_or_disclosed_exposure");
     assert_eq!(audit["same_market_archived_pipeline_records"],events.len()+2);
-    let failed=Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["pipeline","--data"]).arg(&data)
+    let failed=Command::new(root.join("frozen-cli")).args(["pipeline","--data"]).arg(&data)
         .args(["--symbol","USDJPY","--timeframe","M1","--count","0","--keep","1","--archive-dir"]).arg(root.join("failed-archive")).output().unwrap();
     assert!(!failed.status.success());
     let failure_text=String::from_utf8(failed.stdout).unwrap();
@@ -56,7 +57,7 @@ fn pipeline_binds_seed_and_settings_and_assistant_checks_data_before_provider_ac
     let gap=run(&["--symbol","USDJPY","--timeframe","M1"]);assert!(!gap.status.success());assert!(String::from_utf8_lossy(&gap.stderr).contains("Unresolved data gaps"));
     let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();listener.set_nonblocking(true).unwrap();
     let endpoint=format!("http://{}/v1",listener.local_addr().unwrap());
-    let assistant=Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["assistant","--data"]).arg(&data).args(["--symbol","USDJPY","--timeframe","M1","--base-url",&endpoint,"--api-key","fixture-key","--ask","backtest this data"]).output().unwrap();
+    let assistant=Command::new(root.join("frozen-cli")).args(["assistant","--data"]).arg(&data).args(["--symbol","USDJPY","--timeframe","M1","--base-url",&endpoint,"--api-key","fixture-key","--ask","backtest this data"]).output().unwrap();
     assert!(!assistant.status.success());assert!(String::from_utf8_lossy(&assistant.stderr).contains("Unresolved data gaps"));
     assert_eq!(listener.accept().unwrap_err().kind(),std::io::ErrorKind::WouldBlock,"invalid research input must not contact the provider");
     fs::remove_dir_all(root).unwrap();
@@ -77,6 +78,7 @@ fn interrupted_generation_recovery(standalone:bool) {
     // Parallel cases can observe the same clock tick in the same test process.
     // Include the route and a random identity instead of using time as uniqueness.
     let root=std::env::temp_dir().join(format!("sqx-pipeline-kill-{}-{:032x}",if standalone{"generate"}else{"pipeline"},rand::random::<u128>()));
+    freeze_test_engine(&root);
     fs::create_dir_all(&root).unwrap();
     let csv=root.join("bars.csv");
     let mut data="timestamp,open,high,low,close,volume\n".to_string();
@@ -85,7 +87,7 @@ fn interrupted_generation_recovery(standalone:bool) {
     struct Child(std::process::Child);
     impl Drop for Child {fn drop(&mut self){let _=self.0.kill();let _=self.0.wait();}}
     let generate=|directory:&str|{
-        let mut command=Command::new(env!("CARGO_BIN_EXE_sqx-cli"));
+        let mut command=Command::new(root.join("frozen-cli"));
         command.args([if standalone{"generate"}else{"pipeline"},"--data"]).arg(&csv)
             .args(["--symbol","EURUSD","--timeframe","M1","--count","64","--archive-dir"]).arg(root.join(directory));
         if !standalone{command.args(["--keep","1"]);}
@@ -116,7 +118,7 @@ fn interrupted_generation_recovery(standalone:bool) {
     for record in &records {assert_eq!(restored.load(&record.run_id).unwrap().run.result,record.run.result);}
     let started=records.iter().find(|r|r.run.request["research_kind"]=="cli_pipeline_started").unwrap();
     let command=|subcommand:&str,resume:bool|{
-        let mut c=Command::new(env!("CARGO_BIN_EXE_sqx-cli"));
+        let mut c=Command::new(root.join("frozen-cli"));
         c.args([subcommand,"--archive-dir"]).arg(root.join("restored")).args(["--run-id",&started.run_id]);
         if resume{c.arg("--resume");}c.output().unwrap()
     };
@@ -176,12 +178,12 @@ fn interrupted_generation_recovery(standalone:bool) {
         altered.restore(event).unwrap();
     }
     let before=altered.list().unwrap().len();
-    let mismatch=Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["replay-pipeline","--archive-dir"]).arg(root.join("altered"))
+    let mismatch=Command::new(root.join("frozen-cli")).args(["replay-pipeline","--archive-dir"]).arg(root.join("altered"))
         .args(["--run-id",&started.run_id,"--resume"]).output().unwrap();
     assert!(!mismatch.status.success());assert!(String::from_utf8_lossy(&mismatch.stderr).contains("replay differs"));
     assert_eq!(altered.list().unwrap().len(),before,"mismatched prefix must not append work");
     let wrong=altered.save("different engine".into(),started.dataset.clone(),started.strategy.clone(),started.run.request.clone(),started.run.result.clone()).unwrap();
-    let mismatch=Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["replay-pipeline","--archive-dir"]).arg(root.join("altered"))
+    let mismatch=Command::new(root.join("frozen-cli")).args(["replay-pipeline","--archive-dir"]).arg(root.join("altered"))
         .args(["--run-id",&wrong,"--resume"]).output().unwrap();
     assert!(!mismatch.status.success());assert!(String::from_utf8_lossy(&mismatch.stderr).contains("engine executable differs"));
     let event=records.iter().find(|r|r.run.result["kind"]=="build_outcome").unwrap();
@@ -193,16 +195,23 @@ fn interrupted_generation_recovery(standalone:bool) {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Keep the executable identity stable if another build relinks Cargo's output
+// while the fixture is between its original execution and a replay.
+fn freeze_test_engine(root: &std::path::Path) {
+    fs::create_dir_all(root).unwrap();
+    fs::copy(env!("CARGO_BIN_EXE_sqx-cli"), root.join("frozen-cli")).unwrap();
+}
+
 // Exercise the public transport boundary, with the original archive unavailable
 // during import. No test-only record restoration can hide missing backup inputs.
 fn portable_restore(root:&std::path::Path, start_id:&str) {
-    let exported=Command::new(env!("CARGO_BIN_EXE_sqx-cli"))
+    let exported=Command::new(root.join("frozen-cli"))
         .args(["export-pipeline","--archive-dir"]).arg(root.join("archive"))
         .args(["--run-id",start_id]).output().unwrap();
     assert!(exported.status.success(),"{}",String::from_utf8_lossy(&exported.stderr));
     let file=root.join("backup.json");fs::write(&file,&exported.stdout).unwrap();
     fs::remove_dir_all(root.join("archive")).unwrap();
-    let import=||Command::new(env!("CARGO_BIN_EXE_sqx-cli"))
+    let import=||Command::new(root.join("frozen-cli"))
         .args(["import-pipeline","--archive-dir"]).arg(root.join("restored"))
         .arg("--input").arg(&file).output().unwrap();
     let imported=import();
@@ -232,12 +241,13 @@ fn killed_pipeline_stage_recovery(retest:bool){
     struct Cleanup(std::path::PathBuf);
     impl Drop for Cleanup{fn drop(&mut self){let _=fs::remove_dir_all(&self.0);}}
     let _cleanup=Cleanup(root.clone());
+    freeze_test_engine(&root);
     let archive=Archive::new(root.join("archive"));
     let bars:Vec<_>=(0..1500).map(|i|{let p=1.1+(i as f64*0.3).sin()*0.01;sqx_core::Bar::new(i*60000,p,p+0.003,p-0.003,p+0.0002,10.0)}).collect();
     let pipeline=sqx_pipeline::Pipeline{name:"walk-forward recovery".into(),tasks:vec![
         sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::Build{count:100,keep:1}},
         sqx_pipeline::Task{kind:if retest{sqx_pipeline::TaskKind::Retest{mc_runs:256,min_positive_pct:0.0}}else{sqx_pipeline::TaskKind::Optimize{windows:3,candidates:16}}}]};
-    let executable=env!("CARGO_BIN_EXE_sqx-cli");
+    let executable=&root.join("frozen-cli");
     let engine=content_id(&fs::read(executable).unwrap());
     let id=archive.save(engine,json!({"bars":bars,"instrument":sqx_core::Instrument::fx("EURUSD"),"timeframe":"M1"}),
         json!({"pipeline":pipeline,"generator":sqx_optimizer::GeneratorConfig::default()}),
@@ -302,13 +312,14 @@ fn standalone_optimization_survives_kill_backup_and_source_deletion(){
     use sqx_project::archive::Archive;
     use std::process::Stdio;
     let root=std::env::temp_dir().join(format!("sqx-optimize-recovery-{:032x}",rand::random::<u128>()));
+    freeze_test_engine(&root);
     struct Cleanup(std::path::PathBuf);impl Drop for Cleanup{fn drop(&mut self){let _=fs::remove_dir_all(&self.0);}}
     let _cleanup=Cleanup(root.clone());fs::create_dir_all(&root).unwrap();
     let data=root.join("bars.csv");let mut csv="timestamp,open,high,low,close,volume\n".to_owned();
     let bars:Vec<_>=(0..600).map(|i|{let p=1.1+(i as f64*0.3).sin()*0.01;csv.push_str(&format!("{},{},{},{},{},1\n",1700000000+i*60,p,p+0.002,p-0.002,p));sqx_core::Bar::new((1700000000+i*60)*1000,p,p+0.002,p-0.002,p,1.0)}).collect();
     fs::write(&data,csv).unwrap();
     struct Child(std::process::Child);impl Drop for Child{fn drop(&mut self){let _=self.0.kill();let _=self.0.wait();}}
-    let mut child=Child(Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["optimize","--data"]).arg(&data).args(["--symbol","EURUSD","--timeframe","M1","--windows","2","--oos","0.3","--candidates","16","--seed","731","--archive-dir"]).arg(root.join("archive")).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
+    let mut child=Child(Command::new(root.join("frozen-cli")).args(["optimize","--data"]).arg(&data).args(["--symbol","EURUSD","--timeframe","M1","--windows","2","--oos","0.3","--candidates","16","--seed","731","--archive-dir"]).arg(root.join("archive")).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
     let archive=Archive::new(root.join("archive"));let deadline=std::time::Instant::now()+std::time::Duration::from_secs(60);
     let start_id=loop{
         let found=archive.list().unwrap_or_default().into_iter().find_map(|id|{let b=archive.load(&id).ok()?;(b.run.result["kind"]=="walk_forward" && b.run.result["event"]["kind"]=="candidate_outcome").then(||b.run.request["started_run_id"].as_str().unwrap().to_owned())});
@@ -320,7 +331,7 @@ fn standalone_optimization_survives_kill_backup_and_source_deletion(){
     let start=archive.load(&start_id).unwrap();
     fs::remove_file(data).unwrap();portable_restore(&root,&start_id);
     let restored=Archive::new(root.join("restored"));
-    let replay=|directory:&str|Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["replay-pipeline","--run-id",&start_id,"--resume","--archive-dir"]).arg(root.join(directory)).output().unwrap();
+    let replay=|directory:&str|Command::new(root.join("frozen-cli")).args(["replay-pipeline","--run-id",&start_id,"--resume","--archive-dir"]).arg(root.join(directory)).output().unwrap();
     let out=replay("restored");assert!(out.status.success(),"{}",String::from_utf8_lossy(&out.stderr));
     let receipt:Value=serde_json::from_slice(&out.stdout).unwrap();assert!(receipt["appended_events"].as_u64().unwrap()>0);
     let done=restored.load(receipt["completion_id"].as_str().unwrap()).unwrap();
@@ -346,6 +357,7 @@ fn stress_recovery(montecarlo_only:bool){
     use sqx_project::archive::Archive;
     use std::process::Stdio;
     let root=std::env::temp_dir().join(format!("sqx-robustness-recovery-{:032x}",rand::random::<u128>()));
+    freeze_test_engine(&root);
     struct Cleanup(std::path::PathBuf);impl Drop for Cleanup{fn drop(&mut self){let _=fs::remove_dir_all(&self.0);}}
     let _cleanup=Cleanup(root.clone());fs::create_dir_all(&root).unwrap();
     let data=root.join("bars.csv");let strategy=root.join("strategy.json");
@@ -356,7 +368,7 @@ fn stress_recovery(montecarlo_only:bool){
     s["signals"]=serde_json::json!(["LongEntry","LongExit"].map(|kind|serde_json::json!({"kind":kind,"conditions":[{"left":{"Const":1.0},"cmp":"Gt","right":{"Const":0.0}}],"join":"And","fuzzy":null})));
     fs::write(&strategy,s.to_string()).unwrap();
     struct Child(std::process::Child);impl Drop for Child{fn drop(&mut self){let _=self.0.kill();let _=self.0.wait();}}
-    let mut command=Command::new(env!("CARGO_BIN_EXE_sqx-cli"));
+    let mut command=Command::new(root.join("frozen-cli"));
     command.args([if montecarlo_only{"montecarlo"}else{"robustness"},"--data"]).arg(&data).arg("--strategy").arg(&strategy)
         .args(["--symbol","EURUSD","--timeframe","M1","--archive-dir"]).arg(root.join("archive"));
     if montecarlo_only{command.args(["--runs","256","--skip","0.25","--seed","731"]);}else{command.args(["--mc-runs","256","--retest-runs","8","--windows","2"]);}
@@ -390,7 +402,7 @@ fn stress_recovery(montecarlo_only:bool){
 
     let start=archive.load(&start_id).unwrap();fs::remove_file(data).unwrap();fs::remove_file(strategy).unwrap();portable_restore(&root,&start_id);
     let restored=Archive::new(root.join("restored"));
-    let replay=|directory:&str|Command::new(env!("CARGO_BIN_EXE_sqx-cli")).args(["replay-pipeline","--run-id",&start_id,"--resume","--archive-dir"]).arg(root.join(directory)).output().unwrap();
+    let replay=|directory:&str|Command::new(root.join("frozen-cli")).args(["replay-pipeline","--run-id",&start_id,"--resume","--archive-dir"]).arg(root.join(directory)).output().unwrap();
     let out=replay("restored");assert!(out.status.success(),"{}",String::from_utf8_lossy(&out.stderr));
     let receipt:Value=serde_json::from_slice(&out.stdout).unwrap();assert!(receipt["appended_events"].as_u64().unwrap()>0);
     let done=restored.load(receipt["completion_id"].as_str().unwrap()).unwrap();
