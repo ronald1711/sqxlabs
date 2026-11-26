@@ -263,6 +263,10 @@ impl Experiments {
             }
         }
         Ok(json!({"experiment_id":id,"plan":plan,"state":state,"current_exposure_audit":exposure,"jobs":jobs,
+            "market":{"symbol":data.provenance["symbol"].as_str().unwrap_or(&data.instrument.name),
+                "timeframe":data.provenance["timeframe"],"calendar":data.provenance["calendar"]["name"],
+                "calendar_version":data.provenance["calendar"]["frozen"]["profile"]["version"]},
+            "validation_start_time":plan.validation_start.map(|index|data.bars[index].time),
             "development_start_time":data.bars[0].time,"holdout_start_time":data.bars[plan.holdout_start].time,"holdout_end_time":exposure["holdout_observation_range"]["end"],
             "scope":"Reserved within this experiment only. Data access and testing outside this protocol are not prevented or certified.",
             "trials_attempted":events.iter().filter(|e|e["event"]["kind"]=="trial_started").count(),"events":events}))

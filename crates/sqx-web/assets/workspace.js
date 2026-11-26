@@ -702,6 +702,38 @@ function exposureLabel(audit) {
   if (audit.observation_extent_complete!==true) return 'EXPOSURE AUDIT INCOMPLETE — candle durations are missing or unverified in current or retained evidence. ';
   return 'No known overlap in this registry; independence is not proven. ';
 }
+function showFrozenExperimentSettings(state){
+  const details=document.createElement('details');
+  const summary=document.createElement('summary');
+  summary.textContent='Vastgelegde studie-instellingen';
+  details.append(summary);
+  const list=document.createElement('ul');
+  const add=text=>{
+    const item=document.createElement('li');
+    item.textContent=text;
+    list.append(item);
+  };
+  const utc=time=>new Date(time).toISOString();
+  const plan=state.plan;
+  const config=plan.config;
+  const {market}=state;
+  add([market.symbol,market.timeframe,market.calendar||'Kalender niet ingesteld',market.calendar_version].filter(Boolean).join(' · '));
+  add('Ontwikkeling: '+utc(state.development_start_time)+' tot '+utc(state.validation_start_time??state.holdout_start_time));
+  if(state.validation_start_time!=null)add('Validatie: '+utc(state.validation_start_time)+' tot '+utc(state.holdout_start_time));
+  add('Eindtest: '+utc(state.holdout_start_time)+' tot '+utc(state.holdout_end_time));
+  add('Kosten: spread '+config.spread_points+' · slippage '+config.slippage_points+' · commissie '+config.commission_per_lot+' per lot');
+  add('Financiering per lot: long '+config.account.long_financing_per_lot+' · short '+config.account.short_financing_per_lot+' '+config.account.currency);
+  add('Minimaal trades: '+plan.min_development_trades+' in ontwikkeling en, indien ingesteld, validatie · '+plan.min_holdout_trades+' in de eindtest');
+  const req=plan.requirements;
+  if(req){
+    add('Basiseisen: minimaal '+req.min_trades+' trades, netto '+req.min_net_profit+' '+config.account.currency+' en profit factor '+req.min_profit_factor+' · maximaal '+req.max_drawdown_pct+'% drawdown');
+    if(req.spread_stress)add('Spreadtest: '+req.spread_stress.extra_spread+' extra · nettoresultaat daalt maximaal '+req.spread_stress.max_profit_drop+' '+config.account.currency);
+    if(req.monte_carlo)add('Monte Carlo: '+req.monte_carlo.runs+' simulaties · '+fmt(req.monte_carlo.skip_probability*100,2)+'% kans op weglaten van elke trade · minimaal '+req.monte_carlo.min_positive_pct+'% winstgevende simulaties');
+  }
+  add('Dataset: '+plan.dataset_id+' · Engine: '+plan.engine_id);
+  details.append(list);
+  $('experiment-trials').append(details);
+}
 async function showExperiment() {
   const id=$('experiment-select').value;
   $('experiment-trials').replaceChildren();$('experiment-final').replaceChildren();$('experiment-jobs').replaceChildren();
@@ -710,6 +742,7 @@ async function showExperiment() {
   if(state.error)throw new Error(state.error);
   if($('experiment-select').value!==id)return;
   $('experiment-context').textContent=state.state+' · '+state.trials_attempted+' attempted candidates · Final period '+new Date(state.holdout_start_time).toISOString()+' to '+new Date(state.holdout_end_time).toISOString()+' · Deposit '+state.plan.config.initial_deposit+' '+state.plan.config.account.currency+' · Prior exposure: '+(state.plan.prior_exposure_disclosed?'yes / unsure':'not declared')+'. '+state.scope;
+  showFrozenExperimentSettings(state);
   const audit=state.current_exposure_audit;
   const exposure=document.createElement('div');
   exposure.textContent=exposureLabel(audit)+audit.same_market_experiment_attempts+' experiment attempts on this market; '+audit.same_market_archived_backtest_records+' archived backtest records; '+(audit.same_market_archived_assistant_records||0)+' archived AI records; '+(audit.same_market_archived_mcp_generation_records||0)+' archived MCP generation records (not independent trial counts); '+(audit.same_market_archived_pipeline_records||0)+' archived pipeline reports; '+(audit.same_market_archived_crosscheck_records||0)+' archived crosscheck records (including checkpoints); '+(audit.same_market_archived_robustness_records||0)+' archived stress-test reports; '+(audit.same_market_archived_comparison_records||0)+' saved paper comparisons; '+(audit.same_market_evolution_generation_claims||0)+' claimed evolution generations. '+audit.scope;
