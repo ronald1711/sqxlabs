@@ -20,6 +20,7 @@ use sqx_strategy::{render as render_pseudocode, Strategy};
 
 mod mcp_settings;
 mod calendar_settings;
+use sqx_project::search_requirements;
 
 const INDEX: &str = include_str!("../assets/index.html");
 
@@ -1195,6 +1196,7 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("GET", "/api/comparison") => ("200 OK", "application/json", comparison_read_json(&query_param(full_path,"id"),state)),
         ("POST", "/api/comparison/import") => ("200 OK", "application/json", comparison_import_json(body,state)),
         ("POST", "/api/comparison/restore") => ("200 OK", "application/json", comparison_restore_json(body,state)),
+        ("GET", "/api/pipeline/search-assessments") => ("200 OK", "application/json", pipeline_action_json("search_assessments",&json!({"run_id":query_param(full_path,"id")}).to_string(),state)),
         ("GET", "/api/pipeline/status") => ("200 OK", "application/json", pipeline_action_json("status",&json!({"run_id":query_param(full_path,"id")}).to_string(),state)),
         ("GET", "/api/pipeline/backup") => ("200 OK", "application/json", pipeline_action_json("backup",&json!({"run_id":query_param(full_path,"id")}).to_string(),state)),
         ("POST", "/api/pipeline/restore") => ("200 OK", "application/json", pipeline_action_json("restore",body,state)),
@@ -2452,6 +2454,7 @@ fn pipeline_action_json(action:&str,body:&str,state:&State)->String {
                 let mut status=sqx_project::pipeline_archive::summary(&state.archive,id)?;
                 status["engine_matches"]=json!(status["engine_id"]==engine_identity()?);Ok(status)
             },
+            "search_assessments"=>sqx_project::pipeline_archive::search_assessments(&state.archive,id),
             "backup"=>sqx_project::pipeline_archive::export(&state.archive,id),
             "replay"=>{
                 let recovered=sqx_project::pipeline_archive::recover(&state.archive,id,value["resume"]==true)?;
@@ -2708,6 +2711,7 @@ fn generate_json(body: &str, state: &State) -> String {
     #[derive(serde::Deserialize)]
     struct Req {
         count: usize,
+        requirements: Option<search_requirements::Requirements>,
         seed: u64,
         #[serde(default)]
         symbol: String,
@@ -2745,6 +2749,11 @@ fn generate_json(body: &str, state: &State) -> String {
     };
     let val:serde_json::Value=serde_json::from_str(body).expect("request already parsed");
     if !(1..=2000).contains(&req.count){return json!({"error":"count must be between 1 and 2000"}).to_string();}
+    if let Some(requirements) = &req.requirements {
+        if let Err(error) = requirements.validate() {
+            return json!({"error": error}).to_string();
+        }
+    }
     let (creation_guard,existing)=match reserve_web_research_request("web_generation",&val,state){Ok(result)=>result,Err(error)=>return json!({"error":error}).to_string()};
     if let Some(id)=existing{return json!({"recovery_required":true,"message":"This request already has a saved generation study. Inspect Saved research before retrying.","archive":{"started_run_id":id}}).to_string();}
     let series = match find_series(state, &req.symbol) {
@@ -2773,7 +2782,8 @@ fn generate_json(body: &str, state: &State) -> String {
         param_ranges: req.param_ranges.into_iter().map(|r| (r.indicator, r.param, r.min, r.max)).collect(),
     };
     if let Err(error)=gen.validate(){return json!({"error":error}).to_string();}
-    let pipeline=sqx_pipeline::Pipeline{name:"Dashboard quick search".into(),tasks:vec![sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::Generate{count,min_trades:5}}]};
+    let min_trades = req.requirements.as_ref().map_or(5, |requirements| requirements.min_trades as usize);
+    let pipeline=sqx_pipeline::Pipeline{name:"Dashboard quick search".into(),tasks:vec![sqx_pipeline::Task{kind:sqx_pipeline::TaskKind::Generate{count,min_trades}}]};
     let request=json!({"research_kind":"cli_pipeline_started","origin":"web_generation","attempt_id":format!("{:032x}",rand::random::<u128>()),"web_request":val,"config":cfg,"seed":req.seed,"periods_per_year":pyp});
     let dataset=json!({"symbol":series.symbol,"timeframe":series.timeframe,"instrument":inst,"calendar":series.calendar,"source":series.source,"normalization":series.normalization,"bars":series.bars,"source_context":research_context});
     let started=match retained_engine_identity(state).and_then(|engine|state.archive.save(engine,dataset,json!({"pipeline":pipeline,"generator":gen}),request,json!({"status":"execution_not_recorded"}))){Ok(id)=>id,Err(error)=>return json!({"error":format!("Generation could not be archived: {error}")}).to_string()};
@@ -2781,11 +2791,16 @@ fn generate_json(body: &str, state: &State) -> String {
     let recovered=match sqx_project::pipeline_archive::recover(&state.archive,&started,true){Ok(result)=>result,Err(error)=>return json!({"error":format!("Generation stopped: {error}. Inspect Saved research before retrying."),"archive":{"started_run_id":started}}).to_string()};
     let receipt=json!({"started_run_id":started,"run_id":recovered.completion_id});
     if !recovered.report.errors.is_empty(){return json!({"error":recovered.report.errors.join("; "),"research_context":research_context,"archive":receipt}).to_string();}
-    let rows:Vec<_>=recovered.report.databank.iter().take(20).filter_map(|strategy|recovered.report.builds.iter().find(|r|r.evaluation.strategy==*strategy).map(|row|{
+    let assessments = &recovered.search_assessments;
+    let rows:Vec<_>=recovered.report.databank.iter().filter_map(|strategy|recovered.report.builds.iter().find(|r|r.evaluation.strategy==*strategy).map(|row|{
         let m=&row.evaluation.metrics;json!({"name":strategy.name,"research_context":research_context,"profit_factor":m.profit_factor,"net_profit":m.net_profit,"trades":m.number_of_trades,"dd_pct":m.max_drawdown_pct,"strategy":strategy,"source_run_id":receipt["run_id"],"source_started_run_id":started,"source_candidate_index":row.candidate_index})
-    })).collect();
+    })).filter(|row| {
+        assessments.as_ref().is_none_or(|checks| checks.iter().any(|assessment| {
+            row["source_candidate_index"].as_u64() == Some(assessment.candidate_index as u64) && assessment.passed
+        }))
+    }).take(20).collect();
     databank_push(state,&rows);
-    json!({"research_context":research_context,"results":rows,"symbol":series.symbol,"archive":receipt}).to_string()
+    json!({"research_context":research_context,"results":rows,"assessments":assessments,"symbol":series.symbol,"archive":receipt}).to_string()
 }
 
 fn portfolio_json(body: &str, state: &State) -> String {

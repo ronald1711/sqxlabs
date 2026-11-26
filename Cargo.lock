@@ -810,6 +810,7 @@ dependencies = [
  "sqx-metrics",
  "sqx-optimizer",
  "sqx-pipeline",
+ "sqx-robustness",
  "sqx-strategy",
 ]
 

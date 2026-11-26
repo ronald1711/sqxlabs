@@ -327,6 +327,28 @@
           <button id="btn-generate">Find candidates</button>
           <button id="gen-new-request" hidden>Start a new search</button>
         </div>
+        <fieldset>
+          <legend>Basiseisen voor deze zoekopdracht</legend>
+          <label><input type="checkbox" id="gen-requirements" checked> Kandidaten automatisch toetsen</label>
+          <p class="muted">Dit zijn aanpasbare startwaarden voor een verkennende proef. Drawdown is de grootste procentuele daling van de rekeningwaarde.</p>
+          <div class="row">
+            <label>Minimaal aantal trades <input id="gen-req-trades" type="number" value="20" min="1"></label>
+            <label>Minimaal nettoresultaat (rekeningvaluta) <input id="gen-req-profit" type="number" value="0" step="any"></label>
+            <label>Minimale profit factor <input id="gen-req-pf" type="number" value="1" min="0" step="any"></label>
+            <label>Maximale drawdown (%) <input id="gen-req-dd" type="number" value="10" min="0" step="any"></label>
+          </div>
+          <div class="row">
+            <label><input type="checkbox" id="gen-req-stress"> Hogere spread verplicht toetsen</label>
+            <label>Extra spread (FX pips) <input id="gen-req-spread" type="number" min="0.01" step="any" value="1"></label>
+            <label>Maximale winstdaling (rekeningvaluta) <input id="gen-req-drop" type="number" min="0" step="any" value="50"></label>
+          </div>
+          <div class="row">
+            <label><input type="checkbox" id="gen-req-mc"> Monte Carlo verplicht toetsen</label>
+            <label>Simulaties <input id="gen-req-mc-runs" type="number" min="20" max="500" value="100"></label>
+            <label>Kans dat een trade wegvalt (%) <input id="gen-req-mc-skip" type="number" min="0" max="100" step="any" value="10"></label>
+            <label>Minimaal winstgevende simulaties (%) <input id="gen-req-mc-positive" type="number" min="0.01" max="100" step="any" value="80"></label>
+          </div>
+        </fieldset>
         <div id="gen-results" class="muted">No search results yet. Choose your data and costs, review the search settings, then select Find candidates.</div>
       </div>
       <div class="card" style="margin-top:18px">
@@ -948,6 +970,95 @@ function researchNotice(context) {
   if(!context)return "";
   return (context.data_gaps_acknowledged ? "Data gaps explicitly allowed. " : "") + context.scope;
 }
+function showSearchAssessments(box, assessments){
+  const labels={trades:'Trades',net_profit:'Nettoresultaat',profit_factor:'Profit factor',drawdown_pct:'Drawdown (%)',spread_profit_drop:'Winstdaling bij hogere spread',monte_carlo_positive_pct:'Winstgevende Monte Carlo-simulaties (%)'};
+  const statuses={passed:'Geslaagd',rejected:'Afgewezen',insufficient_evidence:'Onvoldoende bewijs',technical_error:'Technische fout',not_run:'Niet uitgevoerd'};
+  const passed=assessments.filter(candidate=>candidate.passed);
+  const rejected=assessments.filter(candidate=>candidate.checks.some(check=>check.decision==='rejected'));
+  const incomplete=assessments.filter(candidate=>!candidate.passed && !rejected.includes(candidate));
+  const section=document.createElement('section');
+  const heading=document.createElement('h3');
+  heading.textContent='Toetsing van deze zoekopdracht';
+  section.appendChild(heading);
+  const selection=new Map();
+  const comparison=document.createElement('div');
+  comparison.setAttribute('aria-live','polite');
+  const compare=document.createElement('button');
+  compare.type='button';
+  compare.textContent='Vergelijk geselecteerde kandidaten';
+  compare.disabled=true;
+  compare.onclick=()=>{
+    const table=document.createElement('table');
+    const caption=table.createCaption();
+    caption.textContent='Vergelijking binnen deze studie';
+    const candidates=[...selection.values()];
+    const header=table.createTHead().insertRow();
+    for(const title of ['Basiseis',...candidates.map(candidate=>candidate.name)]){
+      const cell=document.createElement('th');
+      cell.scope='col';
+      cell.textContent=title;
+      header.appendChild(cell);
+    }
+    const body=table.createTBody();
+    for(const [metric,label] of Object.entries(labels)){
+      if(['spread_profit_drop','monte_carlo_positive_pct'].includes(metric) && !candidates.some(candidate=>candidate.checks.some(check=>check.metric===metric)))continue;
+      const row=body.insertRow();
+      const measure=document.createElement('th');
+      measure.scope='row';
+      measure.textContent=label;
+      row.appendChild(measure);
+      for(const candidate of candidates){
+        const check=candidate.checks.find(check=>check.metric===metric);
+        row.insertCell().textContent=check
+          ? (check.measured===null?'Onbeschikbaar':fmt(check.measured,metric==='trades'?0:2))
+            +' · '+statuses[check.decision]
+          : 'Niet uitgevoerd';
+      }
+    }
+    comparison.replaceChildren(table);
+  };
+  section.append(compare,comparison);
+  for(const [label, candidates] of [['Voldoet aan de ingestelde eisen',passed],['Afgewezen',rejected],['Onvolledig beoordeeld',incomplete]]){
+    const group=document.createElement('details');
+    const title=document.createElement('summary');
+    title.textContent=label+' ('+candidates.length+')';
+    group.appendChild(title);
+    for(const candidate of candidates){
+      const details=document.createElement('details');
+      const name=document.createElement('summary');
+      name.textContent=candidate.name;
+      details.appendChild(name);
+      const selectLabel=document.createElement('label');
+      const checkbox=document.createElement('input');
+      checkbox.type='checkbox';
+      checkbox.onchange=()=>{
+        if(checkbox.checked)selection.set(candidate.candidate_index,candidate);
+        else selection.delete(candidate.candidate_index);
+        compare.disabled=selection.size<2;
+        comparison.replaceChildren();
+      };
+      selectLabel.append(checkbox,document.createTextNode(' Selecteer '+candidate.name+' voor vergelijking'));
+      details.appendChild(selectLabel);
+      const checks=document.createElement('ul');
+      for(const check of candidate.checks){
+        const item=document.createElement('li');
+        const measured=check.measured===null?'onbeschikbaar':String(check.measured);
+        const operator=check.comparison==='at_least'?'≥':'≤';
+        item.textContent=labels[check.metric]+': '+measured+' '+operator+' '+check.threshold+' · '+statuses[check.decision];
+        checks.appendChild(item);
+      }
+      details.appendChild(checks);
+      for(const error of candidate.errors){
+        const message=document.createElement('p');
+        message.textContent=error;
+        details.appendChild(message);
+      }
+      group.appendChild(details);
+    }
+    section.appendChild(group);
+  }
+  box.prepend(section);
+}
 let generationRequestPending=false;
 const generationPendingKey='sqx.pendingGeneration.v1';
 document.getElementById('gen-new-request').onclick=function(){
@@ -966,6 +1077,34 @@ async function runGeneration() {
       const inputs=generatorInputs(box);if(!inputs)return;
       body=Object.assign({count:Number(document.getElementById('count').value),seed:Number(document.getElementById('seed').value),symbol:selectedSymbol()},inputs);
       if(!body.symbol)throw Error('Load and select market data before generating strategies.');
+      if(document.getElementById('gen-requirements').checked){
+        const number=id=>{
+          const field=document.getElementById(id);
+          if(!field.value.trim() || !field.checkValidity() || !Number.isFinite(field.valueAsNumber)){
+            throw Error('Vul geldige basiseisen in voordat je zoekt.');
+          }
+          return field.valueAsNumber;
+        };
+        body.requirements={
+          min_trades:number('gen-req-trades'),
+          min_net_profit:number('gen-req-profit'),
+          min_profit_factor:number('gen-req-pf'),
+          max_drawdown_pct:number('gen-req-dd')
+        };
+        if(document.getElementById('gen-req-stress').checked){
+          body.requirements.spread_stress={
+            extra_spread:number('gen-req-spread'),
+            max_profit_drop:number('gen-req-drop')
+          };
+        }
+        if(document.getElementById('gen-req-mc').checked){
+          body.requirements.monte_carlo={
+            runs:number('gen-req-mc-runs'),
+            skip_probability:number('gen-req-mc-skip')/100,
+            min_positive_pct:number('gen-req-mc-positive')
+          };
+        }
+      }
       const review=await window.reviewGenerationData(body);if(!review)return;
       body.data_review=review;body.allow_data_gaps=review.exploratory_consent;
       body.request_key=crypto.randomUUID();localStorage.setItem(generationPendingKey,JSON.stringify(body));
@@ -986,7 +1125,9 @@ async function runGeneration() {
   const next=d.results.length ? '<p><b>'+d.results.length+' candidates shown.</b> Compare profit, drawdown and trade count before choosing. <button class="secondary" data-go="results">Compare candidates in Strategies</button></p>' : '<p><b>No candidates survived this search.</b> This is a valid research outcome. Inspect the saved search for rejected candidates and errors before changing the rules or trying another seed.</p>';
   box.innerHTML = next+"<p>"+escapeHtml(researchNotice(d.research_context)+saved)+"</p>"+rows;
   refreshDatabank();
-  box.querySelectorAll("tr").forEach(function(tr, i) {
+  const rankedRows=box.querySelectorAll("tr");
+  if(Array.isArray(d.assessments))showSearchAssessments(box,d.assessments);
+  rankedRows.forEach(function(tr, i) {
     if (i === 0) return;
     const td = document.createElement("td");
     const btn = document.createElement("button");

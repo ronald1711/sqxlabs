@@ -48,7 +48,14 @@ fn assert_interrupted_search(route:&str, origin:&str, request_key:&str){
     fs::copy(env!("CARGO_BIN_EXE_sqx-cli"),root.join("frozen-cli")).unwrap();
     let data=root.join("source.csv");let mut csv="timestamp,open,high,low,close,volume\n".to_string();
     for i in 0..900{let p=1.1+(i as f64*0.07).sin()*0.01;csv.push_str(&format!("{},{p},{},{},{p},1\n",1700000000+i*60,p+0.001,p-0.001));}fs::write(&data,csv).unwrap();
-    let request=json!({"symbol":"EURUSD","count":40,"keep":2,"seed":123,"allow_data_gaps":true,"request_key":request_key});
+    let mut request=json!({"symbol":"EURUSD","count":40,"keep":2,"seed":123,"allow_data_gaps":true,"request_key":request_key});
+    if origin == "web_generation" {
+        request["requirements"] = json!({
+            "min_trades": 1, "min_net_profit": 1_000_000_000,
+            "min_profit_factor": 1, "max_drawdown_pct": 10,
+            "spread_stress": {"extra_spread": 1, "max_profit_drop": 50}
+        });
+    }
     let (mut server,addr)=start(&root,Some(&data));let pending=send(&addr,route,&request);
     let archive=Archive::new(root.join("data/research"));let deadline=Instant::now()+Duration::from_secs(90);
     let mut seen=std::collections::BTreeSet::new();
@@ -79,6 +86,24 @@ fn assert_interrupted_search(route:&str, origin:&str, request_key:&str){
     for candidate in builds{assert!(candidate["execution"]["trades"].is_array());assert!(candidate["execution"]["equity"].is_array());}
     assert!(builds.iter().any(|r|r["selected"]==false));
     assert_eq!(completed["execution_valid"],true);
+    if origin == "web_generation" {
+        let assessments = done.run.result["search_assessments"].as_array().unwrap();
+        assert_eq!(assessments.len(), 40);
+        assert!(assessments.iter().all(|candidate| candidate["passed"] == false));
+        assert!(assessments.iter().any(|candidate| candidate["checks"].as_array().unwrap()
+            .iter().any(|check| check["metric"] == "net_profit" && check["decision"] == "rejected")));
+        assert!(assessments.iter().all(|candidate| candidate["checks"].as_array().unwrap()
+            .iter().any(|check| check["metric"] == "spread_profit_drop" && check["decision"] == "not_run")));
+        let inspected = sqx_project::pipeline_archive::inspect(&archive, &started).unwrap();
+        assert_eq!(inspected["search_assessments"], done.run.result["search_assessments"]);
+        let mut stream = TcpStream::connect(&addr).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+        write!(stream, "GET /api/pipeline/search-assessments?id={started} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n").unwrap();
+        let reopened = response(stream);
+        assert_eq!(reopened["started_run_id"], started);
+        assert_eq!(reopened["completion_id"], completed["completion_id"]);
+        assert_eq!(reopened["assessments"], done.run.result["search_assessments"]);
+    }
     let fresh=Archive::new(root.join("uninterrupted"));fresh.restore(&start_record).unwrap();
     let expected=Command::new(root.join("frozen-cli")).args(["replay-pipeline","--archive-dir"]).arg(fresh.root()).args(["--run-id",&started,"--resume"]).output().unwrap();assert!(expected.status.success(),"{}",String::from_utf8_lossy(&expected.stderr));
     let expected:Value=serde_json::from_slice(&expected.stdout).unwrap();assert_eq!(completed["completion_id"],expected["completion_id"]);

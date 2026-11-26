@@ -635,6 +635,30 @@ async function refreshResearchRuns() {
               if(!['incomplete','completion_recorded'].includes(status.status)||typeof status.engine_matches!=='boolean')throw new Error('Missing pipeline status confirmation.');
               inspected=status;
               metadata.textContent=researchTitle+' '+run.run_id.slice(0,12)+' · '+status.event_count+' saved steps · '+(status.status==='incomplete'?'Incomplete':status.execution_valid===true?'Completion recorded':'Completion recorded with errors')+' · Not independently validated';
+              if(status.search_summary){
+                metadata.textContent+=' · '+status.search_summary.passed+' van '+status.search_summary.evaluated+' kandidaten voldoen aan de ingestelde eisen';
+                const open=document.createElement('button');
+                const results=document.createElement('div');
+                open.type='button';
+                open.textContent='Open toetsresultaten';
+                open.onclick=async()=>{
+                  open.disabled=true;
+                  try{
+                    const saved=await getJSON('/api/pipeline/search-assessments?id='+encodeURIComponent(run.run_id));
+                    if(saved.error)throw new Error(saved.error);
+                    if(saved.started_run_id!==run.run_id || !Array.isArray(saved.assessments)){
+                      throw new Error('Onverwachte studiegegevens ontvangen.');
+                    }
+                    results.replaceChildren();
+                    showSearchAssessments(results,saved.assessments);
+                    const study=document.createElement('p');
+                    study.textContent=[saved.symbol,saved.timeframe,run.run_id.slice(0,12)].filter(Boolean).join(' · ');
+                    results.prepend(study);
+                  }catch(error){results.textContent=error.message;}
+                  finally{open.disabled=false;}
+                };
+                card.append(open,results);
+              }
               replay.textContent=status.engine_matches?(status.status==='incomplete'?'Resume '+researchNoun:'Verify '+researchNoun+' replay'):'Original application build required';
               $('research-status').textContent=status.engine_matches?'Saved links checked. Replay recomputes saved work and compares it before continuing; this can take several minutes.':'Saved links checked. Download and inspection are available, but replay requires the original application build. A backup does not install that build.';
               return;

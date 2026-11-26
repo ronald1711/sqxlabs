@@ -105,6 +105,7 @@ pub mod assistant_trials;
 
 mod observation;
 
+pub mod search_requirements;
 pub mod pipeline_archive;
 
 pub mod mcp_config;
