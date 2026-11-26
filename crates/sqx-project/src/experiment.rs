@@ -470,10 +470,24 @@ fn intersects(a:i64,b:i64,c:i64,d:i64)->bool{a<=d&&c<=b}
 fn job_summary(ledger:&Ledger,job_id:usize)->Result<Value,String>{
     let job=&ledger.events.get(job_id).filter(|e|e.1.payload["kind"]=="job_started").ok_or("unknown search job")?.1.payload;
     let starts:Vec<_>=ledger.events.iter().filter(|e|e.1.payload["kind"]=="trial_started"&&e.1.payload["context"]["job_id"]==job_id).collect();
-    let finished:std::collections::BTreeSet<_>=ledger.events.iter().filter(|e|e.1.payload["kind"]=="trial_finished").filter_map(|e|e.1.payload["trial"].as_u64()).collect();
-    let completed=starts.iter().filter(|start|start.1.payload["trial"].as_u64().is_some_and(|id|finished.contains(&id))).count();
+    let finished: std::collections::BTreeMap<_, _> = ledger.events.iter()
+        .filter(|(_, event)| event.payload["kind"] == "trial_finished")
+        .filter_map(|(_, event)| event.payload["trial"].as_u64().map(|id| (id, &event.payload["report"])))
+        .collect();
+    let outcomes: Vec<_> = starts.iter()
+        .filter_map(|(_, event)| finished.get(&event.payload["trial"].as_u64()?))
+        .collect();
+    let completed = outcomes.len();
+    let passed = outcomes.iter().filter(|report| report["evidence_sufficient"] == true).count();
+    let rejected = outcomes.iter().filter(|report| {
+        report["evidence_sufficient"] != true
+            && [&report["assessment"]["checks"], &report["validation"]["checks"]]
+                .iter().filter_map(|checks| checks.as_array()).flatten()
+                .any(|check| check["decision"] == "rejected")
+    }).count();
     let total=job["count"].as_u64().ok_or("invalid job count")? as usize;
     Ok(json!({"job_id":job_id,"seed":job["seed"],"total":total,"completed":completed,"started":starts.len(),
+        "passed":passed,"rejected":rejected,"incomplete_assessments":completed-passed-rejected,
         "state":if completed==total{"complete"}else if ledger.has("holdout_committed"){"frozen"}else{"resumable"}}))
 }
 fn validate_history(events:&[(String,Event)])->Result<(),String>{

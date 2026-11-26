@@ -207,7 +207,13 @@ fn search_jobs_resume_from_saved_candidates_without_duplicate_trials(){
     assert_eq!(store.advance_search(&id,"test-engine",job_id).unwrap()["completed"],1);
     let reopened=Experiments::new(&temp.0);assert_eq!(reopened.status(&id).unwrap()["jobs"][0]["completed"],1);
     assert!(reopened.advance_search(&id,"changed-engine",job_id).is_err());
-    for expected in 2..=4 {assert_eq!(reopened.advance_search(&id,"test-engine",job_id).unwrap()["completed"],expected);}
+    for expected in 2..=4 {
+        let progress = reopened.advance_search(&id, "test-engine", job_id).unwrap();
+        assert_eq!(progress["completed"], expected);
+        let counted: u64 = ["passed", "rejected", "incomplete_assessments"].iter()
+            .map(|key| progress[key].as_u64().unwrap()).sum();
+        assert_eq!(counted, expected);
+    }
     assert_eq!(reopened.advance_search(&id,"test-engine",job_id).unwrap()["state"],"complete");
     assert_eq!(reopened.status(&id).unwrap()["trials_attempted"],4);
     let mut changed=spec.clone();changed.candidates[0].name="changed".into();assert!(reopened.start_search(&id,"test-engine","request-1",&changed).is_err());

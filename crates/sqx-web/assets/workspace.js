@@ -717,7 +717,7 @@ async function showExperiment() {
   for(const overlap of audit.known_overlaps){const line=document.createElement('p');line.textContent=overlap.source+' · '+overlap.id.slice(0,16)+' · '+new Date(overlap.start).toISOString()+' → '+new Date(overlap.end).toISOString();$('experiment-trials').append(line);}
   $('experiment-trial').disabled=state.state!=='development';$('experiment-search').disabled=state.state!=='development'||!!activeSearch||searchStarting;
   for(const job of state.jobs||[]) {
-    const row=document.createElement('p');row.textContent='Search '+job.job_id+' · Seed '+job.seed+' · '+job.completed+'/'+job.total+' saved · '+job.state+' ';
+    const row=document.createElement('p');row.textContent='Search '+job.job_id+' · Seed '+job.seed+' · '+searchProgress(job)+' · '+job.state+' ';
     if(job.state==='resumable'){const resume=document.createElement('button');resume.textContent='Resume saved search';resume.disabled=!!activeSearch;resume.onclick=()=>runSavedSearch(id,job.job_id);row.append(resume);}
     $('experiment-jobs').append(row);
   }
@@ -787,21 +787,40 @@ $('experiment-create').onclick=async()=>{
   }catch(e){$('experiment-status').textContent=e.message;}
 };
 $('experiment-trial').onclick=()=>{try{return experimentAction('trial',{strategy:readStrategy()});}catch(e){$('experiment-status').textContent=e.message;}};
+function searchProgress(job){
+  return job.completed+'/'+job.total+' beoordeeld · '+job.passed+' doorgelaten · '+job.rejected+' afgewezen · '+job.incomplete_assessments+' onvolledig';
+}
 async function runSavedSearch(id,jobId) {
   if(activeSearch)return;
   const run={id,jobId,stop:false};activeSearch=run;
   $('experiment-stop').hidden=false;$('experiment-stop').disabled=false;
+  const startedAt=Date.now();
+  let savedProgress='De opgeslagen zoekopdracht wordt geopend';
+  let activeStep='Studie openen';
+  const showProgress=()=>{
+    const seconds=Math.floor((Date.now()-startedAt)/1000);
+    $('experiment-status').textContent=activeStep+' · '+savedProgress+' · '+seconds+' s verstreken';
+  };
+  const timer=setInterval(()=>{if(!run.stop)showProgress();},1000);
   try {
+    showProgress();
     await showExperiment();
     while(!run.stop) {
+      activeStep='Volgende kandidaat toetsen';
+      showProgress();
       const job=await postJSON('/api/experiments/jobs/step',JSON.stringify({experiment_id:id,job_id:jobId}));
       if(job.error)throw new Error(job.error);
-      $('experiment-status').textContent='Search '+jobId+' ('+id.slice(0,8)+'): '+job.completed+'/'+job.total+' candidates saved.';
-      if(job.state==='complete')break;
+      savedProgress=searchProgress(job);
+      if(job.state==='complete'){
+        activeStep='Zoekopdracht afgerond';
+        showProgress();
+        break;
+      }
+      if(job.state!=='resumable')throw new Error('De studie accepteert geen volgende kandidaat.');
     }
     if(run.stop)$('experiment-status').textContent='Search paused after the current candidate. Saved progress can be resumed, also after reopening the app.';
   }catch(e){$('experiment-status').textContent=e.message+' Refresh to see saved progress before resuming.';}
-  finally{activeSearch=null;$('experiment-stop').hidden=true;await showExperiment().catch(()=>{});}
+  finally{clearInterval(timer);activeSearch=null;$('experiment-stop').hidden=true;await showExperiment().catch(()=>{});}
 }
 $('experiment-stop').onclick=()=>{if(activeSearch){activeSearch.stop=true;$('experiment-stop').disabled=true;$('experiment-status').textContent='Finishing and saving the current candidate…';}};
 $('experiment-search').onclick=async()=>{
