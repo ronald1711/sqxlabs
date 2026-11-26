@@ -35,6 +35,27 @@ vm.runInContext(code,ctx);
   assert.throws(()=>ctx.readSearchRequirements(),/geheel getal/);
   nodes['gen-req-wf-windows']=makeNode(2);
 
+  // --- 1b. A checked mandatory gate can never be dropped while assessment is off. ---
+  nodes['gen-requirements'].checked=false;
+  nodes['gen-req-wf'].checked=true;
+  assert.throws(()=>ctx.readSearchRequirements(),/Kandidaten automatisch toetsen/,'an armed gate without assessment must be rejected, not silently dropped');
+  ctx.syncSearchRequirementToggles();
+  assert.equal(nodes['gen-req-wf'].checked,false,'assessment off must not leave a gate armed');
+  assert.equal(nodes['gen-req-wf'].disabled,true,'dependent gates are disabled while assessment is off');
+  assert.equal(ctx.readSearchRequirements(),undefined,'no assessment means no requirements, never a silent gate');
+  // Arming a gate through the real request route re-enables assessment instead of losing the gate.
+  nodes['gen-req-wf'].checked=true;
+  nodes['gen-req-wf'].onchange.call(nodes['gen-req-wf']);
+  assert.equal(nodes['gen-requirements'].checked,true,'arming walk-forward must switch assessment back on');
+  assert.equal(nodes['gen-req-wf'].disabled,false,'a gate becomes editable once assessment is on');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(ctx.readSearchRequirements().walk_forward)),{windows:2,oos_fraction:0.3,min_is_trades:2,min_oos_trades_per_window:2,min_total_oos_net_profit:0});
+  nodes['gen-requirements'].checked=false;
+  nodes['gen-requirements'].onchange.call(nodes['gen-requirements']);
+  assert.equal(nodes['gen-req-wf'].checked,false,'switching assessment off clears the dependent gate');
+  nodes['gen-requirements'].checked=true;
+  nodes['gen-requirements'].onchange.call(nodes['gen-requirements']);
+  nodes['gen-req-wf'].checked=true;
+
   // --- 2. Per-window archive: IS+OOS net/trades, bounds/times, thresholds, reason; no red reject on a negative net. ---
   const element=tag=>({
     tag,children:[],textContent:'',
@@ -101,6 +122,11 @@ vm.runInContext(code,ctx);
   // A null measurement is 'onbeschikbaar', never a fabricated zero.
   assert.ok(statusTexts.includes('onbeschikbaar'),'null measured must read onbeschikbaar');
   assert.ok(!statusTexts.includes(': 0 ≥ 0'),'missing evidence must not fabricate a zero');
+  // A skipped gate that archived an empty window list renders no panel and never throws.
+  ctx.showSearchAssessments(statusBox,[{candidate_index:9,name:'Skipped gate',passed:false,errors:[],checks:[{metric:'walk_forward_total_oos_net_profit',decision:'not_run',measured:null,threshold:50,comparison:'at_least'}],walk_forward:{method:'fixed_candidate_segmented_v1',version:1,windows:[]}}],undefined);
+  const skippedText=descendants(rendered).map(node=>node.textContent).filter(Boolean).join('\n');
+  assert.ok(!skippedText.includes('Walk-forward stabiliteit'),'an empty archived window list must not render a walk-forward panel');
+  assert.ok(skippedText.includes('Niet uitgevoerd'),'a skipped gate still reports not run');
 
   // --- 4. Reopening a study re-reads the same archived details without recomputation. ---
   let reopenBox={prepend:s=>{rendered=s;}};

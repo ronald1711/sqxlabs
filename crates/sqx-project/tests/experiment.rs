@@ -668,4 +668,3 @@ fn mutating_only_the_reserved_final_test_leaves_selection_and_dev_results_intact
     assert_eq!(dev_only(&a.status(&id_a).unwrap()["events"].clone()),reports_a);
     assert_eq!(dev_only(&b.status(&id_b).unwrap()["events"].clone()),reports_b);
 }
-

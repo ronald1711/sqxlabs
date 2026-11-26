@@ -987,7 +987,8 @@ function showSearchAssessments(box, assessments, studyId){
   const barTime=t=>t==null?'—':new Date(t).toISOString();
   const walkForwardPanel=candidate=>{
     const wf=candidate.walk_forward;
-    if(!wf)return null;
+    // A legacy or skipped gate carries no window archive; never draw an empty or fabricated panel.
+    if(!wf||!Array.isArray(wf.windows)||!wf.windows.length)return null;
     const panel=document.createElement('details');
     const title=document.createElement('summary');
     title.textContent='Walk-forward stabiliteit · '+wf.method+' v'+wf.version;
@@ -1151,8 +1152,15 @@ function showSearchAssessments(box, assessments, studyId){
   }
   box.prepend(section);
 }
+const searchGateIds=['gen-req-stress','gen-req-mc','gen-req-wf'];
 function readSearchRequirements(){
-  if(!document.getElementById('gen-requirements').checked)return undefined;
+  const assess=document.getElementById('gen-requirements').checked;
+  if(!assess){
+    if(searchGateIds.some(id=>document.getElementById(id).checked)){
+      throw Error('Vink ‘Kandidaten automatisch toetsen’ aan: een verplichte toets kan niet zonder beoordeling worden gestart.');
+    }
+    return undefined;
+  }
   const number=id=>{
     const field=document.getElementById(id);
     if(!field.value.trim() || !field.checkValidity() || !Number.isFinite(field.valueAsNumber)){
@@ -1197,6 +1205,22 @@ function readSearchRequirements(){
   }
   return requirements;
 }
+// A mandatory gate cannot be armed while candidate assessment is off: keep the toggle and its
+// dependent gates consistent instead of silently dropping the checked gate from the request.
+function syncSearchRequirementToggles(){
+  const enabled=document.getElementById('gen-requirements').checked;
+  for(const id of searchGateIds){
+    const gate=document.getElementById(id);
+    gate.disabled=!enabled;
+    if(!enabled)gate.checked=false;
+  }
+}
+document.getElementById('gen-requirements').onchange=syncSearchRequirementToggles;
+for(const id of searchGateIds)document.getElementById(id).onchange=function(){
+  if(this.checked)document.getElementById('gen-requirements').checked=true;
+  syncSearchRequirementToggles();
+};
+syncSearchRequirementToggles();
 let generationRequestPending=false;
 const generationPendingKey='sqx.pendingGeneration.v1';
 document.getElementById('gen-new-request').onclick=function(){

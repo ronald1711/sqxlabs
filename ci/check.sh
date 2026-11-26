@@ -45,6 +45,8 @@ node crates/sqx-web/tests/candidate_selection.cjs
 node crates/sqx-web/tests/dataset_context.cjs
 
 node crates/sqx-web/tests/comparison_ui.cjs
+node crates/sqx-web/tests/walk_forward_ui.cjs
+node crates/sqx-web/tests/walk_forward_experiment_archive.cjs
 node crates/sqx-web/tests/evolution_recovery.cjs
 node crates/sqx-web/tests/evolution_report.cjs
 node crates/sqx-web/tests/evolution_creation.cjs
