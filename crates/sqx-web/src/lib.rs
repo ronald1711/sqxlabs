@@ -1202,6 +1202,7 @@ fn route(method: &str, full_path: &str, body: &str, state: &State) -> (&'static 
         ("GET", "/api/comparison") => ("200 OK", "application/json", comparison_read_json(&query_param(full_path,"id"),state)),
         ("POST", "/api/comparison/import") => ("200 OK", "application/json", comparison_import_json(body,state)),
         ("POST", "/api/comparison/restore") => ("200 OK", "application/json", comparison_restore_json(body,state)),
+        ("GET", "/api/pipeline/search-candidate") => ("200 OK", "application/json", pipeline_action_json("search_candidate",&json!({"run_id":query_param(full_path,"id"),"candidate":query_param(full_path,"candidate")}).to_string(),state)),
         ("GET", "/api/pipeline/search-assessments") => ("200 OK", "application/json", pipeline_action_json("search_assessments",&json!({"run_id":query_param(full_path,"id")}).to_string(),state)),
         ("GET", "/api/pipeline/status") => ("200 OK", "application/json", pipeline_action_json("status",&json!({"run_id":query_param(full_path,"id")}).to_string(),state)),
         ("GET", "/api/pipeline/backup") => ("200 OK", "application/json", pipeline_action_json("backup",&json!({"run_id":query_param(full_path,"id")}).to_string(),state)),
@@ -2459,6 +2460,11 @@ fn pipeline_action_json(action:&str,body:&str,state:&State)->String {
             "status"=>{
                 let mut status=sqx_project::pipeline_archive::summary(&state.archive,id)?;
                 status["engine_matches"]=json!(status["engine_id"]==engine_identity()?);Ok(status)
+            },
+            "search_candidate"=>{
+                let index=value["candidate"].as_str().and_then(|index|index.parse::<usize>().ok())
+                    .ok_or("Valid candidate index required")?;
+                sqx_project::pipeline_archive::search_candidate(&state.archive,id,index)
             },
             "search_assessments"=>sqx_project::pipeline_archive::search_assessments(&state.archive,id),
             "backup"=>sqx_project::pipeline_archive::export(&state.archive,id),

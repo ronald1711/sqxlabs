@@ -650,7 +650,7 @@ async function refreshResearchRuns() {
                       throw new Error('Onverwachte studiegegevens ontvangen.');
                     }
                     results.replaceChildren();
-                    showSearchAssessments(results,saved.assessments);
+                    showSearchAssessments(results,saved.assessments,run.run_id);
                     const study=document.createElement('p');
                     study.textContent=[saved.symbol,saved.timeframe,run.run_id.slice(0,12)].filter(Boolean).join(' · ');
                     results.prepend(study);
@@ -734,6 +734,61 @@ function showFrozenExperimentSettings(state){
   details.append(list);
   $('experiment-trials').append(details);
 }
+function recordedExecution(period, execution, currency){
+  const details=document.createElement('details');
+  const summary=document.createElement('summary');
+  const trades=execution.trades||[];
+  summary.textContent=period+' · '+trades.length+' opgeslagen trades en equity';
+  details.append(summary);
+  details.addEventListener('toggle',()=>{
+    if(!details.open || details.children.length>1)return;
+    const chart=document.createElement('div');
+    chart.setAttribute('role','img');
+    chart.setAttribute('aria-label','Equitycurve '+period+' in '+currency);
+    if(execution.equity?.length>=2)drawChart(execution.equity,chart);
+    else chart.textContent='Onvoldoende punten voor een equitycurve.';
+    details.append(chart);
+    if(!trades.length)return;
+    const table=document.createElement('table');
+    const header=table.createTHead().insertRow();
+    for(const title of ['Richting','Open (UTC)','Sluiting (UTC)','Openprijs','Sluitprijs','Omvang','Netto ('+currency+')','Exitreden']){
+      const cell=document.createElement('th');
+      cell.scope='col';
+      cell.textContent=title;
+      header.append(cell);
+    }
+    const body=table.createTBody();
+    const previous=document.createElement('button');
+    const next=document.createElement('button');
+    const status=document.createElement('span');
+    status.setAttribute('aria-live','polite');
+    previous.textContent='Vorige trades';
+    next.textContent='Volgende trades';
+    let offset=0;
+    const pageSize=25;
+    const render=()=>{
+      body.replaceChildren();
+      for(const trade of trades.slice(offset,offset+pageSize)){
+        const row=body.insertRow();
+        const utc=value=>new Date(value).toISOString();
+        for(const value of [trade.direction,utc(trade.open_time),utc(trade.close_time),trade.open_price,trade.close_price,trade.size,fmt(trade.pnl,2),trade.exit_reason]){
+          row.insertCell().textContent=value;
+        }
+      }
+      previous.disabled=offset===0;
+      next.disabled=offset+pageSize>=trades.length;
+      status.textContent=(offset+1)+'–'+Math.min(offset+pageSize,trades.length)+' van '+trades.length;
+    };
+    previous.onclick=()=>{offset-=pageSize;render();};
+    next.onclick=()=>{offset+=pageSize;render();};
+    render();
+    const scroll=document.createElement('div');
+    scroll.style.overflowX='auto';
+    scroll.append(table);
+    details.append(scroll,previous,status,next);
+  });
+  return details;
+}
 async function showExperiment() {
   const id=$('experiment-select').value;
   $('experiment-trials').replaceChildren();$('experiment-final').replaceChildren();$('experiment-jobs').replaceChildren();
@@ -769,7 +824,17 @@ async function showExperiment() {
       const reveal=document.createElement('button');reveal.textContent='Commit candidate & reveal final test';
       reveal.onclick=()=>experimentAction('reveal',{trial:attempt.trial});row.append(document.createTextNode(' '),reveal);
     }
-    $('experiment-trials').append(row);
+    if(finished){
+      const currency=state.plan.config.account.currency;
+      const report=finished.event.report;
+      const evidence=document.createElement('div');
+      evidence.append(recordedExecution('Ontwikkeling',report.execution,currency));
+      if(validation)evidence.append(recordedExecution('Validatie',validation.execution,currency));
+      if(final?.event.report.trial===attempt.trial){
+        evidence.append(recordedExecution('Eindtest',final.event.report.execution,currency));
+      }
+      $('experiment-trials').append(row,evidence);
+    }else $('experiment-trials').append(row);
     const assessment=finished?.event.report.assessment;
     if(assessment){
       const checks=assessment.checks.map(check=>({...check,period:'Ontwikkeling'}));

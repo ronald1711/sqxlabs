@@ -198,6 +198,26 @@ pub fn search_assessments(archive: &Archive, id: &str) -> Result<Value, String> 
     }))
 }
 
+/// Return only the fields needed to inspect one completed exploratory candidate.
+pub fn search_candidate(archive: &Archive, id: &str, index: usize) -> Result<Value, String> {
+    let _guard = lock(archive, id)?;
+    let state = load(archive, id)?;
+    if state.root.run.request["origin"] != "web_generation" {
+        return Err("This study is not an exploratory search".into());
+    }
+    let completion = state.completion.ok_or("Search is incomplete")?;
+    let builds = completion.run.result["report"]["builds"].as_array().ok_or("Missing candidate reports")?;
+    let build = builds.iter().find(|build| build["candidate_index"].as_u64() == Some(index as u64))
+        .ok_or("Candidate not found in this study")?;
+    Ok(json!({
+        "started_run_id": id,
+        "candidate_index": index,
+        "currency": state.root.run.request["config"]["account"]["currency"],
+        "strategy": build["evaluation"]["strategy"],
+        "execution": {"trades":build["execution"]["trades"], "equity":build["execution"]["equity"]},
+    }))
+}
+
 pub fn inspect(archive:&Archive,id:&str)->Result<Value,String>{
     let _guard=lock(archive,id)?;let state=load(archive,id)?;
     let mut reader=archive.record_session();

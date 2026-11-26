@@ -914,7 +914,7 @@ function buildStrategyJSON() {
 }
 
 function drawChart(equity, id) {
-  const svg = document.getElementById(id || "chart");
+  const svg = typeof id === "object" && id ? id : document.getElementById(id || "chart");
   if (!equity || equity.length < 2) { svg.innerHTML = ""; return; }
   const w = 700, h = 220, pad = 6;
   let min = Infinity, max = -Infinity;
@@ -972,7 +972,7 @@ function researchNotice(context) {
   if(!context)return "";
   return (context.data_gaps_acknowledged ? "Data gaps explicitly allowed. " : "") + context.scope;
 }
-function showSearchAssessments(box, assessments){
+function showSearchAssessments(box, assessments, studyId){
   const labels={trades:'Trades',net_profit:'Nettoresultaat',profit_factor:'Profit factor',drawdown_pct:'Drawdown (%)',spread_profit_drop:'Winstdaling bij hogere spread',monte_carlo_positive_pct:'Winstgevende Monte Carlo-simulaties (%)'};
   const statuses={passed:'Geslaagd',rejected:'Afgewezen',insufficient_evidence:'Onvoldoende bewijs',technical_error:'Technische fout',not_run:'Niet uitgevoerd',recorded:'Gemeten'};
   const passed=assessments.filter(candidate=>candidate.passed);
@@ -1062,6 +1062,30 @@ function showSearchAssessments(box, assessments){
         message.textContent=error;
         details.appendChild(message);
       }
+      if(studyId){
+        const inspect=document.createElement('button');
+        inspect.type='button';
+        inspect.textContent='Open opgeslagen regels en trades';
+        const evidence=document.createElement('div');
+        inspect.onclick=async()=>{
+          inspect.disabled=true;
+          try{
+            const saved=await getJSON('/api/pipeline/search-candidate?id='+encodeURIComponent(studyId)+'&candidate='+encodeURIComponent(candidate.candidate_index));
+            if(saved.error)throw new Error(saved.error);
+            if(saved.started_run_id!==studyId || saved.candidate_index!==candidate.candidate_index)throw new Error('Onverwachte kandidaat ontvangen.');
+            const rules=document.createElement('button');
+            rules.type='button';
+            rules.textContent='Open regels in Builder';
+            rules.onclick=()=>{
+              setStrategy(saved.strategy,'Geopende kandidaat uit opgeslagen studie');
+              document.querySelector('.nav-btn[data-tab="builder"]').click();
+            };
+            evidence.replaceChildren(rules,recordedExecution('Verkennende zoekopdracht',saved.execution,saved.currency));
+          }catch(error){evidence.textContent=error.message;}
+          finally{inspect.disabled=false;}
+        };
+        details.append(inspect,evidence);
+      }
       group.appendChild(details);
     }
     section.appendChild(group);
@@ -1138,7 +1162,7 @@ async function runGeneration() {
   box.innerHTML = next+"<p>"+escapeHtml(researchNotice(d.research_context)+saved)+"</p>"+rows;
   refreshDatabank();
   const rankedRows=box.querySelectorAll("tr");
-  if(Array.isArray(d.assessments))showSearchAssessments(box,d.assessments);
+  if(Array.isArray(d.assessments))showSearchAssessments(box,d.assessments,id);
   rankedRows.forEach(function(tr, i) {
     if (i === 0) return;
     const td = document.createElement("td");

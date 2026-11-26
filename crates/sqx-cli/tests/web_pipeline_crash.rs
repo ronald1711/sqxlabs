@@ -103,6 +103,17 @@ fn assert_interrupted_search(route:&str, origin:&str, request_key:&str){
         assert_eq!(reopened["started_run_id"], started);
         assert_eq!(reopened["completion_id"], completed["completion_id"]);
         assert_eq!(reopened["assessments"], done.run.result["search_assessments"]);
+        let candidate = &builds[0];
+        let index = candidate["candidate_index"].as_u64().unwrap();
+        let mut stream = TcpStream::connect(&addr).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+        write!(stream, "GET /api/pipeline/search-candidate?id={started}&candidate={index} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n").unwrap();
+        let reopened = response(stream);
+        assert_eq!(reopened["started_run_id"], started);
+        assert_eq!(reopened["candidate_index"], index);
+        assert_eq!(reopened["strategy"], candidate["evaluation"]["strategy"]);
+        assert_eq!(reopened["execution"]["trades"], candidate["execution"]["trades"]);
+        assert_eq!(reopened["execution"]["equity"], candidate["execution"]["equity"]);
     }
     let fresh=Archive::new(root.join("uninterrupted"));fresh.restore(&start_record).unwrap();
     let expected=Command::new(root.join("frozen-cli")).args(["replay-pipeline","--archive-dir"]).arg(fresh.root()).args(["--run-id",&started,"--resume"]).output().unwrap();assert!(expected.status.success(),"{}",String::from_utf8_lossy(&expected.stderr));
