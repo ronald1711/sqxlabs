@@ -1,7 +1,7 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const html=fs.readFileSync(require('node:path').join(__dirname,'../assets/index.html'),'utf8');
-const code=html.slice(html.indexOf('function showSearchAssessments('),html.indexOf('document.getElementById("btn-backtest").onclick'));
-assert.ok(code.length>0,'slice covers showSearchAssessments..runGeneration');
+const code=html.slice(html.indexOf('function fmtExact('),html.indexOf('document.getElementById("btn-backtest").onclick'));
+assert.ok(code.length>0,'slice covers fmtExact..runGeneration');
 
 // Faithful `fmt` used by the rendered assessment text.
 const fmt=(v,d)=>(v==null||Number.isNaN(v))?'-':(v===Infinity?'inf':Number(v).toFixed(d));
@@ -97,19 +97,42 @@ vm.runInContext(code,ctx);
   const texts=()=>all.map(node=>node.textContent).filter(Boolean);
   const has=t=>assert.ok(texts().some(x=>String(x).includes(t)),'missing rendered text: '+t);
   has('Walk-forward stabiliteit · fixed_candidate_segmented_v1 v1');
-  has('Gezamenlijke out-of-sample nettowinst: 50.00 (rekeningvaluta) · drempel ≥ 50.00');
+  has('Verkennend — gebruikt al geziene zoekdata; geen onafhankelijke eindtest.');
+  has('Gezamenlijke out-of-sample nettowinst gemeten: 50.00 (rekeningvaluta) · drempel ≥ 50.00');
   has('Gezamenlijke out-of-sample nettowinst: 50 ≥ 50 · Geslaagd');
   has('-20.00');has('70.00');
   has('IS trades ≥ 2 · OOS trades ≥ 2');
   has('[0–56)');has('[56–80)');has('[80–112)');has('[112–160)');
   has('1970-01-01T00:00:00.000Z');has('1970-01-01T00:55:00.000Z');
   has('10000.00');has('9980.00');
+  // Each window decision is a badge, not a bare word at the far right of the row.
+  const badges=all.filter(node=>node.tag==='span'&&node.className==='status-pill');
+  assert.equal(badges.filter(node=>node.textContent==='Geslaagd').length,2,'both window decisions must render as status badges');
+  assert.equal(all.filter(node=>node.tag==='td'&&node.textContent==='Geslaagd').length,0,'the decision must not stay a bare cell');
+  // The decision now sits directly next to the OOS net it judges.
+  const decisionRow=all.find(node=>node.tag==='tr'&&node.children.some(cell=>cell.children&&cell.children.some(grand=>grand.className==='status-pill')));
+  assert.ok(decisionRow,'a rendered window row must exist');
+  const decisionIndex=decisionRow.children.findIndex(cell=>cell.children&&cell.children[0]&&cell.children[0].className==='status-pill');
+  assert.equal(decisionIndex,9,'the decision badge must sit directly after OOS net and before the local thresholds');
+  assert.equal(decisionRow.children[decisionIndex-1].textContent,'-20.00','the cell left of the badge must be the OOS net it judges');
   // The −20 window must render as a plain value in a *passed* row, never as a red rejection.
   const lossCells=all.filter(node=>node.tag==='td'&&node.textContent==='-20.00');
   assert.ok(lossCells.length>=1,'negative OOS net should appear as a table cell');
   for(const cell of lossCells)assert.notEqual(cell.className,'neg','negative OOS net must not carry a red reject class');
   // Same row carries the window decision 'Geslaagd' — a valid losing window is not rejected.
   assert.ok(texts().includes('Geslaagd'),'passed status must be rendered');
+
+  // --- 2b. The joint gate keeps stored precision: 0.004 stays visible, a missing value stays unavailable. ---
+  const preciseCandidate=JSON.parse(JSON.stringify(wfCandidate));
+  preciseCandidate.walk_forward.min_total_oos_net_profit=0.004;
+  preciseCandidate.walk_forward.oos_total_net_profit=0.004;
+  let preciseBox={prepend:s=>{rendered=s;}};
+  ctx.showSearchAssessments(preciseBox,[preciseCandidate],undefined);
+  const preciseText=()=>descendants(rendered).map(node=>node.textContent).filter(Boolean).join('\n');
+  assert.ok(preciseText().includes('Gezamenlijke out-of-sample nettowinst gemeten: 0.004 (rekeningvaluta) · drempel ≥ 0.004'),'a 0.004 joint threshold must not round to 0.00:\n'+preciseText());
+  preciseCandidate.walk_forward.oos_total_net_profit=null;
+  ctx.showSearchAssessments(preciseBox,[preciseCandidate],undefined);
+  assert.ok(preciseText().includes('Gezamenlijke out-of-sample nettowinst gemeten: onbeschikbaar · drempel ≥ 0.004'),'a missing measured total must read onbeschikbaar, never 0:\n'+preciseText());
 
   // --- 3. Five statuses are all displayable. ---
   const statusCandidate=decision=>({candidate_index:1,name:'Status '+decision,passed:decision==='passed',errors:[],checks:[{metric:'walk_forward_total_oos_net_profit',decision,measured:decision==='passed'||decision==='rejected'?1:null,threshold:0,comparison:'at_least'}],walk_forward:null});

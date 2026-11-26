@@ -981,6 +981,15 @@ function researchNotice(context) {
   if(!context)return "";
   return (context.data_gaps_acknowledged ? "Data gaps explicitly allowed. " : "") + context.scope;
 }
+// A recorded gate value is evidence, so it must stay lossless: keep the usual two decimals only
+// when they are exactly the stored value, otherwise show the shortest exact representation. A
+// missing value reads 'onbeschikbaar' and never becomes 0. Render through textContent only, so no
+// archived value can inject markup.
+function fmtExact(v){
+  if(typeof v!=='number'||!Number.isFinite(v))return 'onbeschikbaar';
+  const fixed=v.toFixed(2);
+  return Number(fixed)===v?fixed:String(v);
+}
 function showSearchAssessments(box, assessments, studyId){
   const labels={trades:'Trades',net_profit:'Nettoresultaat',profit_factor:'Profit factor',drawdown_pct:'Drawdown (%)',spread_profit_drop:'Winstdaling bij hogere spread',monte_carlo_positive_pct:'Winstgevende Monte Carlo-simulaties (%)',walk_forward_total_oos_net_profit:'Gezamenlijke out-of-sample nettowinst'};
   const statuses={passed:'Geslaagd',rejected:'Afgewezen',insufficient_evidence:'Onvoldoende bewijs',technical_error:'Technische fout',not_run:'Niet uitgevoerd',recorded:'Gemeten'};
@@ -993,18 +1002,27 @@ function showSearchAssessments(box, assessments, studyId){
     const title=document.createElement('summary');
     title.textContent='Walk-forward stabiliteit · '+wf.method+' v'+wf.version;
     panel.append(title);
+    // The independence boundary is the whole point of this panel: state it as a callout, not as
+    // small running text between result blocks.
+    const caution=document.createElement('p');
+    caution.className='status-pill';
+    caution.textContent='Verkennend — gebruikt al geziene zoekdata; geen onafhankelijke eindtest.';
+    panel.append(caution);
     const scope=document.createElement('p');
     scope.textContent=wf.scope;
     panel.append(scope);
     const total=document.createElement('p');
-    const measured=wf.oos_total_net_profit==null?'onbeschikbaar':fmt(wf.oos_total_net_profit,2)+' (rekeningvaluta)';
-    total.textContent='Gezamenlijke out-of-sample nettowinst: '+measured+' · drempel ≥ '+fmt(wf.min_total_oos_net_profit,2);
+    // Both the measured total and the threshold are shown losslessly and labelled separately, so a
+    // rounded value can never look like it met (or missed) the recorded gate.
+    total.textContent='Gezamenlijke out-of-sample nettowinst gemeten: '
+      +(wf.oos_total_net_profit==null?'onbeschikbaar':fmtExact(wf.oos_total_net_profit)+' (rekeningvaluta)')
+      +' · drempel ≥ '+fmtExact(wf.min_total_oos_net_profit);
     panel.append(total);
     const scroll=document.createElement('div');
     scroll.className='table-scroll';
     const table=document.createElement('table');
     const head=table.createTHead().insertRow();
-    for(const label of ['Venster','Trainingsgrenzen','Testgrenzen','Startkapitaal','IS trades','IS netto','IS PF','OOS trades','OOS netto','Lokale drempels','Besluit','Reden']){
+    for(const label of ['Venster','Trainingsgrenzen','Testgrenzen','Startkapitaal','IS trades','IS netto','IS PF','OOS trades','OOS netto','Besluit','Lokale drempels','Reden']){
       const cell=document.createElement('th');
       cell.scope='col';
       cell.textContent=label;
@@ -1013,21 +1031,31 @@ function showSearchAssessments(box, assessments, studyId){
     const body=table.createTBody();
     for(const window of wf.windows){
       const row=body.insertRow();
+      // The decision sits directly next to the OOS value it judges, as a badge rather than a word
+      // at the far right of a dense row.
       const cells=[
-        window.index,
-        '['+window.is_start+'–'+window.is_end+') '+barTime(window.is_first_bar_time)+'–'+barTime(window.is_last_bar_time),
-        '['+window.oos_start+'–'+window.oos_end+') '+barTime(window.oos_first_bar_time)+'–'+barTime(window.oos_last_bar_time),
-        fmt(window.starting_equity,2),
-        fmt(window.is_trades,0),
-        fmt(window.is_net_profit,2),
-        fmt(window.is_profit_factor,2),
-        fmt(window.oos_trades,0),
-        fmt(window.oos_net_profit,2),
-        'IS trades ≥ '+window.thresholds.min_is_trades+' · OOS trades ≥ '+window.thresholds.min_oos_trades_per_window,
-        statuses[window.decision]||window.decision,
-        window.reason
+        [window.index],
+        ['['+window.is_start+'–'+window.is_end+') '+barTime(window.is_first_bar_time)+'–'+barTime(window.is_last_bar_time)],
+        ['['+window.oos_start+'–'+window.oos_end+') '+barTime(window.oos_first_bar_time)+'–'+barTime(window.oos_last_bar_time)],
+        [fmt(window.starting_equity,2)],
+        [fmt(window.is_trades,0)],
+        [fmt(window.is_net_profit,2)],
+        [fmt(window.is_profit_factor,2)],
+        [fmt(window.oos_trades,0)],
+        [fmt(window.oos_net_profit,2)],
+        [statuses[window.decision]||window.decision,'status-pill'],
+        ['IS trades ≥ '+window.thresholds.min_is_trades+' · OOS trades ≥ '+window.thresholds.min_oos_trades_per_window],
+        [window.reason]
       ];
-      for(const value of cells)row.insertCell().textContent=value;
+      for(const [value,className] of cells){
+        const cell=row.insertCell();
+        if(className){
+          const badge=document.createElement('span');
+          badge.className=className;
+          badge.textContent=value;
+          cell.append(badge);
+        }else cell.textContent=value;
+      }
     }
     scroll.append(table);
     panel.append(scroll);

@@ -3,14 +3,16 @@ const html=fs.readFileSync(path.join(__dirname,'../assets/index.html'),'utf8');
 const workspace=fs.readFileSync(path.join(__dirname,'../assets/workspace.js'),'utf8');
 
 // The renderer under test is the real showExperiment route plus the shared assessment panel.
+const exactCode=html.slice(html.indexOf('function fmtExact('),html.indexOf('function showSearchAssessments('));
 const assessmentsCode=html.slice(html.indexOf('function showSearchAssessments('),html.indexOf('function readSearchRequirements('));
 const experimentCode=workspace.slice(workspace.indexOf('function exposureLabel('),workspace.indexOf('async function refreshExperiments('));
+assert.ok(exactCode.includes('function fmtExact('),'index.html slice must cover the lossless number formatter');
 assert.ok(assessmentsCode.length>0,'index.html slice must cover showSearchAssessments');
 assert.ok(experimentCode.includes('async function showExperiment()'),'workspace.js slice must cover showExperiment');
 assert.ok(experimentCode.includes('function showFrozenExperimentSettings('),'workspace.js slice must cover the frozen settings panel');
 
 function makeElement(tag){
-  return {
+  const el={
     tag,children:[],textContent:'',className:'',hidden:false,disabled:false,value:'',style:{},
     setAttribute(){},addEventListener(){},
     append(...children){this.children.push(...children);},
@@ -24,6 +26,9 @@ function makeElement(tag){
     insertCell(){return this.appendChild(makeElement('td'));},
     querySelectorAll(){return [];}
   };
+  // Archived values must be rendered as text; any innerHTML write is an injection risk.
+  Object.defineProperty(el,'innerHTML',{get(){return '';},set(){throw Error('recorded values must be rendered with textContent, never innerHTML');}});
+  return el;
 }
 const nodes={};
 for(const id of ['experiment-trials','experiment-final','experiment-jobs','experiment-context','experiment-select','experiment-trial','experiment-search','experiment-status'])nodes[id]=makeElement('div');
@@ -40,6 +45,7 @@ const ctx=vm.createContext({
   window:{confirm:()=>true}
 });
 ctx.currentState=null;
+vm.runInContext(exactCode,ctx);
 vm.runInContext(assessmentsCode,ctx);
 vm.runInContext(experimentCode,ctx);
 
@@ -122,7 +128,7 @@ function status({requirements={min_trades:1,min_net_profit:-1000000,min_profit_f
   };
 }
 
-const frozenSettings='Walk-forward: 2 vensters · out-of-sample aandeel 0.30 · minimaal 1 trainingstrades en 1 testtrades per venster · gezamenlijke out-of-sample nettowinst ≥ -100000.00 USD';
+const frozenSettings='Walk-forward: 2 vensters · out-of-sample aandeel 0.30 · minimaal 1 trainingstrades en 1 testtrades per venster · gezamenlijke out-of-sample nettowinstdrempel ≥ -100000.00 USD';
 const snapshot=()=>textOf(nodes['experiment-trials'])+'\n'+textOf(nodes['experiment-final']);
 
 (async()=>{
@@ -143,10 +149,14 @@ const snapshot=()=>textOf(nodes['experiment-trials'])+'\n'+textOf(nodes['experim
   assert.equal(panels().length,2,'exactly the two archived trials must carry a window panel');
   assert.ok(panels()[0].children[0].textContent==='Walk-forward stabiliteit · fixed_candidate_segmented_v1 v1','panel keeps the archived method and version');
   const trialOne=textOf(panels()[0]),trialThree=textOf(panels()[1]);
-  assert.ok(trialOne.includes('Gezamenlijke out-of-sample nettowinst: -923.22 (rekeningvaluta) · drempel ≥ -100000.00'),'negative archived total must be shown as saved');
-  assert.ok(trialThree.includes('Gezamenlijke out-of-sample nettowinst: 417.77 (rekeningvaluta) · drempel ≥ -100000.00'),'archived total and joint threshold must be shown');
+  assert.ok(trialOne.includes('Gezamenlijke out-of-sample nettowinst gemeten: -923.2214874270194 (rekeningvaluta) · drempel ≥ -100000.00'),'the archived measured total and threshold must be shown losslessly and labelled apart:\n'+trialOne);
+  assert.ok(trialThree.includes('Gezamenlijke out-of-sample nettowinst gemeten: 417.7691368017355 (rekeningvaluta) · drempel ≥ -100000.00'),'archived total and joint threshold must be shown');
+  assert.ok(trialThree.includes('Verkennend — gebruikt al geziene zoekdata; geen onafhankelijke eindtest.'),'the independence callout must be visible in the panel');
   for(const range of ['[0–336)','[336–480)','[480–816)','[816–960)'])assert.ok(trialThree.includes(range),'archived window bounds missing: '+range);
   assert.ok(trialThree.includes('IS trades ≥ 1 · OOS trades ≥ 1'),'local IS/OOS minimum trades must be shown');
+  // The per-window decision is a badge directly next to the OOS value it judges.
+  const decisionBadges=descendants(panels()[0]).filter(node=>node.tag==='span'&&node.className==='status-pill');
+  assert.deepStrictEqual(decisionBadges.map(badge=>badge.textContent),['Geslaagd','Geslaagd'],'each window decision must render as a status badge');
 
   // --- 2. No panel for a legacy, unrequested or skipped gate. ---
   assert.ok(!textOf(candidateCard('experiment-42-0 (#0)')).includes('Walk-forward stabiliteit'),'a trial without an archived gate must not show a walk-forward panel');
@@ -167,7 +177,41 @@ const snapshot=()=>textOf(nodes['experiment-trials'])+'\n'+textOf(nodes['experim
   assert.equal(snapshot(),first,'reopening must render the same frozen settings and windows');
   assert.equal(JSON.stringify(ctx.currentState),archiveBefore,'rendering must not modify the archived status');
 
-  // --- 5. A legacy study without a walk-forward gate stays readable and panel-free. ---
+  // --- 5. Recorded precision is never lost: a 0.004 joint threshold and an API fraction with more
+  // than two decimals stay visible instead of rounding to 0.00 / 0.06. ---
+  const precise=walkForward(1);
+  precise.oos_total_net_profit=0.004;
+  precise.min_total_oos_net_profit=0.004;
+  ctx.currentState=status({
+    requirements:{min_trades:1,min_net_profit:-1000000,min_profit_factor:0,max_drawdown_pct:100,
+      walk_forward:{windows:2,oos_fraction:0.05555555555555555,min_is_trades:1,min_oos_trades_per_window:1,min_total_oos_net_profit:0.004}},
+    trials:[{trial:1,archive:precise}]});
+  await ctx.showExperiment();
+  const exactText=textOf(nodes['experiment-trials']);
+  const exactSettings=exactText.split('\n').find(line=>line.startsWith('Walk-forward:'));
+  assert.ok(exactSettings,'the frozen walk-forward settings line must exist:\n'+exactText);
+  assert.ok(exactSettings.includes('out-of-sample aandeel 0.05555555555555555'),'an API fraction with more than two decimals must be exact: '+exactSettings);
+  assert.ok(exactSettings.includes('gezamenlijke out-of-sample nettowinstdrempel ≥ 0.004 USD'),'a 0.004 threshold must stay visible: '+exactSettings);
+  assert.ok(!exactSettings.includes('aandeel 0.00')&&!exactSettings.includes('drempel ≥ 0.00 '),'no lossy two-decimal rounding in the frozen settings: '+exactSettings);
+  assert.ok(exactText.includes('Gezamenlijke out-of-sample nettowinst gemeten: 0.004 (rekeningvaluta) · drempel ≥ 0.004'),'the panel must show the same exact measured value and threshold');
+
+  // --- 6. A recorded null stays unavailable and is never rendered as zero. ---
+  const missing=walkForward(1);
+  missing.oos_total_net_profit=null;
+  missing.min_total_oos_net_profit=null;
+  ctx.currentState=status({
+    requirements:{min_trades:1,min_net_profit:-1000000,min_profit_factor:0,max_drawdown_pct:100,
+      walk_forward:{windows:2,oos_fraction:null,min_is_trades:1,min_oos_trades_per_window:1,min_total_oos_net_profit:null}},
+    trials:[{trial:1,archive:missing}]});
+  await ctx.showExperiment();
+  const missingText=textOf(nodes['experiment-trials']);
+  const missingSettings=missingText.split('\n').find(line=>line.startsWith('Walk-forward:'));
+  assert.ok(missingSettings.includes('out-of-sample aandeel onbeschikbaar'),'a missing OOS fraction must never read 0.00: '+missingSettings);
+  assert.ok(missingSettings.includes('nettowinstdrempel ≥ onbeschikbaar'),'a missing threshold must never read 0.00: '+missingSettings);
+  assert.ok(!missingSettings.includes('0.00'),'a missing recorded value must not become zero: '+missingSettings);
+  assert.ok(missingText.includes('Gezamenlijke out-of-sample nettowinst gemeten: onbeschikbaar · drempel ≥ onbeschikbaar'),'the panel must report both missing values as unavailable');
+
+  // --- 7. A legacy study without a walk-forward gate stays readable and panel-free. ---
   ctx.currentState=status({requirements:{min_trades:20,min_net_profit:0,min_profit_factor:1,max_drawdown_pct:10},trials:[{trial:0,archive:undefined},{trial:1,archive:undefined}]});
   await ctx.showExperiment();
   const legacy=textOf(nodes['experiment-trials']);

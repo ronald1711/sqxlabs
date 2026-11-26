@@ -729,7 +729,7 @@ function showFrozenExperimentSettings(state){
     add('Basiseisen: minimaal '+req.min_trades+' trades, netto '+req.min_net_profit+' '+config.account.currency+' en profit factor '+req.min_profit_factor+' · maximaal '+req.max_drawdown_pct+'% drawdown');
     if(req.spread_stress)add('Spreadtest: '+req.spread_stress.extra_spread+' extra · nettoresultaat daalt maximaal '+req.spread_stress.max_profit_drop+' '+config.account.currency);
     if(req.monte_carlo)add('Monte Carlo: '+req.monte_carlo.runs+' simulaties · '+fmt(req.monte_carlo.skip_probability*100,2)+'% kans op weglaten van elke trade · minimaal '+req.monte_carlo.min_positive_pct+'% winstgevende simulaties');
-    if(req.walk_forward)add('Walk-forward: '+req.walk_forward.windows+' vensters · out-of-sample aandeel '+fmt(req.walk_forward.oos_fraction,2)+' · minimaal '+req.walk_forward.min_is_trades+' trainingstrades en '+req.walk_forward.min_oos_trades_per_window+' testtrades per venster · gezamenlijke out-of-sample nettowinst ≥ '+fmt(req.walk_forward.min_total_oos_net_profit,2)+' '+config.account.currency);
+    if(req.walk_forward)add('Walk-forward: '+req.walk_forward.windows+' vensters · out-of-sample aandeel '+fmtExact(req.walk_forward.oos_fraction)+' · minimaal '+req.walk_forward.min_is_trades+' trainingstrades en '+req.walk_forward.min_oos_trades_per_window+' testtrades per venster · gezamenlijke out-of-sample nettowinstdrempel ≥ '+fmtExact(req.walk_forward.min_total_oos_net_profit)+' '+config.account.currency);
   }
   add('Dataset: '+plan.dataset_id+' · Engine: '+plan.engine_id);
   details.append(list);
