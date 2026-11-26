@@ -350,6 +350,15 @@
             <label>Kans dat een trade wegvalt (%) <input id="gen-req-mc-skip" type="number" min="0" max="100" step="any" value="10"></label>
             <label>Minimaal winstgevende simulaties (%) <input id="gen-req-mc-positive" type="number" min="0.01" max="100" step="any" value="80"></label>
           </div>
+          <div class="row">
+            <label><input type="checkbox" id="gen-req-wf"> Walk-forward verplicht toetsen</label>
+            <label>Vensters <input id="gen-req-wf-windows" type="number" min="2" max="10" step="1" value="2"></label>
+            <label>Out-of-sample aandeel (0.05–0.5) <input id="gen-req-wf-oos" type="number" min="0.05" max="0.5" step="0.05" value="0.3"></label>
+            <label>Minimaal trainingstrades <input id="gen-req-wf-min-is" type="number" min="1" step="1" value="2"></label>
+            <label>Minimaal testtrades per venster <input id="gen-req-wf-min-oos" type="number" min="1" step="1" value="2"></label>
+            <label>Gezamenlijke out-of-sample nettowinst (rekeningvaluta) <input id="gen-req-wf-profit" type="number" step="any" value="0"></label>
+          </div>
+          <p class="muted">Walk-forward verdeelt de toegestane zoekdata in opeenvolgende trainings-/testvensters en toetst één bevroren kandidaat in elk venster. Alleen de gezamenlijke out-of-sample nettowinst wordt aan de drempel getoetst; een verliesvenster mag worden gecompenseerd. Dit is een stabiliteitscontrole over reeds geziene zoekdata, geen onafhankelijke eindtest.</p>
         </fieldset>
         <div id="gen-results" class="muted">No search results yet. Choose your data and costs, review the search settings, then select Find candidates.</div>
       </div>
@@ -973,8 +982,56 @@ function researchNotice(context) {
   return (context.data_gaps_acknowledged ? "Data gaps explicitly allowed. " : "") + context.scope;
 }
 function showSearchAssessments(box, assessments, studyId){
-  const labels={trades:'Trades',net_profit:'Nettoresultaat',profit_factor:'Profit factor',drawdown_pct:'Drawdown (%)',spread_profit_drop:'Winstdaling bij hogere spread',monte_carlo_positive_pct:'Winstgevende Monte Carlo-simulaties (%)'};
+  const labels={trades:'Trades',net_profit:'Nettoresultaat',profit_factor:'Profit factor',drawdown_pct:'Drawdown (%)',spread_profit_drop:'Winstdaling bij hogere spread',monte_carlo_positive_pct:'Winstgevende Monte Carlo-simulaties (%)',walk_forward_total_oos_net_profit:'Gezamenlijke out-of-sample nettowinst'};
   const statuses={passed:'Geslaagd',rejected:'Afgewezen',insufficient_evidence:'Onvoldoende bewijs',technical_error:'Technische fout',not_run:'Niet uitgevoerd',recorded:'Gemeten'};
+  const barTime=t=>t==null?'—':new Date(t).toISOString();
+  const walkForwardPanel=candidate=>{
+    const wf=candidate.walk_forward;
+    if(!wf)return null;
+    const panel=document.createElement('details');
+    const title=document.createElement('summary');
+    title.textContent='Walk-forward stabiliteit · '+wf.method+' v'+wf.version;
+    panel.append(title);
+    const scope=document.createElement('p');
+    scope.textContent=wf.scope;
+    panel.append(scope);
+    const total=document.createElement('p');
+    const measured=wf.oos_total_net_profit==null?'onbeschikbaar':fmt(wf.oos_total_net_profit,2)+' (rekeningvaluta)';
+    total.textContent='Gezamenlijke out-of-sample nettowinst: '+measured+' · drempel ≥ '+fmt(wf.min_total_oos_net_profit,2);
+    panel.append(total);
+    const scroll=document.createElement('div');
+    scroll.className='table-scroll';
+    const table=document.createElement('table');
+    const head=table.createTHead().insertRow();
+    for(const label of ['Venster','Trainingsgrenzen','Testgrenzen','Startkapitaal','IS trades','IS netto','IS PF','OOS trades','OOS netto','Lokale drempels','Besluit','Reden']){
+      const cell=document.createElement('th');
+      cell.scope='col';
+      cell.textContent=label;
+      head.append(cell);
+    }
+    const body=table.createTBody();
+    for(const window of wf.windows){
+      const row=body.insertRow();
+      const cells=[
+        window.index,
+        '['+window.is_start+'–'+window.is_end+') '+barTime(window.is_first_bar_time)+'–'+barTime(window.is_last_bar_time),
+        '['+window.oos_start+'–'+window.oos_end+') '+barTime(window.oos_first_bar_time)+'–'+barTime(window.oos_last_bar_time),
+        fmt(window.starting_equity,2),
+        fmt(window.is_trades,0),
+        fmt(window.is_net_profit,2),
+        fmt(window.is_profit_factor,2),
+        fmt(window.oos_trades,0),
+        fmt(window.oos_net_profit,2),
+        'IS trades ≥ '+window.thresholds.min_is_trades+' · OOS trades ≥ '+window.thresholds.min_oos_trades_per_window,
+        statuses[window.decision]||window.decision,
+        window.reason
+      ];
+      for(const value of cells)row.insertCell().textContent=value;
+    }
+    scroll.append(table);
+    panel.append(scroll);
+    return panel;
+  };
   const passed=assessments.filter(candidate=>candidate.passed);
   const rejected=assessments.filter(candidate=>candidate.checks.some(check=>check.decision==='rejected'));
   const incomplete=assessments.filter(candidate=>!candidate.passed && !rejected.includes(candidate));
@@ -1057,6 +1114,8 @@ function showSearchAssessments(box, assessments, studyId){
         checks.appendChild(item);
       }
       details.appendChild(checks);
+      const wfPanel=walkForwardPanel(candidate);
+      if(wfPanel)details.appendChild(wfPanel);
       for(const error of candidate.errors){
         const message=document.createElement('p');
         message.textContent=error;
@@ -1101,6 +1160,13 @@ function readSearchRequirements(){
     }
     return field.valueAsNumber;
   };
+  const integer=id=>{
+    const field=document.getElementById(id);
+    if(!field.value.trim() || !field.checkValidity() || !Number.isSafeInteger(field.valueAsNumber)){
+      throw Error('Vul een geheel getal in voor de walk-forwardinstelling voordat je zoekt.');
+    }
+    return field.valueAsNumber;
+  };
   const requirements={
     min_trades:number('gen-req-trades'),
     min_net_profit:number('gen-req-profit'),
@@ -1118,6 +1184,15 @@ function readSearchRequirements(){
       runs:number('gen-req-mc-runs'),
       skip_probability:number('gen-req-mc-skip')/100,
       min_positive_pct:number('gen-req-mc-positive')
+    };
+  }
+  if(document.getElementById('gen-req-wf').checked){
+    requirements.walk_forward={
+      windows:integer('gen-req-wf-windows'),
+      oos_fraction:number('gen-req-wf-oos'),
+      min_is_trades:integer('gen-req-wf-min-is'),
+      min_oos_trades_per_window:integer('gen-req-wf-min-oos'),
+      min_total_oos_net_profit:number('gen-req-wf-profit')
     };
   }
   return requirements;

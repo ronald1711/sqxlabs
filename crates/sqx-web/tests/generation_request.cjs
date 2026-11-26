@@ -6,6 +6,7 @@ nodes['gen-results'].querySelectorAll=()=>[];
 nodes['gen-requirements']={checked:true};
 nodes['gen-req-stress']={checked:false};
 nodes['gen-req-mc']={checked:false};
+nodes['gen-req-wf']={checked:false};
 for(const [id,value] of Object.entries({trades:20,profit:0,pf:1,dd:10})){
  nodes['gen-req-'+id]={value:String(value),valueAsNumber:value,checkValidity:()=>true};
 }
