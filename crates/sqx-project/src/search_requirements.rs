@@ -505,26 +505,46 @@ mod tests {
     #[test]
     fn joint_threshold_allows_only_float_rounding_at_the_boundary() {
         // Summing per-window nets can land a few ulps off an exact boundary;
-        // that must still count as reaching the threshold.
-        assert!(meets_threshold(50.0, 50.0));
-        assert!(meets_threshold(50.0 - 4.0 * f64::EPSILON * 50.0, 50.0));
-        assert!(meets_threshold(50.0 + f64::EPSILON * 50.0, 50.0));
+        // that must still count as reaching the threshold. The magnitude is the
+        // summed absolute window nets (the oracle's -20 and +70 sum to 90).
+        assert!(meets_threshold(50.0, 50.0, 90.0));
+        assert!(meets_threshold(50.0 - 4.0 * f64::EPSILON * 50.0, 50.0, 90.0));
+        assert!(meets_threshold(50.0 + f64::EPSILON * 50.0, 50.0, 90.0));
         // The real per-window oracle sum lands ~1e-12 below its nominal 50.00;
         // that summation noise must still count as reaching the threshold.
-        assert!(meets_threshold(49.999999999998934, 50.0));
+        assert!(meets_threshold(49.999999999998934, 50.0, 90.0));
         // A real shortfall, however small, is rejected.
-        assert!(!meets_threshold(49.9, 50.0));
-        assert!(!meets_threshold(50.0 - 1e-6, 50.0));
-        assert!(!meets_threshold(50.0, 50.01));
-        assert!(!meets_threshold(f64::NAN, 0.0));
-        assert!(!meets_threshold(f64::INFINITY, 0.0));
+        assert!(!meets_threshold(49.9, 50.0, 90.0));
+        assert!(!meets_threshold(50.0 - 1e-6, 50.0, 90.0));
+        assert!(!meets_threshold(50.0, 50.01, 90.0));
+        assert!(!meets_threshold(f64::NAN, 0.0, 90.0));
+        assert!(!meets_threshold(f64::INFINITY, 0.0, 90.0));
         // Large magnitudes: the tolerance is a fixed multiple of the float ulp,
         // so a half-currency shortfall at a billion-currency threshold rejects
         // (the former 1e-9 relative margin would have let it pass).
-        assert!(meets_threshold(1_000_000_000.0, 1_000_000_000.0));
-        assert!(meets_threshold(1_000_000_000.0 - 1e-6, 1_000_000_000.0));
-        assert!(!meets_threshold(1_000_000_000.0 - 0.5, 1_000_000_000.0));
-        assert!(!meets_threshold(999_999_999.5, 1_000_000_000.0));
+        assert!(meets_threshold(1_000_000_000.0, 1_000_000_000.0, 2_000_000_000.0));
+        assert!(meets_threshold(1_000_000_000.0 - 1e-6, 1_000_000_000.0, 2_000_000_000.0));
+        assert!(!meets_threshold(1_000_000_000.0 - 0.5, 1_000_000_000.0, 2_000_000_000.0));
+        assert!(!meets_threshold(999_999_999.5, 1_000_000_000.0, 2_000_000_000.0));
+    }
+
+    #[test]
+    fn break_even_at_zero_threshold_passes_despite_rounding_noise() {
+        // Two windows of +70 and -70 cancel to a break-even joint total. The
+        // summation noise is a few ulps of the window magnitude (70), not of the
+        // near-zero outcome, so a threshold of 0.0 must still pass when the sum
+        // lands a few ulps below zero — while a real one-currency loss rejects.
+        let magnitude = 70.0 + 70.0;
+        let noise = -4.0 * f64::EPSILON * 70.0;
+        assert!(
+            meets_threshold(noise, 0.0, magnitude),
+            "break-even rounding noise {noise} must pass at a 0.0 threshold"
+        );
+        assert!(meets_threshold(0.0, 0.0, magnitude));
+        // A genuine loss is far above any summation noise and still rejects.
+        assert!(!meets_threshold(-1.0, 0.0, magnitude));
+        // A magnitude of zero (all windows exactly zero) still passes at zero.
+        assert!(meets_threshold(0.0, 0.0, 0.0));
     }
 
     #[test]
@@ -790,14 +810,20 @@ fn aggregate_decision(
 /// float precision, so at a billion-currency threshold it stays around a tenth
 /// of a cent and cannot mask a meaningful shortfall — a 0.5-currency gap there
 /// is millions of ulps wide and still rejects.
-fn meets_threshold(measured: f64, threshold: f64) -> bool {
-    if !measured.is_finite() || !threshold.is_finite() {
+///
+/// `magnitude` must be the sum of the absolute per-window nets actually summed.
+/// Scaling the allowance by that magnitude (rather than the outcome itself)
+/// keeps the tolerance from collapsing toward zero when positive and negative
+/// windows cancel to a break-even total at a threshold of 0.0: the summation
+/// noise is a few ulps of the *window* values, not of the near-zero total.
+fn meets_threshold(measured: f64, threshold: f64, magnitude: f64) -> bool {
+    if !measured.is_finite() || !threshold.is_finite() || !magnitude.is_finite() {
         return false;
     }
     if measured >= threshold {
         return true;
     }
-    let scale = measured.abs().max(threshold.abs());
+    let scale = magnitude.max(measured.abs()).max(threshold.abs());
     // 4096 · ulp covers the observed summation noise of at most ten rounded
     // per-window values with a large margin, while staying far below a cent
     // for any realistic account balance.
@@ -1054,6 +1080,10 @@ fn run_walk_forward(
     );
     let mut assessment_errors = report_errors.clone();
     let joint_total = all_oos_nets.iter().sum::<f64>();
+    // Magnitude of the values actually summed: a break-even total at a 0.0
+    // threshold carries summation noise proportional to the per-window nets,
+    // not to the (near-zero) outcome, so the tolerance must use this scale.
+    let oos_abs_sum: f64 = all_oos_nets.iter().map(|net| net.abs()).sum::<f64>();
     if all_valid && decision == Decision::Passed {
         // Cross-check the summed per-window nets against the carried capital:
         // last out-of-sample equity minus the first deposit. No return sum.
@@ -1067,7 +1097,7 @@ fn run_walk_forward(
             decision = Decision::TechnicalError;
             assessment_errors
                 .push("walk-forward net profit does not reconcile with carried capital".into());
-        } else if !meets_threshold(joint_total, spec.min_total_oos_net_profit) {
+        } else if !meets_threshold(joint_total, spec.min_total_oos_net_profit, oos_abs_sum) {
             decision = Decision::Rejected;
         }
     }

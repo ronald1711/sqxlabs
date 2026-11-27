@@ -1181,6 +1181,14 @@ function showSearchAssessments(box, assessments, studyId){
   box.prepend(section);
 }
 const searchGateIds=['gen-req-stress','gen-req-mc','gen-req-wf'];
+// Dependent input fields per gate, disabled whenever their gate (or candidate
+// assessment as a whole) is off so they never look live while the request
+// ignores them.
+const searchGateFields={
+  'gen-req-stress':['gen-req-spread','gen-req-drop'],
+  'gen-req-mc':['gen-req-mc-runs','gen-req-mc-skip','gen-req-mc-positive'],
+  'gen-req-wf':['gen-req-wf-windows','gen-req-wf-oos','gen-req-wf-min-is','gen-req-wf-min-oos','gen-req-wf-profit']
+};
 function readSearchRequirements(){
   const assess=document.getElementById('gen-requirements').checked;
   if(!assess){
@@ -1241,6 +1249,10 @@ function syncSearchRequirementToggles(){
     const gate=document.getElementById(id);
     gate.disabled=!enabled;
     if(!enabled)gate.checked=false;
+    const gateEnabled=enabled && gate.checked;
+    for(const fieldId of searchGateFields[id]){
+      document.getElementById(fieldId).disabled=!gateEnabled;
+    }
   }
 }
 document.getElementById('gen-requirements').onchange=syncSearchRequirementToggles;

@@ -10,6 +10,11 @@ nodes['gen-req-wf']={checked:false};
 for(const [id,value] of Object.entries({trades:20,profit:0,pf:1,dd:10})){
  nodes['gen-req-'+id]={value:String(value),valueAsNumber:value,checkValidity:()=>true};
 }
+// Dependent gate fields must exist so syncSearchRequirementToggles can disable
+// them; they are never read here because the gates stay unchecked.
+for(const id of ['gen-req-spread','gen-req-drop','gen-req-mc-runs','gen-req-mc-skip','gen-req-mc-positive','gen-req-wf-windows','gen-req-wf-oos','gen-req-wf-min-is','gen-req-wf-min-oos','gen-req-wf-profit']){
+ nodes[id]={value:'',valueAsNumber:0,checkValidity:()=>true};
+}
 const stored=new Map();let calls=[],symbol='EURUSD',reply,refreshes=0,reviews=0,reviewAccepted=true;
 const context={window:{reviewGenerationData:async()=>{reviews++;return reviewAccepted?{dataset_id:'frozen-dataset',as_of_ms:180000,data_quality:{unclassified_intervals:1},exploratory_consent:true}:null;}},document:{getElementById:id=>nodes[id]},localStorage:{getItem:k=>stored.get(k)||null,setItem:(k,v)=>stored.set(k,v),removeItem:k=>stored.delete(k)},crypto:{randomUUID:()=>`request-${calls.length}`},selectedSymbol:()=>symbol,generatorInputs:()=>({deposit:10000,seed:123}),refreshResearchRuns:()=>{},refreshDatabank:()=>{refreshes++;},researchNotice:()=>'Exploratory',postJSON:async(url,body)=>{calls.push({url,body});return reply();},escapeHtml:s=>String(s).replaceAll('<','&lt;'),cls:()=>'pos',fmt:v=>String(v),drawChart:()=>{}};
 vm.createContext(context);vm.runInContext(code,context);

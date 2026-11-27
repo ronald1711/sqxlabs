@@ -10,7 +10,8 @@ function makeNode(value){return {value:String(value),valueAsNumber:Number(value)
 const nodes={
   'gen-requirements':{checked:true},
   'gen-req-trades':makeNode(20),'gen-req-profit':makeNode(0),'gen-req-pf':makeNode(1),'gen-req-dd':makeNode(10),
-  'gen-req-stress':{checked:false},'gen-req-mc':{checked:false},
+  'gen-req-stress':{checked:false},'gen-req-spread':makeNode(1),'gen-req-drop':makeNode(50),
+  'gen-req-mc':{checked:false},'gen-req-mc-runs':makeNode(100),'gen-req-mc-skip':makeNode(10),'gen-req-mc-positive':makeNode(80),
   'gen-req-wf':{checked:true},
   'gen-req-wf-windows':makeNode(2),'gen-req-wf-oos':makeNode(0.3),'gen-req-wf-min-is':makeNode(2),'gen-req-wf-min-oos':makeNode(2),'gen-req-wf-profit':makeNode(0),
   'gen-new-request':{textContent:'',hidden:false,onclick:null},'btn-generate':{disabled:false,onclick:null},'gen-results':{textContent:'',innerHTML:'',querySelectorAll:()=>[]},
@@ -55,6 +56,41 @@ vm.runInContext(code,ctx);
   nodes['gen-requirements'].checked=true;
   nodes['gen-requirements'].onchange.call(nodes['gen-requirements']);
   nodes['gen-req-wf'].checked=true;
+
+  // --- 1c. Dependent input fields follow their parent gate: disabled when the
+  // gate (or assessment) is off, editable only while both are on. ---
+  nodes['gen-req-wf'].checked=false;
+  ctx.syncSearchRequirementToggles();
+  for(const id of ['gen-req-wf-windows','gen-req-wf-oos','gen-req-wf-min-is','gen-req-wf-min-oos','gen-req-wf-profit']){
+    assert.equal(nodes[id].disabled,true,'walk-forward field '+id+' must be disabled while its gate is off');
+  }
+  nodes['gen-req-wf'].checked=true;
+  ctx.syncSearchRequirementToggles();
+  for(const id of ['gen-req-wf-windows','gen-req-wf-oos','gen-req-wf-min-is','gen-req-wf-min-oos','gen-req-wf-profit']){
+    assert.equal(nodes[id].disabled,false,'walk-forward field '+id+' must be editable while its gate is on');
+  }
+  // The same rule holds for the stress and Monte Carlo field groups.
+  nodes['gen-req-stress'].checked=true;
+  ctx.syncSearchRequirementToggles();
+  assert.equal(nodes['gen-req-spread'].disabled,false,'stress fields must be editable when the stress gate is on');
+  assert.equal(nodes['gen-req-drop'].disabled,false);
+  nodes['gen-req-stress'].checked=false;
+  nodes['gen-req-mc'].checked=true;
+  ctx.syncSearchRequirementToggles();
+  assert.equal(nodes['gen-req-spread'].disabled,true,'stress fields must be disabled when the stress gate is off');
+  for(const id of ['gen-req-mc-runs','gen-req-mc-skip','gen-req-mc-positive']){
+    assert.equal(nodes[id].disabled,false,'Monte Carlo field '+id+' must be editable when the mc gate is on');
+  }
+  // Turning assessment off disables every dependent field, whatever its gate.
+  nodes['gen-requirements'].checked=false;
+  ctx.syncSearchRequirementToggles();
+  for(const id of ['gen-req-spread','gen-req-drop','gen-req-mc-runs','gen-req-mc-skip','gen-req-mc-positive','gen-req-wf-windows','gen-req-wf-oos','gen-req-wf-min-is','gen-req-wf-min-oos','gen-req-wf-profit']){
+    assert.equal(nodes[id].disabled,true,'dependent field '+id+' must be disabled while assessment is off');
+  }
+  // Restore a clean all-gates-off state for the later rendering sections.
+  nodes['gen-requirements'].checked=true;
+  nodes['gen-req-mc'].checked=false;
+  ctx.syncSearchRequirementToggles();
 
   // --- 2. Per-window archive: IS+OOS net/trades, bounds/times, thresholds, reason; no red reject on a negative net. ---
   const element=tag=>({
