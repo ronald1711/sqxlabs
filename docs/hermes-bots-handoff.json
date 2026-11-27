@@ -1,0 +1,31 @@
+{
+  "format": "hermes-bots-handoff",
+  "version": 1,
+  "source": "Local Hermes profiles",
+  "import_mode": "reference manifest; map fields to the target harness",
+  "bots": [
+    {"id": "default", "role_nl": "Algemene hoofdassistent", "model": "gpt-6.2-sol", "provider": "openai-codex", "reasoning_effort": "medium", "active_profile": true, "skill_files": 47},
+    {"id": "architect", "role_nl": "Softwarearchitectuur en ontwerpkeuzes", "model": "gpt-6.2-astra", "provider": "openai-codex", "reasoning_effort": "medium", "skill_files": 44},
+    {"id": "dev", "role_nl": "Projectleiding en integratie", "model": "gpt-6.2-sol", "provider": "openai-codex", "reasoning_effort": "medium", "skill_files": 44, "configured_mcp_servers": ["context7", "figma"]},
+    {"id": "ds-flash", "role_nl": "Kleine wijzigingen en tests", "model": "deepseek-flash", "provider": "deepseek", "reasoning_effort": "medium", "skill_files": 44},
+    {"id": "ds-pro", "role_nl": "Feature-implementatie en debugging", "model": "deepseek-v4-pro", "provider": "deepseek", "reasoning_effort": "high", "skill_files": 44},
+    {"id": "qa", "role_nl": "Code-review", "model": "gpt-6.1-terra", "provider": "openai-codex", "reasoning_effort": "medium", "skill_files": 44},
+    {"id": "ui-review", "role_nl": "Review van app-interfaces", "model": "gpt-5.6-sol", "provider": "openai-codex", "reasoning_effort": "medium", "skill_files": 44}
+  ],
+  "source_setup": {
+    "persona_file_per_profile": "SOUL.md",
+    "common_skill_files": 44,
+    "default_extra_skill_ids": ["ai-hedge-fund", "antigravity-cli", "create-account"],
+    "default_terminal_backend": "local",
+    "default_memory_enabled": true,
+    "default_user_profile_enabled": true,
+    "default_local_plugin_ids": ["advanced-delegation", "camofox", "claude-subscription-directsdk-experimental", "hermes-security", "live-retitle", "live-status", "session-model-icons"]
+  },
+  "migration_nl": [
+    "Zet role_nl om naar een startprompt of beoordeel het bronbestand SOUL.md en neem de gewenste rolinstructies over.",
+    "Koppel provider en model aan de opties in het doelharnas; de model-ID's zijn letterlijk overgenomen en kunnen providerspecifiek zijn.",
+    "Configureer tools, MCP en autorisatie opnieuw met de minimaal benodigde rechten. Een geconfigureerde MCP-server is niet op bereikbaarheid getest.",
+    "Vervang Hermes-specifieke plugins, botberichten en routines door functies van het doelharnas indien nodig. Dit manifest bevat geen actieve routering of planning."
+  ],
+  "not_included": ["credentials", "raw_configuration", "raw_personas", "skill_contents", "memory_contents", "session_history", "mcp_endpoints", "automation_state"]
+}
