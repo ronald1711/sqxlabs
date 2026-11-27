@@ -113,7 +113,7 @@ pub(super) fn reviewed_quality(series:&SymbolSeries,request:&serde_json::Value)-
  static TEST_GATE:Mutex<()>=Mutex::new(());
  fn state()->State{
     let mut store=DataStore::new();store.add("EURUSD",Timeframe::M1,vec![Bar::new(0,1.,1.,1.,1.,1.),Bar::new(120000,1.,1.,1.,1.,1.)]);
-    State{assistant_gate:std::sync::Mutex::new(()),archive:sqx_project::archive::Archive::new(std::env::temp_dir().join(format!("sqx-calendar-{:032x}",rand::random::<u128>()))),store:RwLock::new(store),databank:RwLock::new(vec![]),questdb:None}
+    State{assistant_gate:std::sync::Mutex::new(()),archive:sqx_project::archive::Archive::new(std::env::temp_dir().join(format!("sqx-calendar-{:032x}",rand::random::<u128>()))),store:RwLock::new(store),databank:RwLock::new(vec![]),questdb:None,external_host:None}
  }
  #[test]fn review_requires_exact_dataset_cutoff_and_explicit_consent(){
     let state=state();let series=find_series(&state,"EURUSD").unwrap();
