@@ -52,6 +52,31 @@ cargo run -q -p sqx-cli -- serve --open
 `serve` with no `--data`/`--data-dir` starts on synthetic demo data (EURUSD and
 GBPUSD, 2000 M1 bars), so the app can be opened without preparing a data source.
 
+### Serving over Tailscale (optional)
+
+The dashboard is loopback-only by default: it refuses a non-loopback listener
+and rejects any non-loopback connection, so it is reachable only from the same
+host. To open it from another device, run Tailscale's reverse proxy on that host
+and point it at the local port — Tailscale terminates TLS, supplies the
+certificate and keeps the connection to the server on loopback, so the server
+still sees a `127.0.0.1`/`::1` peer and does not need to listen on a Tailscale
+interface:
+
+```bash
+tailscale serve --bg 8080     # https://<machine>.<tailnet>.ts.net -> http://127.0.0.1:8080
+cargo run -q -p sqx-cli -- serve --external-host <machine>.<tailnet>.ts.net
+```
+
+`--external-host` widens the Host-header gate to an *exact* match of that
+hostname (with or without the local port) and nothing else — no wildcard, no
+prefix/suffix match. Without the flag nothing changes: only
+`localhost`/`127.0.0.1`/`::1` are accepted. The TCP source of every request must
+still be loopback and is never optional.
+
+Restrict who may reach the port with a Tailscale ACL grant that names your own
+identity specifically — not "everyone on the tailnet". See the Tailscale docs
+for ACL grants; the exact tag/identity shape is yours to define.
+
 ### Full tour (one script)
 
 `examples/run_everything.sh` runs the whole flow end to end — indicator count,
