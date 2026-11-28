@@ -350,6 +350,15 @@
             <label>Kans dat een trade wegvalt (%) <input id="gen-req-mc-skip" type="number" min="0" max="100" step="any" value="10"></label>
             <label>Minimaal winstgevende simulaties (%) <input id="gen-req-mc-positive" type="number" min="0.01" max="100" step="any" value="80"></label>
           </div>
+          <div class="row">
+            <label><input type="checkbox" id="gen-req-wf"> Walk-forward verplicht toetsen</label>
+            <label>Vensters <input id="gen-req-wf-windows" type="number" min="2" max="10" step="1" value="2"></label>
+            <label>Out-of-sample aandeel (0.05–0.5) <input id="gen-req-wf-oos" type="number" min="0.05" max="0.5" step="0.05" value="0.3"></label>
+            <label>Minimaal trainingstrades <input id="gen-req-wf-min-is" type="number" min="1" step="1" value="2"></label>
+            <label>Minimaal testtrades per venster <input id="gen-req-wf-min-oos" type="number" min="1" step="1" value="2"></label>
+            <label>Gezamenlijke out-of-sample nettowinst (rekeningvaluta) <input id="gen-req-wf-profit" type="number" step="any" value="0"></label>
+          </div>
+          <p class="muted">Walk-forward verdeelt de toegestane zoekdata in opeenvolgende trainings-/testvensters en toetst één bevroren kandidaat in elk venster. Alleen de gezamenlijke out-of-sample nettowinst wordt aan de drempel getoetst; een verliesvenster mag worden gecompenseerd. Dit is een stabiliteitscontrole over reeds geziene zoekdata, geen onafhankelijke eindtest.</p>
         </fieldset>
         <div id="gen-results" class="muted">No search results yet. Choose your data and costs, review the search settings, then select Find candidates.</div>
       </div>
@@ -972,9 +981,86 @@ function researchNotice(context) {
   if(!context)return "";
   return (context.data_gaps_acknowledged ? "Data gaps explicitly allowed. " : "") + context.scope;
 }
+// A recorded gate value is evidence, so it must stay lossless: keep the usual two decimals only
+// when they are exactly the stored value, otherwise show the shortest exact representation. A
+// missing value reads 'onbeschikbaar' and never becomes 0. Render through textContent only, so no
+// archived value can inject markup.
+function fmtExact(v){
+  if(typeof v!=='number'||!Number.isFinite(v))return 'onbeschikbaar';
+  const fixed=v.toFixed(2);
+  return Number(fixed)===v?fixed:String(v);
+}
 function showSearchAssessments(box, assessments, studyId){
-  const labels={trades:'Trades',net_profit:'Nettoresultaat',profit_factor:'Profit factor',drawdown_pct:'Drawdown (%)',spread_profit_drop:'Winstdaling bij hogere spread',monte_carlo_positive_pct:'Winstgevende Monte Carlo-simulaties (%)'};
+  const labels={trades:'Trades',net_profit:'Nettoresultaat',profit_factor:'Profit factor',drawdown_pct:'Drawdown (%)',spread_profit_drop:'Winstdaling bij hogere spread',monte_carlo_positive_pct:'Winstgevende Monte Carlo-simulaties (%)',walk_forward_total_oos_net_profit:'Gezamenlijke out-of-sample nettowinst'};
   const statuses={passed:'Geslaagd',rejected:'Afgewezen',insufficient_evidence:'Onvoldoende bewijs',technical_error:'Technische fout',not_run:'Niet uitgevoerd',recorded:'Gemeten'};
+  const barTime=t=>t==null?'—':new Date(t).toISOString();
+  const walkForwardPanel=candidate=>{
+    const wf=candidate.walk_forward;
+    // A legacy or skipped gate carries no window archive; never draw an empty or fabricated panel.
+    if(!wf||!Array.isArray(wf.windows)||!wf.windows.length)return null;
+    const panel=document.createElement('details');
+    const title=document.createElement('summary');
+    title.textContent='Walk-forward stabiliteit · '+wf.method+' v'+wf.version;
+    panel.append(title);
+    // The independence boundary is the whole point of this panel: state it as a callout, not as
+    // small running text between result blocks.
+    const caution=document.createElement('p');
+    caution.className='status-pill';
+    caution.textContent='Verkennend — gebruikt al geziene zoekdata; geen onafhankelijke eindtest.';
+    panel.append(caution);
+    const scope=document.createElement('p');
+    scope.textContent=wf.scope;
+    panel.append(scope);
+    const total=document.createElement('p');
+    // Both the measured total and the threshold are shown losslessly and labelled separately, so a
+    // rounded value can never look like it met (or missed) the recorded gate.
+    total.textContent='Gezamenlijke out-of-sample nettowinst gemeten: '
+      +(wf.oos_total_net_profit==null?'onbeschikbaar':fmtExact(wf.oos_total_net_profit)+' (rekeningvaluta)')
+      +' · drempel ≥ '+fmtExact(wf.min_total_oos_net_profit);
+    panel.append(total);
+    const scroll=document.createElement('div');
+    scroll.className='table-scroll';
+    const table=document.createElement('table');
+    const head=table.createTHead().insertRow();
+    for(const label of ['Venster','Trainingsgrenzen','Testgrenzen','Startkapitaal','IS trades','IS netto','IS PF','OOS trades','OOS netto','Besluit','Lokale drempels','Reden']){
+      const cell=document.createElement('th');
+      cell.scope='col';
+      cell.textContent=label;
+      head.append(cell);
+    }
+    const body=table.createTBody();
+    for(const window of wf.windows){
+      const row=body.insertRow();
+      // The decision sits directly next to the OOS value it judges, as a badge rather than a word
+      // at the far right of a dense row.
+      const cells=[
+        [window.index],
+        ['['+window.is_start+'–'+window.is_end+') '+barTime(window.is_first_bar_time)+'–'+barTime(window.is_last_bar_time)],
+        ['['+window.oos_start+'–'+window.oos_end+') '+barTime(window.oos_first_bar_time)+'–'+barTime(window.oos_last_bar_time)],
+        [window.starting_equity==null?'onbeschikbaar':fmt(window.starting_equity,2)],
+        [fmt(window.is_trades,0)],
+        [fmt(window.is_net_profit,2)],
+        [fmt(window.is_profit_factor,2)],
+        [fmt(window.oos_trades,0)],
+        [fmt(window.oos_net_profit,2)],
+        [statuses[window.decision]||window.decision,'status-pill'],
+        ['IS trades ≥ '+window.thresholds.min_is_trades+' · OOS trades ≥ '+window.thresholds.min_oos_trades_per_window],
+        [window.reason]
+      ];
+      for(const [value,className] of cells){
+        const cell=row.insertCell();
+        if(className){
+          const badge=document.createElement('span');
+          badge.className=className;
+          badge.textContent=value;
+          cell.append(badge);
+        }else cell.textContent=value;
+      }
+    }
+    scroll.append(table);
+    panel.append(scroll);
+    return panel;
+  };
   const passed=assessments.filter(candidate=>candidate.passed);
   const rejected=assessments.filter(candidate=>candidate.checks.some(check=>check.decision==='rejected'));
   const incomplete=assessments.filter(candidate=>!candidate.passed && !rejected.includes(candidate));
@@ -1057,6 +1143,8 @@ function showSearchAssessments(box, assessments, studyId){
         checks.appendChild(item);
       }
       details.appendChild(checks);
+      const wfPanel=walkForwardPanel(candidate);
+      if(wfPanel)details.appendChild(wfPanel);
       for(const error of candidate.errors){
         const message=document.createElement('p');
         message.textContent=error;
@@ -1092,12 +1180,34 @@ function showSearchAssessments(box, assessments, studyId){
   }
   box.prepend(section);
 }
+const searchGateIds=['gen-req-stress','gen-req-mc','gen-req-wf'];
+// Dependent input fields per gate, disabled whenever their gate (or candidate
+// assessment as a whole) is off so they never look live while the request
+// ignores them.
+const searchGateFields={
+  'gen-req-stress':['gen-req-spread','gen-req-drop'],
+  'gen-req-mc':['gen-req-mc-runs','gen-req-mc-skip','gen-req-mc-positive'],
+  'gen-req-wf':['gen-req-wf-windows','gen-req-wf-oos','gen-req-wf-min-is','gen-req-wf-min-oos','gen-req-wf-profit']
+};
 function readSearchRequirements(){
-  if(!document.getElementById('gen-requirements').checked)return undefined;
+  const assess=document.getElementById('gen-requirements').checked;
+  if(!assess){
+    if(searchGateIds.some(id=>document.getElementById(id).checked)){
+      throw Error('Vink ‘Kandidaten automatisch toetsen’ aan: een verplichte toets kan niet zonder beoordeling worden gestart.');
+    }
+    return undefined;
+  }
   const number=id=>{
     const field=document.getElementById(id);
     if(!field.value.trim() || !field.checkValidity() || !Number.isFinite(field.valueAsNumber)){
       throw Error('Vul geldige basiseisen in voordat je zoekt.');
+    }
+    return field.valueAsNumber;
+  };
+  const integer=id=>{
+    const field=document.getElementById(id);
+    if(!field.value.trim() || !field.checkValidity() || !Number.isSafeInteger(field.valueAsNumber)){
+      throw Error('Vul een geheel getal in voor de walk-forwardinstelling voordat je zoekt.');
     }
     return field.valueAsNumber;
   };
@@ -1120,8 +1230,37 @@ function readSearchRequirements(){
       min_positive_pct:number('gen-req-mc-positive')
     };
   }
+  if(document.getElementById('gen-req-wf').checked){
+    requirements.walk_forward={
+      windows:integer('gen-req-wf-windows'),
+      oos_fraction:number('gen-req-wf-oos'),
+      min_is_trades:integer('gen-req-wf-min-is'),
+      min_oos_trades_per_window:integer('gen-req-wf-min-oos'),
+      min_total_oos_net_profit:number('gen-req-wf-profit')
+    };
+  }
   return requirements;
 }
+// A mandatory gate cannot be armed while candidate assessment is off: keep the toggle and its
+// dependent gates consistent instead of silently dropping the checked gate from the request.
+function syncSearchRequirementToggles(){
+  const enabled=document.getElementById('gen-requirements').checked;
+  for(const id of searchGateIds){
+    const gate=document.getElementById(id);
+    gate.disabled=!enabled;
+    if(!enabled)gate.checked=false;
+    const gateEnabled=enabled && gate.checked;
+    for(const fieldId of searchGateFields[id]){
+      document.getElementById(fieldId).disabled=!gateEnabled;
+    }
+  }
+}
+document.getElementById('gen-requirements').onchange=syncSearchRequirementToggles;
+for(const id of searchGateIds)document.getElementById(id).onchange=function(){
+  if(this.checked)document.getElementById('gen-requirements').checked=true;
+  syncSearchRequirementToggles();
+};
+syncSearchRequirementToggles();
 let generationRequestPending=false;
 const generationPendingKey='sqx.pendingGeneration.v1';
 document.getElementById('gen-new-request').onclick=function(){

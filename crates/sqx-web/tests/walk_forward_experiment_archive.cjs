@@ -1,0 +1,317 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
+const html=fs.readFileSync(path.join(__dirname,'../assets/index.html'),'utf8');
+const workspace=fs.readFileSync(path.join(__dirname,'../assets/workspace.js'),'utf8');
+
+// The renderer under test is the real showExperiment route plus the shared assessment panel.
+const exactCode=html.slice(html.indexOf('function fmtExact('),html.indexOf('function showSearchAssessments('));
+const assessmentsCode=html.slice(html.indexOf('function showSearchAssessments('),html.indexOf('function readSearchRequirements('));
+const experimentCode=workspace.slice(workspace.indexOf('function exposureLabel('),workspace.indexOf('async function refreshExperiments('));
+assert.ok(exactCode.includes('function fmtExact('),'index.html slice must cover the lossless number formatter');
+assert.ok(assessmentsCode.length>0,'index.html slice must cover showSearchAssessments');
+assert.ok(experimentCode.includes('async function showExperiment()'),'workspace.js slice must cover showExperiment');
+assert.ok(experimentCode.includes('function showFrozenExperimentSettings('),'workspace.js slice must cover the frozen settings panel');
+
+function makeElement(tag){
+  const el={
+    tag,children:[],textContent:'',className:'',hidden:false,disabled:false,value:'',style:{},
+    setAttribute(){},addEventListener(){},
+    append(...children){this.children.push(...children);},
+    appendChild(child){this.children.push(child);return child;},
+    prepend(child){this.children.unshift(child);},
+    replaceChildren(...children){this.children=children;},
+    createCaption(){return this.appendChild(makeElement('caption'));},
+    createTHead(){return this.appendChild(makeElement('thead'));},
+    createTBody(){return this.appendChild(makeElement('tbody'));},
+    insertRow(){return this.appendChild(makeElement('tr'));},
+    insertCell(){return this.appendChild(makeElement('td'));},
+    querySelectorAll(){return [];}
+  };
+  // Archived values must be rendered as text; any innerHTML write is an injection risk.
+  Object.defineProperty(el,'innerHTML',{get(){return '';},set(){throw Error('recorded values must be rendered with textContent, never innerHTML');}});
+  return el;
+}
+const nodes={};
+for(const id of ['experiment-trials','experiment-final','experiment-jobs','experiment-context','experiment-select','experiment-trial','experiment-search','experiment-status'])nodes[id]=makeElement('div');
+nodes['experiment-select'].value='exp-1';
+let statusCalls=[];
+// Every read deserializes its own copy of the stored payload. A reopen can therefore never see an
+// object graph that a previous render or the test fixture mutated, and each case below is answered
+// with an independently parsed archive.
+const servedStates=[];
+const fmt=(v,d)=>(v==null||Number.isNaN(v))?'-':(v===Infinity?'inf':Number(v).toFixed(d));
+const ctx=vm.createContext({
+  document:{getElementById:id=>nodes[id],createElement:makeElement,createTextNode:text=>({textContent:String(text),children:[]})},
+  $:id=>nodes[id],
+  fmt,
+  getJSON:async url=>{
+    statusCalls.push(url);
+    const stored=ctx.archivePayloadText!==undefined?ctx.archivePayloadText:ctx.currentState;
+    const state=stored==null?null:JSON.parse(typeof stored==='string'?stored:JSON.stringify(stored));
+    servedStates.push(state);
+    return state;
+  },
+  setStrategy(){},drawChart(){},console,
+  activeSearch:null,searchStarting:false,
+  window:{confirm:()=>true}
+});
+ctx.currentState=null;
+ctx.archivePayloadText=undefined;
+vm.runInContext(exactCode,ctx);
+vm.runInContext(assessmentsCode,ctx);
+vm.runInContext(experimentCode,ctx);
+
+const descendants=node=>[node,...(node.children||[]).flatMap(descendants)];
+const textOf=node=>descendants(node).map(n=>n.textContent).filter(Boolean).join('\n');
+const panels=()=>descendants(nodes['experiment-trials']).filter(
+  node=>node.tag==='details'&&node.children[0]&&String(node.children[0].textContent).startsWith('Walk-forward stabiliteit')
+);
+const candidateCard=name=>{
+  const cards=descendants(nodes['experiment-trials']).filter(node=>node.tag==='details'&&node.children[0]);
+  const found=cards.find(node=>node.children[0].textContent===name);
+  assert.ok(found,'candidate card not found: '+name+' among '+JSON.stringify(cards.map(card=>card.children[0].textContent)));
+  return found;
+};
+
+// Contract shape of /api/experiments/status: frozen plan.requirements.walk_forward and, per
+// finished trial, report.assessment.walk_forward. Copied from the integration evidence.
+const window=(index,isStart,isEnd,oosStart,oosEnd,t0,t1,t2,t3,starting,oosNet,oosTrades,isNet,isTrades)=>({
+  index,is_start:isStart,is_end:isEnd,is_first_bar_time:t0,is_last_bar_time:t1,oos_start:oosStart,oos_end:oosEnd,oos_first_bar_time:t2,oos_last_bar_time:t3,
+  starting_equity:starting,oos_final_equity:starting+oosNet,is_trades:isTrades,is_net_profit:isNet,is_profit_factor:0.18,is_eligible:true,is_exclusion_reason:null,
+  oos_trades:oosTrades,oos_net_profit:oosNet,thresholds:{comparison:'at_least',min_is_trades:1,min_oos_trades_per_window:1},
+  is_decision:'passed',oos_decision:'passed',decision:'passed',reason:'passed',errors:[]
+});
+const walkForward=trial=>({
+  method:'fixed_candidate_segmented_v1',version:1,
+  scope:'Segmented walk-forward stability check over already-seen search data; one frozen candidate evaluated identically in every window. Not an independent final test.',
+  candidate_index:trial,strategy_name:'experiment-42-'+trial,
+  frozen_specification:{windows:2,oos_fraction:0.3,min_is_trades:1,min_oos_trades_per_window:1,min_total_oos_net_profit:-100000},
+  allowed_start_index:0,allowed_end_index:960,allowed_start_time:1704672000000,allowed_end_time:1704729540000,
+  planned_windows:2,min_total_oos_net_profit:-100000,
+  oos_total_net_profit:trial===3?417.7691368017355:-923.2214874270194,
+  windows:trial===3
+    ?[window(0,0,336,336,480,1704672000000,1704692100000,1704692160000,1704700740000,10000,8.536802601302185,7,109.8261710021697,18),
+      window(1,480,816,816,960,1704700800000,1704720900000,1704720960000,1704729540000,10008.536802601302,409.23233420043334,7,-84.33059219609798,19)]
+    :[window(0,0,336,336,480,1704672000000,1704692100000,1704692160000,1704700740000,10000,-140.9837374854028,6,-447.99442495913047,15),
+      window(1,480,816,816,960,1704700800000,1704720900000,1704720960000,1704729540000,9859.016262514593,-782.2377499416166,20,-660.6708624445367,20)]
+});
+const audit={classification:'known_reuse_or_disclosed_exposure',observation_extent_complete:true,scope:'Reserved within this experiment only.',
+  same_market_experiment_attempts:1,same_market_archived_backtest_records:0,same_market_archived_assistant_records:0,
+  same_market_archived_mcp_generation_records:0,same_market_archived_pipeline_records:0,same_market_archived_crosscheck_records:0,
+  same_market_archived_robustness_records:0,same_market_archived_comparison_records:0,same_market_evolution_generation_claims:0,known_overlaps:[]};
+const execution=()=>({trades:[],equity:[],errors:[]});
+function report(trial,{walkForward:archive,evidence=true}={}){
+  const result={
+    metrics:{net_profit:trial*10,trades:20,max_drawdown_pct:3.18},minimum_trades:1,evidence_sufficient:evidence,execution:execution(),
+    assessment:{candidate_index:trial,name:'experiment-42-'+trial,passed:evidence,errors:[],checks:[
+      {metric:'trades',decision:'passed',measured:20,threshold:1,comparison:'at_least'},
+      {metric:'net_profit',decision:'passed',measured:120,threshold:-1000000,comparison:'at_least'},
+      {metric:'profit_factor',decision:'passed',measured:1.4,threshold:0,comparison:'at_least'},
+      {metric:'drawdown_pct',decision:'passed',measured:3.2,threshold:100,comparison:'at_most'}
+    ]},
+    validation:{metrics:{net_profit:5,trades:3},evidence_sufficient:true,execution:execution(),
+      checks:[{metric:'trades',decision:'passed',measured:3,threshold:1,comparison:'at_least'}]}
+  };
+  if(archive)result.assessment.walk_forward=archive;
+  return result;
+}
+function status({requirements={min_trades:1,min_net_profit:-1000000,min_profit_factor:0,max_drawdown_pct:100,walk_forward:{windows:2,oos_fraction:0.3,min_is_trades:1,min_oos_trades_per_window:1,min_total_oos_net_profit:-100000}},trials}={}){
+  const events=[];
+  for(const entry of trials){
+    events.push({event:{kind:'trial_started',trial:entry.trial,strategy:{name:'experiment-42-'+entry.trial}}});
+    events.push({event:{kind:'trial_finished',trial:entry.trial,report:report(entry.trial,entry.archive===undefined?{}:{walkForward:entry.archive})}});
+  }
+  const finalTrial=trials[trials.length-1].trial;
+  events.push({event:{kind:'holdout_finished',report:{
+    trial:finalTrial,metrics:{net_profit:1234.56,max_drawdown_pct:9.87,trades:77},evidence_sufficient:true,
+    execution:execution(),interpretation:'Synthetic interpretation.',exposure_at_commitment:audit
+  }}});
+  return {
+    state:'revealed',experiment_id:'exp-1',trials_attempted:trials.length,
+    development_start_time:1704672000000,validation_start_time:1704693600000,holdout_start_time:1704700800000,holdout_end_time:1704729600000,
+    market:{symbol:'EURUSD',timeframe:'M1',calendar:null,calendar_version:null},
+    plan:{
+      config:{account:{currency:'USD',long_financing_per_lot:0,short_financing_per_lot:0},initial_deposit:10000,spread_points:0,slippage_points:0,commission_per_lot:0},
+      dataset_id:'dataset-1',engine_id:'engine-1',min_development_trades:1,min_holdout_trades:1,prior_exposure_disclosed:true,
+      requirements
+    },
+    scope:'Reserved within this experiment only. Data access and testing outside this protocol are not prevented or certified.',
+    current_exposure_audit:audit,jobs:[],events
+  };
+}
+
+const frozenSettings='Walk-forward: 2 vensters · out-of-sample aandeel 0.30 · minimaal 1 trainingstrades en 1 testtrades per venster · gezamenlijke out-of-sample nettowinstdrempel ≥ -100000.00 USD';
+const snapshot=()=>textOf(nodes['experiment-trials'])+'\n'+textOf(nodes['experiment-final']);
+
+// The reopen route answers with the stored archive as JSON: every read deserializes its own copy.
+// A test can therefore mutate the saved payload without touching the in-memory fixture, exactly as a
+// lossy or corrupted archive would.
+const serveArchivedState=state=>{ctx.archivePayloadText=typeof state==='string'?state:JSON.stringify(state);};
+const lastServedWindows=()=>{
+  const last=servedStates[servedStates.length-1];
+  const finished=last&&last.events.find(entry=>entry.event.kind==='trial_finished');
+  return finished&&finished.event.report.assessment.walk_forward;
+};
+const windowRows=panel=>descendants(panel).filter(node=>node.tag==='tr'
+  &&node.children.length===12&&node.children.every(cell=>cell.tag==='td'));
+const startingCapitalCell=(panel,index)=>{
+  const rows=windowRows(panel);
+  assert.equal(rows.length,2,'each walked window must render exactly one row, got '+rows.length);
+  const row=rows.find(candidate=>String(candidate.children[0].textContent)===String(index));
+  assert.ok(row,'the reopened panel must render window '+index);
+  return row.children[3].textContent;
+};
+const assertStartingCapital=(panel,expected,when)=>{
+  expected.forEach((value,index)=>assert.equal(startingCapitalCell(panel,index),value,
+    when+': starting capital of window '+index+' must be exactly '+JSON.stringify(value)));
+};
+
+(async()=>{
+  // --- 1. Reopening a saved final-test study shows the frozen settings and both window archives. ---
+  ctx.currentState=status({trials:[
+    {trial:0,archive:undefined},                                 // gate not requested -> no archive
+    {trial:1,archive:walkForward(1)},                            // archived negative total, still a valid outcome
+    {trial:2,archive:{method:'fixed_candidate_segmented_v1',version:1,windows:[]}}, // skipped gate with an empty archive
+    {trial:3,archive:walkForward(3)}                             // revealed candidate
+  ]});
+  nodes['experiment-select'].value='exp-1';
+  const archiveBefore=JSON.stringify(ctx.currentState);
+  await ctx.showExperiment();
+  assert.deepStrictEqual(statusCalls,['/api/experiments/status?id=exp-1'],'reopening reads the saved status once, no recomputation');
+  const all=textOf(nodes['experiment-trials']);
+  assert.ok(all.includes(frozenSettings),'frozen walk-forward settings must be shown from plan.requirements:\n'+frozenSettings);
+  assert.ok(all.includes('Basiseisen: minimaal 1 trades'),'the existing frozen settings list must stay in place');
+  assert.equal(panels().length,2,'exactly the two archived trials must carry a window panel');
+  assert.ok(panels()[0].children[0].textContent==='Walk-forward stabiliteit · fixed_candidate_segmented_v1 v1','panel keeps the archived method and version');
+  const trialOne=textOf(panels()[0]),trialThree=textOf(panels()[1]);
+  assert.ok(trialOne.includes('Gezamenlijke out-of-sample nettowinst gemeten: -923.2214874270194 (rekeningvaluta) · drempel ≥ -100000.00'),'the archived measured total and threshold must be shown losslessly and labelled apart:\n'+trialOne);
+  assert.ok(trialThree.includes('Gezamenlijke out-of-sample nettowinst gemeten: 417.7691368017355 (rekeningvaluta) · drempel ≥ -100000.00'),'archived total and joint threshold must be shown');
+  assert.ok(trialThree.includes('Verkennend — gebruikt al geziene zoekdata; geen onafhankelijke eindtest.'),'the independence callout must be visible in the panel');
+  for(const range of ['[0–336)','[336–480)','[480–816)','[816–960)'])assert.ok(trialThree.includes(range),'archived window bounds missing: '+range);
+  assert.ok(trialThree.includes('IS trades ≥ 1 · OOS trades ≥ 1'),'local IS/OOS minimum trades must be shown');
+  // The per-window decision is a badge directly next to the OOS value it judges.
+  const decisionBadges=descendants(panels()[0]).filter(node=>node.tag==='span'&&node.className==='status-pill');
+  assert.deepStrictEqual(decisionBadges.map(badge=>badge.textContent),['Geslaagd','Geslaagd'],'each window decision must render as a status badge');
+
+  // --- 2. No panel for a legacy, unrequested or skipped gate. ---
+  assert.ok(!textOf(candidateCard('experiment-42-0 (#0)')).includes('Walk-forward stabiliteit'),'a trial without an archived gate must not show a walk-forward panel');
+  assert.ok(!textOf(candidateCard('experiment-42-2 (#2)')).includes('Walk-forward stabiliteit'),'an empty/skipped archive must not show an empty panel');
+
+  // --- 3. The walk-forward panel carries no final-test data. ---
+  for(const panel of panels()){
+    const text=textOf(panel);
+    assert.ok(!text.includes('Eindtest'),'walk-forward panel must stay separate from the final test');
+    assert.ok(!text.includes('1234.56')&&!text.includes('9.87'),'final-test metrics must never leak into the walk-forward panel');
+  }
+  const finalText=textOf(nodes['experiment-final']);
+  assert.ok(finalText.includes('Final test · Candidate 3 · Net 1234.56'),'the final test renders separately: '+finalText);
+
+  // --- 4. Reopening twice renders the identical archive and never mutates it. ---
+  const first=snapshot();
+  await ctx.showExperiment();
+  assert.equal(snapshot(),first,'reopening must render the same frozen settings and windows');
+  assert.equal(JSON.stringify(ctx.currentState),archiveBefore,'rendering must not modify the archived status');
+
+  // --- 5. Recorded precision is never lost: a 0.004 joint threshold and an API fraction with more
+  // than two decimals stay visible instead of rounding to 0.00 / 0.06. ---
+  const precise=walkForward(1);
+  precise.oos_total_net_profit=0.004;
+  precise.min_total_oos_net_profit=0.004;
+  ctx.currentState=status({
+    requirements:{min_trades:1,min_net_profit:-1000000,min_profit_factor:0,max_drawdown_pct:100,
+      walk_forward:{windows:2,oos_fraction:0.05555555555555555,min_is_trades:1,min_oos_trades_per_window:1,min_total_oos_net_profit:0.004}},
+    trials:[{trial:1,archive:precise}]});
+  await ctx.showExperiment();
+  const exactText=textOf(nodes['experiment-trials']);
+  const exactSettings=exactText.split('\n').find(line=>line.startsWith('Walk-forward:'));
+  assert.ok(exactSettings,'the frozen walk-forward settings line must exist:\n'+exactText);
+  assert.ok(exactSettings.includes('out-of-sample aandeel 0.05555555555555555'),'an API fraction with more than two decimals must be exact: '+exactSettings);
+  assert.ok(exactSettings.includes('gezamenlijke out-of-sample nettowinstdrempel ≥ 0.004 USD'),'a 0.004 threshold must stay visible: '+exactSettings);
+  assert.ok(!exactSettings.includes('aandeel 0.00')&&!exactSettings.includes('drempel ≥ 0.00 '),'no lossy two-decimal rounding in the frozen settings: '+exactSettings);
+  assert.ok(exactText.includes('Gezamenlijke out-of-sample nettowinst gemeten: 0.004 (rekeningvaluta) · drempel ≥ 0.004'),'the panel must show the same exact measured value and threshold');
+
+  // --- 6. A recorded null stays unavailable and is never rendered as zero. ---
+  const missing=walkForward(1);
+  missing.oos_total_net_profit=null;
+  missing.min_total_oos_net_profit=null;
+  ctx.currentState=status({
+    requirements:{min_trades:1,min_net_profit:-1000000,min_profit_factor:0,max_drawdown_pct:100,
+      walk_forward:{windows:2,oos_fraction:null,min_is_trades:1,min_oos_trades_per_window:1,min_total_oos_net_profit:null}},
+    trials:[{trial:1,archive:missing}]});
+  await ctx.showExperiment();
+  const missingText=textOf(nodes['experiment-trials']);
+  const missingSettings=missingText.split('\n').find(line=>line.startsWith('Walk-forward:'));
+  assert.ok(missingSettings.includes('out-of-sample aandeel onbeschikbaar'),'a missing OOS fraction must never read 0.00: '+missingSettings);
+  assert.ok(missingSettings.includes('nettowinstdrempel ≥ onbeschikbaar'),'a missing threshold must never read 0.00: '+missingSettings);
+  assert.ok(!missingSettings.includes('0.00'),'a missing recorded value must not become zero: '+missingSettings);
+  assert.ok(missingText.includes('Gezamenlijke out-of-sample nettowinst gemeten: onbeschikbaar · drempel ≥ onbeschikbaar'),'the panel must report both missing values as unavailable');
+
+  // --- 7. A legacy study without a walk-forward gate stays readable and panel-free. ---
+  ctx.currentState=status({requirements:{min_trades:20,min_net_profit:0,min_profit_factor:1,max_drawdown_pct:10},trials:[{trial:0,archive:undefined},{trial:1,archive:undefined}]});
+  await ctx.showExperiment();
+  const legacy=textOf(nodes['experiment-trials']);
+  assert.ok(!legacy.includes('Walk-forward:'),'a legacy study must not invent frozen walk-forward settings');
+  assert.equal(panels().length,0,'a legacy study must not show a walk-forward window panel');
+
+  // --- 8. The exact starting-capital cell of window 1 survives the real reopen route. showExperiment
+  // re-reads /api/experiments/status, and every answer is an independently parsed stored archive, so
+  // these assertions can only pass when the saved value itself is rendered. ---
+  const neverStarted=walkForward(1);
+  neverStarted.windows[1]={...neverStarted.windows[1],starting_equity:null,decision:'insufficient_evidence',reason:'account exhausted; remaining windows not traded'};
+  const neverStartedStudy=status({trials:[{trial:1,archive:neverStarted}]});
+  serveArchivedState(neverStartedStudy);
+  const readsBefore=statusCalls.length;
+  await ctx.showExperiment();
+  assert.deepStrictEqual(statusCalls.slice(readsBefore),['/api/experiments/status?id=exp-1'],'the reopen route must read the saved study once instead of re-rendering a candidate');
+  const reopenedNull=panels()[0];
+  assert.ok(reopenedNull,'the reopened study must show the archived window panel');
+  assertStartingCapital(reopenedNull,['10000.00','onbeschikbaar'],'reopen route: never-started window');
+  // Negative control on the same reopened panel: window 0 still renders 10000.00, so only the exact
+  // fourth cell of window 1 can reject the fabricated 0.00.
+  assert.ok(textOf(reopenedNull).includes('10000.00'),'control: window 0 keeps its recorded 10000.00 on the reopened panel');
+  assert.throws(()=>assertStartingCapital(reopenedNull,['10000.00','0.00'],'reopen negative control'),
+    /starting capital of window 1 must be exactly "0\.00"/,
+    'a 0.00 elsewhere on the panel must not satisfy window 1 after reopen');
+  // Every reopen deserializes its own copy of the archive instead of sharing one rendered object.
+  await ctx.showExperiment();
+  const firstRead=lastServedWindows();
+  await ctx.showExperiment();
+  const secondRead=lastServedWindows();
+  assert.equal(statusCalls.length,readsBefore+3,'each reopen must issue exactly one saved-study read');
+  assert.notEqual(firstRead,secondRead,'every reopen must deserialize its own archive instead of sharing one object');
+  assert.notEqual(firstRead,neverStarted,'the reopen route must not render the test fixture object');
+  assert.notEqual(secondRead,neverStarted,'the reopen route must not render the test fixture object');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(firstRead)),JSON.parse(JSON.stringify(secondRead)),'both reopened copies must keep the same recorded values');
+  assertStartingCapital(panels()[0],['10000.00','onbeschikbaar'],'second reopen: never-started window');
+
+  // A legacy archive that really stored a numeric 0 keeps reading 0.00 through the same route.
+  const legacyZero=walkForward(1);
+  legacyZero.windows[1]={...legacyZero.windows[1],starting_equity:0};
+  serveArchivedState(status({trials:[{trial:1,archive:legacyZero}]}));
+  const zeroReadsBefore=statusCalls.length;
+  await ctx.showExperiment();
+  assert.deepStrictEqual(statusCalls.slice(zeroReadsBefore),['/api/experiments/status?id=exp-1'],'the legacy value must also come from a fresh saved-study read');
+  const reopenedZero=panels()[0];
+  assert.notEqual(reopenedZero,reopenedNull,'reopening must render a new panel, not reuse the previous one');
+  assertStartingCapital(reopenedZero,['10000.00','0.00'],'reopen route: legacy numeric zero');
+
+  // Mutation of the stored value only: the archive served on reopen records 0 where the intact archive
+  // read null. The initial render above passed against the intact archive; after this reopen the
+  // exact-cell assertion must fail instead of inheriting either the fixture or the earlier object.
+  const mutated=JSON.parse(JSON.stringify(neverStartedStudy));
+  mutated.events.find(entry=>entry.event.kind==='trial_finished').event.report.assessment.walk_forward.windows[1].starting_equity=0;
+  serveArchivedState(mutated);
+  const mutationReadsBefore=statusCalls.length;
+  await ctx.showExperiment();
+  assert.deepStrictEqual(statusCalls.slice(mutationReadsBefore),['/api/experiments/status?id=exp-1'],'the mutated value must come from the stored archive read');
+  const mutatedPanel=panels()[0];
+  assert.equal(startingCapitalCell(mutatedPanel,1),'0.00','the reopen route must render the mutated stored value');
+  assert.throws(()=>assertStartingCapital(mutatedPanel,['10000.00','onbeschikbaar'],'mutated stored archive'),
+    /starting capital of window 1 must be exactly "onbeschikbaar"/,
+    'a null recorded as 0 in the stored archive must fail after reopen');
+  // Only the stored value changed: the earlier render and the in-memory fixture are untouched.
+  assert.equal(startingCapitalCell(reopenedNull,1),'onbeschikbaar','the initial render still shows the intact archive');
+  assert.equal(neverStarted.windows[1].starting_equity,null,'the in-memory fixture itself stays untouched');
+  ctx.archivePayloadText=undefined;
+
+  console.log('Walk-forward experiment archive passed: showExperiment renders frozen plan.requirements.walk_forward and the saved per-window archive, re-reads an independently deserialized archive on every reopen with the exact window-1 starting-capital cell (null=onbeschikbaar, legacy 0=0.00), fails on a mutated stored value while the initial render stays intact, without final-test data, and no panel for legacy/unrequested/skipped gates.');
+})().catch(error=>{console.error(error);process.exitCode=1;});
