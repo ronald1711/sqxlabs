@@ -423,6 +423,11 @@ enum Cmd {
         /// Listen address, e.g. 127.0.0.1:8080.
         #[arg(long, default_value = "127.0.0.1:8080")]
         addr: String,
+        /// Opt-in hostname a trusted loopback reverse proxy (Tailscale
+        /// `tailscale serve`) presents in the Host header. Exact match only;
+        /// without this flag only localhost/127.0.0.1 are accepted.
+        #[arg(long)]
+        external_host: Option<String>,
         /// Single CSV file (symbol from --symbol).
         #[arg(long, conflicts_with_all=["data_dir","questdb"], requires_all=["symbol","data_timeframe"])]
         data: Option<PathBuf>,
@@ -986,7 +991,7 @@ fn main() -> Result<()> {
             if !report.errors.is_empty(){anyhow::bail!(report.errors.join("; "));}
             Ok(())
         }
-        Cmd::Serve { addr, data, data_dir, data_manifest, data_timeframe, symbol, open, questdb, questdb_symbols, questdb_timeframe, questdb_limit } => {
+        Cmd::Serve { addr, external_host, data, data_dir, data_manifest, data_timeframe, symbol, open, questdb, questdb_symbols, questdb_timeframe, questdb_limit } => {
             if data_timeframe.is_some() && data.is_none() && data_dir.is_none(){anyhow::bail!("data-timeframe requires a CSV data source");}
             let mut store = DataStore::new();
             // With --questdb the client is handed to the dashboard, which lists
@@ -1046,7 +1051,7 @@ fn main() -> Result<()> {
                     let _ = std::process::Command::new("cmd").args(["/C", "start", &url]).status();
                 });
             }
-            sqx_web::serve(&addr, store, questdb_client).map_err(|e| anyhow!(e))?;
+            sqx_web::serve(&addr, store, questdb_client, external_host.as_deref()).map_err(|e| anyhow!(e))?;
             Ok(())
         }
         Cmd::Questdb { sub } => {

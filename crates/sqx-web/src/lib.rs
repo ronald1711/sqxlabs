@@ -30,20 +30,34 @@ struct State {
     store: RwLock<DataStore>,
     databank: RwLock<Vec<serde_json::Value>>,
     questdb: Option<QuestdbClient>,
+    external_host: Option<String>,
 }
 
-pub fn serve(addr: &str, store: DataStore, questdb: Option<QuestdbClient>) -> std::io::Result<()> {
+pub fn serve(addr: &str, store: DataStore, questdb: Option<QuestdbClient>, external_host: Option<&str>) -> std::io::Result<()> {
     let addresses:Vec<_>=addr.to_socket_addrs()?.collect();
     if addresses.is_empty() || addresses.iter().any(|a|!a.ip().is_loopback()) {
         return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied,"The embedded research server only supports loopback addresses; remote authenticated serving is not implemented."));
     }
+    // Opt-in host that a trusted loopback reverse proxy (Tailscale `tailscale
+    // serve`) may present. It must be a bare hostname: a scheme, port or path
+    // would silently weaken the exact-match gate, so those are rejected up front.
+    let external_host = match external_host {
+        None => None,
+        Some(ext) => {
+            let ext = ext.trim();
+            if ext.is_empty() || ext.chars().any(|c| c == '/' || c == ':' || c.is_whitespace()) {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput,"--external-host must be a bare hostname (no scheme, port or path)"));
+            }
+            Some(ext.to_ascii_lowercase())
+        }
+    };
     engine_identity().map_err(std::io::Error::other)?;
     println!("SqxLabs web app: http://{addr} ({} symbols)", store.len());
     let databank = std::fs::read_to_string("data/databank.json")
         .ok()
         .and_then(|t| serde_json::from_str::<Vec<serde_json::Value>>(&t).ok())
         .unwrap_or_default();
-    let state = Arc::new(State { assistant_gate: std::sync::Mutex::new(()), archive: sqx_project::archive::Archive::new("data/research"), store: RwLock::new(store), databank: RwLock::new(databank), questdb });
+    let state = Arc::new(State { assistant_gate: std::sync::Mutex::new(()), archive: sqx_project::archive::Archive::new("data/research"), store: RwLock::new(store), databank: RwLock::new(databank), questdb, external_host });
     let listener = TcpListener::bind(addresses.as_slice())?;
     let connections=Arc::new(std::sync::atomic::AtomicUsize::new(0));
     for stream in listener.incoming() {
@@ -81,6 +95,66 @@ fn http_response(stream:&mut TcpStream,status:&str,ctype:&str,payload:&str)->std
     stream.flush()
 }
 
+/// Pure serving gate: decide whether one request may proceed. Returns the
+/// rejection reason, or `None` to allow. Kept as a pure function so the
+/// security scenarios can be asserted without binding sockets.
+///
+/// `host` is the raw `Host` header, `origin`/`sec_fetch_site` the raw headers,
+/// `peer_ip` the TCP source address, `local_port` the loopback listen port, and
+/// `external_host` the opt-in `--external-host` value (already normalized).
+fn gate_decision(
+    host: &str,
+    origin: Option<&str>,
+    sec_fetch_site: Option<&str>,
+    peer_ip: std::net::IpAddr,
+    local_port: u16,
+    external_host: Option<&str>,
+) -> Option<&'static str> {
+    // The source must always be loopback. Tailscale's `tailscale serve` proxies
+    // to the local loopback port, so no listener on a real interface is ever
+    // needed. This check is not optional and fails closed: a non-loopback peer
+    // is rejected regardless of any other setting.
+    if !peer_ip.is_loopback() {
+        return Some("Remote connections are not allowed");
+    }
+
+    let host = host.to_ascii_lowercase();
+    let mut allowed = vec![
+        format!("localhost:{local_port}"),
+        format!("127.0.0.1:{local_port}"),
+        format!("[::1]:{local_port}"),
+    ];
+    if local_port == 80 {
+        allowed.extend(["localhost".to_string(), "127.0.0.1".to_string(), "[::1]".to_string()]);
+    }
+    if let Some(ext) = external_host {
+        // Exact match only: the configured hostname, bare or with the local
+        // port. No wildcard, no prefix/suffix match.
+        allowed.push(format!("{ext}:{local_port}"));
+        allowed.push(ext.to_string());
+    }
+    if !allowed.contains(&host) {
+        return Some("Unrecognized local Host");
+    }
+
+    // Cross-site protection. Browsers send `Origin` on cross-origin requests;
+    // with `--external-host` the app is reachable on a real hostname for the
+    // first time, so a present `Origin` must name exactly the host being served
+    // (http or https). No wildcards and no different host are accepted.
+    let origin_ok = match origin {
+        None => true,
+        Some(origin) => {
+            let origin = origin.trim_end_matches('/').to_ascii_lowercase();
+            origin == format!("http://{host}") || origin == format!("https://{host}")
+        }
+    };
+    if !origin_ok || sec_fetch_site.is_some_and(|site| site == "cross-site") {
+        return Some("Cross-origin requests are not allowed");
+    }
+
+    None
+}
+
 fn handle(mut stream: TcpStream, state: &State) -> std::io::Result<()> {
     stream.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
     stream.set_write_timeout(Some(std::time::Duration::from_secs(30)))?;
@@ -106,14 +180,16 @@ fn handle(mut stream: TcpStream, state: &State) -> std::io::Result<()> {
         if key.trim()!=key || headers.insert(key,value.trim().to_string()).is_some(){return http_response(&mut stream,"400 Bad Request","text/plain","Duplicate or malformed headers");}
     }
     let port=stream.local_addr()?.port();
-    let host=headers.get("host").map(|s|s.to_ascii_lowercase()).unwrap_or_default();
-    let allowed=[format!("localhost:{port}"),format!("127.0.0.1:{port}"),format!("[::1]:{port}")];
-    if !allowed.contains(&host) && !(port==80 && ["localhost","127.0.0.1","[::1]"].contains(&host.as_str())) {
-        return http_response(&mut stream,"403 Forbidden","text/plain","Unrecognized local Host");
-    }
-    if headers.get("origin").is_some_and(|origin|origin!=&format!("http://{host}"))
-        || headers.get("sec-fetch-site").is_some_and(|site|site=="cross-site") {
-        return http_response(&mut stream,"403 Forbidden","text/plain","Cross-origin requests are not allowed");
+    let peer_ip=stream.peer_addr()?.ip();
+    if let Some(reason)=gate_decision(
+        headers.get("host").map(|s|s.as_str()).unwrap_or_default(),
+        headers.get("origin").map(|s|s.as_str()),
+        headers.get("sec-fetch-site").map(|s|s.as_str()),
+        peer_ip,
+        port,
+        state.external_host.as_deref(),
+    ) {
+        return http_response(&mut stream,"403 Forbidden","text/plain",reason);
     }
     if headers.contains_key("transfer-encoding") {return http_response(&mut stream,"400 Bad Request","text/plain","Transfer encoding is not supported");}
     if method!="GET" && method!="POST" {return http_response(&mut stream,"405 Method Not Allowed","text/plain","Unsupported method");}
@@ -170,7 +246,59 @@ mod tests {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let mut store = DataStore::new();
         store.add("EURUSD", Timeframe::M1, sqx_data::synthetic_bars("EURUSD", 200));
-        State { assistant_gate: std::sync::Mutex::new(()), archive: sqx_project::archive::Archive::new(std::env::temp_dir().join(format!("sqx-web-research-{}-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),NEXT.fetch_add(1,std::sync::atomic::Ordering::Relaxed)))), store: RwLock::new(store), databank: RwLock::new(Vec::new()), questdb: None }
+        State { assistant_gate: std::sync::Mutex::new(()), archive: sqx_project::archive::Archive::new(std::env::temp_dir().join(format!("sqx-web-research-{}-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),NEXT.fetch_add(1,std::sync::atomic::Ordering::Relaxed)))), store: RwLock::new(store), databank: RwLock::new(Vec::new()), questdb: None, external_host: None }
+    }
+
+    const LOOP:std::net::IpAddr=std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1));
+    const REMOTE:std::net::IpAddr=std::net::IpAddr::V4(std::net::Ipv4Addr::new(192,0,2,1));
+    const CGNAT:std::net::IpAddr=std::net::IpAddr::V4(std::net::Ipv4Addr::new(100,64,0,1));
+    fn gate(host:&str,origin:Option<&str>,peer:std::net::IpAddr,port:u16,ext:Option<&str>)->Option<&'static str>{
+        gate_decision(host,origin,None,peer,port,ext)
+    }
+
+    #[test]
+    fn default_accepts_only_loopback_hosts(){
+        assert_eq!(gate("localhost:8080",None,LOOP,8080,None),None);
+        assert_eq!(gate("127.0.0.1:8080",None,LOOP,8080,None),None);
+        assert_eq!(gate("attacker.example:8080",None,LOOP,8080,None),Some("Unrecognized local Host"));
+    }
+
+    #[test]
+    fn external_host_accepts_exact_match_only(){
+        let ext=Some("dashboard.tailnet.ts.net");
+        // Exact host, bare and with the local port.
+        assert_eq!(gate("dashboard.tailnet.ts.net:8080",None,LOOP,8080,ext),None);
+        assert_eq!(gate("dashboard.tailnet.ts.net",None,LOOP,8080,ext),None);
+        // Host matching is case-insensitive.
+        assert_eq!(gate("Dashboard.Tailnet.ts.net:8080",None,LOOP,8080,ext),None);
+        // Any other host is rejected, including prefix/suffix lookalikes.
+        assert_eq!(gate("attacker.example:8080",None,LOOP,8080,ext),Some("Unrecognized local Host"));
+        assert_eq!(gate("dashboard.tailnet.ts.net.evil.example:8080",None,LOOP,8080,ext),Some("Unrecognized local Host"));
+        assert_eq!(gate("evil-dashboard.tailnet.ts.net:8080",None,LOOP,8080,ext),Some("Unrecognized local Host"));
+        // Without the flag the same host is still rejected (default unchanged).
+        assert_eq!(gate("dashboard.tailnet.ts.net:8080",None,LOOP,8080,None),Some("Unrecognized local Host"));
+    }
+
+    #[test]
+    fn non_loopback_source_is_always_rejected(){
+        for ext in [None,Some("dashboard.tailnet.ts.net")] {
+            assert_eq!(gate("localhost:8080",None,REMOTE,8080,ext),Some("Remote connections are not allowed"));
+            // CGNAT (100.64.0.0/10) is not authorization: still not loopback.
+            assert_eq!(gate("localhost:8080",None,CGNAT,8080,ext),Some("Remote connections are not allowed"));
+            assert_eq!(gate("dashboard.tailnet.ts.net:8080",None,REMOTE,8080,ext),Some("Remote connections are not allowed"));
+        }
+    }
+
+    #[test]
+    fn cross_origin_requests_are_rejected(){
+        let ext=Some("dashboard.tailnet.ts.net");
+        // Same-origin over http or https is accepted for the served host.
+        assert_eq!(gate_decision("dashboard.tailnet.ts.net",Some("https://dashboard.tailnet.ts.net"),None,LOOP,8080,ext),None);
+        assert_eq!(gate_decision("localhost:8080",Some("http://localhost:8080"),None,LOOP,8080,ext),None);
+        // A foreign origin is rejected.
+        assert_eq!(gate_decision("dashboard.tailnet.ts.net",Some("https://attacker.example"),None,LOOP,8080,ext),Some("Cross-origin requests are not allowed"));
+        // sec-fetch-site: cross-site is rejected even without an Origin.
+        assert_eq!(gate_decision("dashboard.tailnet.ts.net",None,Some("cross-site"),LOOP,8080,ext),Some("Cross-origin requests are not allowed"));
     }
 
     #[test]
